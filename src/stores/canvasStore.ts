@@ -94,6 +94,12 @@ interface CanvasState {
   saveSnapshot: (name: string) => WorkspaceSnapshot;
   loadSnapshot: (snapshot: WorkspaceSnapshot) => void;
 
+  // Session sticky notes
+  stickyNotes: Record<string, { id: string; x: number; y: number; text: string; color: string }[]>;
+  addStickyNote: (x: number, y: number, text: string) => void;
+  removeStickyNote: (noteId: string) => void;
+  updateStickyNote: (noteId: string, text: string) => void;
+
   // Snap guides (ephemeral, set during drag)
   snapGuides: SnapGuide[];
   setSnapGuides: (guides: SnapGuide[]) => void;
@@ -124,6 +130,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   bookmarks: {},
   activeWorkspace: {},
   workspaceNames: {},
+  stickyNotes: {},
   snapGuides: [],
   wireData: {},
 
@@ -487,6 +494,22 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set(s => ({
       transforms: { ...s.transforms, [s.activeProject]: DEFAULT_TRANSFORM },
     })),
+
+  // ─── Sticky Notes ─────────────────────────────────────
+  addStickyNote: (x, y, text) => set(s => {
+    const pid = s.activeProject;
+    const current = s.stickyNotes[pid] || [];
+    const colors = ['#CCFF00', '#FF6B6B', '#4ECDC4', '#FFE66D', '#A8E6CF'];
+    return { stickyNotes: { ...s.stickyNotes, [pid]: [...current, { id: crypto.randomUUID(), x, y, text, color: colors[current.length % colors.length] }] } };
+  }),
+  removeStickyNote: (noteId) => set(s => {
+    const pid = s.activeProject;
+    return { stickyNotes: { ...s.stickyNotes, [pid]: (s.stickyNotes[pid] || []).filter(n => n.id !== noteId) } };
+  }),
+  updateStickyNote: (noteId, text) => set(s => {
+    const pid = s.activeProject;
+    return { stickyNotes: { ...s.stickyNotes, [pid]: (s.stickyNotes[pid] || []).map(n => n.id === noteId ? { ...n, text } : n) } };
+  }),
 
   // ─── Snap Guides ──────────────────────────────────────
   setSnapGuides: (guides) => set({ snapGuides: guides }),

@@ -143,6 +143,39 @@ export const TileShell = memo(function TileShell({ tile, zIndex, children }: Til
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
   }, []);
 
+  const handlePinOutput = useCallback(() => {
+    const store = useCanvasStore.getState();
+    const pid = store.activeProject;
+    // Grab wireData for this tile's PTY
+    const currentTile = (store.tiles[pid] || []).find(t => t.id === tile.id);
+    const ptyId = currentTile && 'ptyId' in currentTile ? (currentTile as { ptyId?: string }).ptyId : undefined;
+    const output = ptyId ? (store.wireData[ptyId] || '') : '';
+    if (!output) return;
+    store.addTile({
+      id: crypto.randomUUID(),
+      type: 'note',
+      title: `Pin: ${tile.title || tile.type}`,
+      content: '```\n' + output + '\n```',
+      x: tile.x + tile.w + 16,
+      y: tile.y,
+      w: 400,
+      h: 300,
+    } as Tile);
+  }, [tile]);
+
+  const handleClone = useCallback(() => {
+    const store = useCanvasStore.getState();
+    const { id: _id, ptyId: _pty, ...config } = tile as unknown as Record<string, unknown>;
+    delete config.ptyId;
+    store.addTile({
+      ...config,
+      id: crypto.randomUUID(),
+      x: tile.x + 40,
+      y: tile.y + 40,
+      title: (tile.title || tile.type) + ' (copy)',
+    } as Tile);
+  }, [tile]);
+
   const handleSaveAsTemplate = useCallback(() => {
     const name = prompt('Template name:', tile.title || tile.type);
     if (!name) return;
@@ -263,6 +296,56 @@ export const TileShell = memo(function TileShell({ tile, zIndex, children }: Til
           }}>
             piped
           </div>
+        )}
+
+        {hovered && (tile.type === 'terminal' || tile.type === 'agent' || tile.type === 'runner') && (
+          <button
+            onClick={handlePinOutput}
+            onPointerDown={e => e.stopPropagation()}
+            title="Pin output as note"
+            style={{
+              width: 20, height: 20,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'none', border: 'none',
+              color: colors.onSurfaceVariant,
+              cursor: 'pointer',
+              borderRadius: radius.sm,
+              fontSize: 10,
+              lineHeight: 1,
+              padding: 0,
+              opacity: 0.6,
+              transition: `color ${motion.hover}, opacity ${motion.hover}`,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = colors.primary; e.currentTarget.style.opacity = '1'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = colors.onSurfaceVariant; e.currentTarget.style.opacity = '0.6'; }}
+          >
+            &#128204;
+          </button>
+        )}
+
+        {hovered && (
+          <button
+            onClick={handleClone}
+            onPointerDown={e => e.stopPropagation()}
+            title="Duplicate tile"
+            style={{
+              width: 20, height: 20,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'none', border: 'none',
+              color: colors.onSurfaceVariant,
+              cursor: 'pointer',
+              borderRadius: radius.sm,
+              fontSize: 10,
+              lineHeight: 1,
+              padding: 0,
+              opacity: 0.6,
+              transition: `color ${motion.hover}, opacity ${motion.hover}`,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = colors.primary; e.currentTarget.style.opacity = '1'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = colors.onSurfaceVariant; e.currentTarget.style.opacity = '0.6'; }}
+          >
+            &#8910;
+          </button>
         )}
 
         {hovered && (

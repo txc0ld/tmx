@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TerminalX — The Command Center for AI Agents</title>
+  <meta name="description" content="An infinite canvas workspace for orchestrating Claude Code, Codex, and Gemini CLI in parallel. Native desktop. Rust-powered. Zero compromise." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <!-- =========================================
+       NAVIGATION
+       ========================================= -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">TERMINAL<span class="lime">X</span></a>
+      <div class="nav-links">
+        <a href="#features">FEATURES</a>
+        <a href="#capabilities">CAPABILITIES</a>
+        <a href="#architecture">ARCHITECTURE</a>
+        <a href="#agents">AGENTS</a>
+      </div>
+      <a href="#download" class="btn btn-primary">DOWNLOAD</a>
+    </div>
+  </nav>
+
+  <!-- =========================================
+       HERO
+       ========================================= -->
+  <section class="hero">
+    <div class="blueprint-grid"></div>
+    <div class="hero-inner">
+      <div class="hero-content">
+        <div class="chip" data-reveal>NATIVE DESKTOP APPLICATION</div>
+        <h1 class="hero-headline" data-reveal data-reveal-delay="1">
+          THE COMMAND<br />CENTER FOR<br /><span class="lime">AI AGENTS</span>
+        </h1>
+        <p class="hero-sub" data-reveal data-reveal-delay="2">
+          Orchestrate Claude Code, Codex, and Gemini CLI on an infinite canvas.
+          Wire them together. Ship faster.
+        </p>
+        <div class="hero-actions" data-reveal data-reveal-delay="3">
+          <a href="#download" class="btn btn-primary btn-lg">DOWNLOAD</a>
+          <a href="https://github.com" class="btn btn-secondary btn-lg" target="_blank" rel="noopener">VIEW SOURCE</a>
+        </div>
+      </div>
+      <div class="hero-terminal" data-reveal data-reveal-delay="2">
+        <div class="terminal-chrome">
+          <span class="terminal-title">TERMINALX://WORKSPACE</span>
+          <div class="terminal-dots">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+        <div class="terminal-body">
+          <div class="terminal-lines" id="terminal-lines"></div>
+          <div class="terminal-cursor" id="terminal-cursor">_</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================
+       TICKER
+       ========================================= -->
+  <div class="ticker">
+    <div class="ticker-track">
+      <span>INFINITE_CANVAS</span><span class="ticker-dot">&bull;</span>
+      <span>MULTI_AGENT</span><span class="ticker-dot">&bull;</span>
+      <span>WIRE_SYSTEM</span><span class="ticker-dot">&bull;</span>
+      <span>NATIVE_PTY</span><span class="ticker-dot">&bull;</span>
+      <span>RUST_BACKEND</span><span class="ticker-dot">&bull;</span>
+      <span>MONACO_EDITOR</span><span class="ticker-dot">&bull;</span>
+      <span>AUTO_SAVE</span><span class="ticker-dot">&bull;</span>
+      <span>FOCUS_MODE</span><span class="ticker-dot">&bull;</span>
+      <span>13_TILE_TYPES</span><span class="ticker-dot">&bull;</span>
+      <span>ZERO_ELECTRON</span><span class="ticker-dot">&bull;</span>
+      <span>INFINITE_CANVAS</span><span class="ticker-dot">&bull;</span>
+      <span>MULTI_AGENT</span><span class="ticker-dot">&bull;</span>
+      <span>WIRE_SYSTEM</span><span class="ticker-dot">&bull;</span>
+      <span>NATIVE_PTY</span><span class="ticker-dot">&bull;</span>
+      <span>RUST_BACKEND</span><span class="ticker-dot">&bull;</span>
+      <span>MONACO_EDITOR</span><span class="ticker-dot">&bull;</span>
+      <span>AUTO_SAVE</span><span class="ticker-dot">&bull;</span>
+      <span>FOCUS_MODE</span><span class="ticker-dot">&bull;</span>
+      <span>13_TILE_TYPES</span><span class="ticker-dot">&bull;</span>
+      <span>ZERO_ELECTRON</span><span class="ticker-dot">&bull;</span>
+    </div>
+  </div>
+
+  <!-- =========================================
+       FEATURES
+       ========================================= -->
+  <section class="section features" id="features">
+    <div class="section-header" data-reveal>
+      <span class="section-number">[01]</span>
+      <h2 class="section-title">CORE_FEATURES</h2>
+      <div class="section-rule"></div>
+    </div>
+
+    <div class="features-grid">
+
+      <div class="feature-card" data-reveal data-reveal-delay="0">
+        <div class="feature-index">01</div>
+        <h3 class="feature-title">INFINITE_CANVAS</h3>
+        <p class="feature-desc">
+          Arrange terminals, agents, and editors spatially on a boundless workspace.
+          No tabs. No splits. Pure spatial freedom with pan, zoom, and minimap navigation.
+        </p>
+        <div class="feature-tag">SPATIAL</div>
+      </div>
+
+      <div class="feature-card" data-reveal data-reveal-delay="1">
+        <div class="feature-index">02</div>
+        <h3 class="feature-title">AGENT_ORCHESTRATION</h3>
+        <p class="feature-desc">
+          Run multiple AI coding agents simultaneously. Compare approaches,
+          chain operations, and multiply your throughput across every task.
+        </p>
+        <div class="feature-tag">PARALLEL</div>
+      </div>
+
+      <div class="feature-card" data-reveal data-reveal-delay="2">
+        <div class="feature-index">03</div>
+        <h3 class="feature-title">WIRE_SYSTEM</h3>
+        <p class="feature-desc">
+          Connect tiles with data wires. Output from one agent pipes directly
+          into another. Build visual processing chains without touching config files.
+        </p>
+        <div class="feature-tag">DATAFLOW</div>
+      </div>
+
+      <div class="feature-card" data-reveal data-reveal-delay="3">
+        <div class="feature-index">04</div>
+        <h3 class="feature-title">13_TILE_TYPES</h3>
+        <p class="feature-desc">
+          Terminals, agents, code editors, browsers, file trees, runners, and more.
+          Every tool you need on a single surface.
+        </p>
+        <div class="feature-tag">MODULAR</div>
+      </div>
+
+      <div class="feature-card" data-reveal data-reveal-delay="4">
+        <div class="feature-index">05</div>
+        <h3 class="feature-title">NATIVE_PERFORMANCE</h3>
+        <p class="feature-desc">
+          Tauri 2 with a Rust backend. Real PTY sessions via portable-pty.
+          Native OS integration, sub-50ms latency, a fraction of Electron's memory.
+        </p>
+        <div class="feature-tag">RUST</div>
+      </div>
+
+      <div class="feature-card" data-reveal data-reveal-delay="5">
+        <div class="feature-index">06</div>
+        <h3 class="feature-title">WORKSPACE_PERSISTENCE</h3>
+        <p class="feature-desc">
+          Auto-save captures every tile, wire, and position. Switch projects,
+          restart your machine. Everything is exactly where you left it.
+        </p>
+        <div class="feature-tag">AUTOSAVE</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- =========================================
+       CAPABILITIES
+       ========================================= -->
+  <section class="section capabilities" id="capabilities">
+    <div class="section-header" data-reveal>
+      <span class="section-number">[02]</span>
+      <h2 class="section-title">CAPABILITIES</h2>
+      <div class="section-rule"></div>
+    </div>
+
+    <div class="capabilities-layout">
+
+      <div class="stats-grid" data-reveal>
+        <div class="stat-block">
+          <div class="stat-value" data-count="13">0</div>
+          <div class="stat-label">TILE_TYPES</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-value" data-count="5">0</div>
+          <div class="stat-label">BUILT_IN_THEMES</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-value" data-count-prefix="<" data-count="50">0</div>
+          <div class="stat-label">MS_LATENCY</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-value" data-count="0" data-count-static>0</div>
+          <div class="stat-label">ELECTRON</div>
+        </div>
+      </div>
+
+      <div class="specs-panel" data-reveal data-reveal-delay="1">
+        <div class="specs-col">
+          <h4 class="specs-heading">EDITOR_&_TERMINAL</h4>
+          <ul class="specs-list">
+            <li>Monaco Editor integration</li>
+            <li>xterm.js 5.5 terminal emulation</li>
+            <li>Full PTY with resize support</li>
+            <li>Multi-cursor editing</li>
+          </ul>
+        </div>
+        <div class="specs-col">
+          <h4 class="specs-heading">WORKSPACE</h4>
+          <ul class="specs-list">
+            <li>Focus mode with tile dimming</li>
+            <li>Minimap navigation</li>
+            <li>Multi-select and batch ops</li>
+            <li>Bookmark system</li>
+          </ul>
+        </div>
+        <div class="specs-col">
+          <h4 class="specs-heading">INTEGRATION</h4>
+          <ul class="specs-list">
+            <li>Git clone, status, diff</li>
+            <li>Filesystem watcher</li>
+            <li>Timeline event recording</li>
+            <li>Project-level persistence</li>
+          </ul>
+        </div>
+        <div class="specs-col">
+          <h4 class="specs-heading">THEMING</h4>
+          <ul class="specs-list">
+            <li>5 themes: Electric, Phantom, Ember, Ice, Snow</li>
+            <li>CSS custom property system</li>
+            <li>Glass-morphism tile shells</li>
+            <li>Mouse-tracking glow overlays</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- =========================================
+       ARCHITECTURE
+       ========================================= -->
+  <section class="section architecture" id="architecture">
+    <div class="section-header" data-reveal>
+      <span class="section-number">[03]</span>
+      <h2 class="section-title">ARCHITECTURE</h2>
+      <div class="section-rule"></div>
+    </div>
+
+    <div class="arch-layout">
+
+      <div class="arch-diagram" data-reveal>
+        <div class="arch-col">
+          <div class="arch-label">FRONTEND</div>
+          <div class="arch-stack">
+            <div class="arch-block">React 19</div>
+            <div class="arch-block">TypeScript 5</div>
+            <div class="arch-block">Zustand 5</div>
+            <div class="arch-block">xterm.js 5.5</div>
+            <div class="arch-block">Monaco Editor</div>
+          </div>
+        </div>
+
+        <div class="arch-bridge">
+          <div class="arch-bridge-label">IPC</div>
+          <div class="arch-bridge-line">
+            <svg viewBox="0 0 120 20" preserveAspectRatio="none">
+              <line x1="0" y1="10" x2="120" y2="10" stroke="#1B1B1B" stroke-width="2" stroke-dasharray="6,4" class="arch-dash" />
+              <polygon points="110,5 120,10 110,15" fill="#C9FF00" />
+            </svg>
+          </div>
+          <div class="arch-bridge-sublabel">invoke()</div>
+        </div>
+
+        <div class="arch-col">
+          <div class="arch-label">BACKEND</div>
+          <div class="arch-stack">
+            <div class="arch-block arch-block-accent">Tauri 2 (Rust)</div>
+            <div class="arch-block">portable-pty</div>
+            <div class="arch-block">parking_lot::Mutex</div>
+            <div class="arch-block">AppState</div>
+            <div class="arch-block">PtyManager</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="arch-flow" data-reveal data-reveal-delay="1">
+        <div class="arch-flow-label">DATA_FLOW</div>
+        <div class="arch-flow-steps">
+          <div class="arch-step">
+            <span class="arch-step-num">01</span>
+            <span class="arch-step-text">TileComponent</span>
+          </div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-step">
+            <span class="arch-step-num">02</span>
+            <span class="arch-step-text">usePty Hook</span>
+          </div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-step">
+            <span class="arch-step-num">03</span>
+            <span class="arch-step-text">IPC invoke()</span>
+          </div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-step">
+            <span class="arch-step-num">04</span>
+            <span class="arch-step-text">Rust PTY</span>
+          </div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-step">
+            <span class="arch-step-num">05</span>
+            <span class="arch-step-text">emit()</span>
+          </div>
+          <div class="arch-arrow">&rarr;</div>
+          <div class="arch-step">
+            <span class="arch-step-num">06</span>
+            <span class="arch-step-text">xterm.write()</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- =========================================
+       SUPPORTED AGENTS
+       ========================================= -->
+  <section class="section agents" id="agents">
+    <div class="section-header" data-reveal>
+      <span class="section-number">[04]</span>
+      <h2 class="section-title">SUPPORTED_AGENTS</h2>
+      <div class="section-rule"></div>
+    </div>
+
+    <div class="agents-grid">
+
+      <div class="agent-card" data-reveal data-reveal-delay="0">
+        <div class="agent-icon">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="4" y="4" width="24" height="24" />
+            <line x1="10" y1="12" x2="22" y2="12" />
+            <line x1="10" y1="16" x2="18" y2="16" />
+            <line x1="10" y1="20" x2="20" y2="20" />
+          </svg>
+        </div>
+        <h3 class="agent-name">CLAUDE_CODE</h3>
+        <p class="agent-org">ANTHROPIC</p>
+        <p class="agent-desc">
+          Anthropic's agentic coding CLI. Full file editing,
+          terminal access, and multi-step task execution.
+        </p>
+        <div class="agent-status">
+          <span class="status-dot"></span> SUPPORTED
+        </div>
+      </div>
+
+      <div class="agent-card" data-reveal data-reveal-delay="1">
+        <div class="agent-icon">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="4" y="4" width="24" height="24" />
+            <polyline points="10,16 14,20 22,12" />
+          </svg>
+        </div>
+        <h3 class="agent-name">CODEX_CLI</h3>
+        <p class="agent-org">OPENAI</p>
+        <p class="agent-desc">
+          OpenAI's terminal-native coding agent.
+          Sandboxed execution with approval workflows.
+        </p>
+        <div class="agent-status">
+          <span class="status-dot"></span> SUPPORTED
+        </div>
+      </div>
+
+      <div class="agent-card" data-reveal data-reveal-delay="2">
+        <div class="agent-icon">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="16,4 28,28 4,28" />
+            <line x1="16" y1="18" x2="16" y2="22" />
+            <circle cx="16" cy="14" r="1" fill="currentColor" />
+          </svg>
+        </div>
+        <h3 class="agent-name">GEMINI_CLI</h3>
+        <p class="agent-org">GOOGLE</p>
+        <p class="agent-desc">
+          Google's AI in the terminal. Direct access to
+          Gemini models with tool-use and code generation.
+        </p>
+        <div class="agent-status">
+          <span class="status-dot"></span> SUPPORTED
+        </div>
+      </div>
+
+      <div class="agent-card agent-card-open" data-reveal data-reveal-delay="3">
+        <div class="agent-icon">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="16" y1="8" x2="16" y2="24" />
+            <line x1="8" y1="16" x2="24" y2="16" />
+          </svg>
+        </div>
+        <h3 class="agent-name">ANY_CLI</h3>
+        <p class="agent-org">UNIVERSAL</p>
+        <p class="agent-desc">
+          Any command-line tool runs as a tile. If it works
+          in your terminal, it works in TerminalX.
+        </p>
+        <div class="agent-status">
+          <span class="status-dot"></span> SUPPORTED
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- =========================================
+       HOW IT WORKS
+       ========================================= -->
+  <section class="section how-it-works">
+    <div class="section-header" data-reveal>
+      <span class="section-number">[05]</span>
+      <h2 class="section-title">HOW_IT_WORKS</h2>
+      <div class="section-rule"></div>
+    </div>
+
+    <div class="steps-layout">
+      <div class="step-item" data-reveal data-reveal-delay="0">
+        <div class="step-num">01</div>
+        <div class="step-content">
+          <h3 class="step-title">SPAWN_AGENTS</h3>
+          <p class="step-desc">
+            Click a tile in the dock to spawn a terminal, agent, editor, or any of 13 tile types.
+            Each tile gets its own PTY session backed by Rust.
+          </p>
+        </div>
+      </div>
+      <div class="step-connector" data-reveal></div>
+      <div class="step-item" data-reveal data-reveal-delay="1">
+        <div class="step-num">02</div>
+        <div class="step-content">
+          <h3 class="step-title">ARRANGE_SPATIALLY</h3>
+          <p class="step-desc">
+            Drag tiles anywhere on the infinite canvas. Resize, stack, group.
+            The workspace is your mental model made physical.
+          </p>
+        </div>
+      </div>
+      <div class="step-connector" data-reveal></div>
+      <div class="step-item" data-reveal data-reveal-delay="2">
+        <div class="step-num">03</div>
+        <div class="step-content">
+          <h3 class="step-title">WIRE_TOGETHER</h3>
+          <p class="step-desc">
+            Connect tile outputs to tile inputs. Data flows through wires automatically.
+            Build multi-agent pipelines visually.
+          </p>
+        </div>
+      </div>
+      <div class="step-connector" data-reveal></div>
+      <div class="step-item" data-reveal data-reveal-delay="3">
+        <div class="step-num">04</div>
+        <div class="step-content">
+          <h3 class="step-title">SHIP_FASTER</h3>
+          <p class="step-desc">
+            Run agents in parallel. Compare outputs. Chain reasoning.
+            Your workspace auto-saves. Come back to exactly where you left off.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================
+       CTA / DOWNLOAD
+       ========================================= -->
+  <section class="cta-section" id="download">
+    <div class="cta-inner">
+      <div class="cta-label" data-reveal>READY</div>
+      <h2 class="cta-headline" data-reveal data-reveal-delay="1">TAKE CONTROL</h2>
+      <p class="cta-sub" data-reveal data-reveal-delay="2">
+        Stop switching between terminals. Start orchestrating.
+      </p>
+      <div class="cta-actions" data-reveal data-reveal-delay="3">
+        <a href="#" class="btn btn-cta btn-lg">DOWNLOAD FOR WINDOWS</a>
+      </div>
+      <div class="cta-platforms" data-reveal data-reveal-delay="4">
+        <span>WINDOWS</span>
+        <span class="cta-sep">/</span>
+        <span>MACOS</span>
+        <span class="cta-sep">/</span>
+        <span>LINUX</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================
+       FOOTER
+       ========================================= -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="nav-logo">TERMINAL<span class="lime">X</span></span>
+        <span class="footer-version">v0.1.0</span>
+      </div>
+      <div class="footer-links">
+        <a href="#">DOCUMENTATION</a>
+        <a href="#">GITHUB</a>
+        <a href="#">CHANGELOG</a>
+        <a href="#">LICENSE</a>
+      </div>
+      <div class="footer-copy">
+        &copy; 2026 TERMINALX. BUILT WITH TAURI, RUST, AND INTENT.
+      </div>
+    </div>
+  </footer>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

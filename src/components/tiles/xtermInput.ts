@@ -126,10 +126,54 @@ export function attachKeyboardCapture(
     }
   };
 
-  const onPaste = (e: ClipboardEvent) => {
+  const onPaste = async (e: ClipboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
+    // Check for image data first (screenshots, copied images)
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const blob = item.getAsFile();
+          if (!blob) continue;
+
+          try {
+            // Read image as base64
+            const buffer = await blob.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+
+            // Save to temp file via Tauri
+            const ext = item.type.split('/')[1] || 'png';
+            const fileName = `clipboard-${Date.now()}.${ext}`;
+
+            const { appDataDir } = await import('@tauri-apps/api/path');
+            const { writeFile, mkdir, exists } = await import('@tauri-apps/plugin-fs');
+
+            const baseDir = await appDataDir();
+            const imgDir = baseDir + 'clipboard-images';
+
+            // Ensure directory exists
+            const dirExists = await exists(imgDir);
+            if (!dirExists) await mkdir(imgDir, { recursive: true });
+
+            const filePath = imgDir + '/' + fileName;
+            await writeFile(filePath, bytes);
+
+            // Paste the file path into the terminal
+            writeToPty(filePath);
+          } catch (err) {
+            console.error('Failed to save clipboard image:', err);
+            writeToPty('[image paste failed]');
+          }
+          return;
+        }
+      }
+    }
+
+    // Fall back to text paste
     const text = e.clipboardData?.getData('text');
     if (text) {
       // Bracketed paste so readline-aware programs handle multi-line correctly

@@ -222,6 +222,152 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
       },
     });
 
+    // ─── Tile Presets per Project ──────────────────────
+    result.push({
+      id: 'cmd-save-project-preset',
+      label: 'Save Current Layout as Project Preset',
+      category: 'workspace',
+      action: () => {
+        const store = useCanvasStore.getState();
+        const pid = store.activeProject;
+        if (!pid) return;
+        const tiles = (store.tiles[pid] || []).map(t => {
+          const { ...rest } = t as unknown as Record<string, unknown>;
+          delete rest.ptyId;
+          return rest;
+        });
+        localStorage.setItem(`tx-preset-${pid}`, JSON.stringify({ tiles, transform: store.transforms[pid] }));
+        useTimelineStore.getState().recordEvent('snapshot-saved', 'Project preset saved');
+      },
+    });
+
+    result.push({
+      id: 'cmd-load-project-preset',
+      label: 'Load Project Preset',
+      category: 'workspace',
+      action: () => {
+        const store = useCanvasStore.getState();
+        const pid = store.activeProject;
+        try {
+          const raw = localStorage.getItem(`tx-preset-${pid}`);
+          if (!raw) { alert('No preset saved for this project'); return; }
+          const preset = JSON.parse(raw);
+          // Clear existing tiles
+          const existing = store.tiles[pid] || [];
+          for (const t of existing) store.removeTile(t.id);
+          // Restore preset
+          store.setTransform(preset.transform || { x: 0, y: 0, scale: 1 });
+          for (const t of preset.tiles) {
+            store.addTile({ ...t, id: crypto.randomUUID(), ptyId: undefined });
+          }
+        } catch {
+          alert('Failed to load preset');
+        }
+      },
+    });
+
+    // ─── Sticky Note ─────────────────────────────────
+    result.push({
+      id: 'cmd-sticky-note',
+      label: 'Add Sticky Note to Canvas',
+      category: 'command',
+      action: () => {
+        const text = prompt('Sticky note text:');
+        if (!text) return;
+        const store = useCanvasStore.getState();
+        const pid = store.activeProject;
+        const t = store.transforms[pid] || { x: 0, y: 0, scale: 1 };
+        const cx = (window.innerWidth / 2 - t.x) / t.scale;
+        const cy = (window.innerHeight / 2 - t.y) / t.scale;
+        store.addStickyNote(cx, cy, text);
+      },
+    });
+
+    // ─── Time Travel ──────────────────────────────────
+    result.push({
+      id: 'cmd-time-travel',
+      label: 'Time Travel — Rollback Workspace',
+      category: 'workspace',
+      action: () => {
+        try {
+          const pid = activeProject;
+          const snapKeys = Object.keys(localStorage).filter(k => k.startsWith(`tx-autosnapshot-${pid}-`)).sort();
+          if (snapKeys.length === 0) { alert('No snapshots available yet. Snapshots are saved automatically every 5 minutes.'); return; }
+          const options = snapKeys.map(k => {
+            const ts = k.replace(`tx-autosnapshot-${pid}-`, '');
+            return new Date(parseInt(ts)).toLocaleTimeString();
+          }).join('\n');
+          const choice = prompt(`Available snapshots:\n${options}\n\nEnter time to rollback to (or leave blank for most recent):`);
+          const targetKey = choice
+            ? snapKeys.find(k => new Date(parseInt(k.replace(`tx-autosnapshot-${pid}-`, ''))).toLocaleTimeString().includes(choice))
+            : snapKeys[snapKeys.length - 1];
+          if (!targetKey) { alert('Snapshot not found'); return; }
+          const data = JSON.parse(localStorage.getItem(targetKey) || '{}');
+          if (data.tiles) {
+            const store = useCanvasStore.getState();
+            const existing = store.tiles[pid] || [];
+            for (const t of existing) store.removeTile(t.id);
+            store.setTransform(data.transform || { x: 0, y: 0, scale: 1 });
+            for (const t of data.tiles) store.addTile({ ...t, id: crypto.randomUUID(), ptyId: undefined });
+          }
+        } catch { alert('Rollback failed'); }
+      },
+    });
+
+    // ─── Multi-Agent Debate ────────────────────────────
+    result.push({
+      id: 'cmd-multi-agent-debate',
+      label: 'Multi-Agent Debate (Claude vs Codex vs Gemini)',
+      category: 'command',
+      action: () => {
+        const task = prompt('Enter the prompt to send to all agents:');
+        if (!task) return;
+        const store = useCanvasStore.getState();
+        const pid = store.activeProject;
+        const project = useProjectStore.getState().projects.find(p => p.id === pid);
+        const cwd = project?.cwd || '~';
+        const t = store.transforms[pid] || { x: 0, y: 0, scale: 1 };
+        const cx = (window.innerWidth / 2 - t.x) / t.scale;
+        const cy = (window.innerHeight / 2 - t.y) / t.scale;
+
+        const agents = ['claude', 'codex', 'gemini'];
+        const w = 450;
+        const startX = cx - (agents.length * (w + 16)) / 2;
+
+        for (let i = 0; i < agents.length; i++) {
+          store.addTile({
+            id: crypto.randomUUID(),
+            type: 'agent',
+            title: `${agents[i]} — debate`,
+            agent: agents[i],
+            model: agents[i] === 'claude' ? 'opus-4' : agents[i],
+            effort: 'high', mode: 'code', version: '',
+            cwd, branch: '', status: 'idle', elapsed: 0,
+            x: startX + i * (w + 16),
+            y: cy - 200,
+            w,
+            h: 400,
+          } as unknown as import('@/types').Tile);
+        }
+      },
+    });
+
+    // ─── Agent Memory ─────────────────────────────────
+    result.push({
+      id: 'cmd-agent-memory',
+      label: 'Set Agent Memory (Project Context)',
+      category: 'command',
+      action: async () => {
+        const { useAgentMemoryStore } = await import('@/stores/agentMemoryStore');
+        const pid = useCanvasStore.getState().activeProject;
+        const current = useAgentMemoryStore.getState().getMemory(pid);
+        const context = prompt('Agent memory — context shared with all new agents:\n(e.g., "Uses pnpm, API at /api/v2, Postgres DB")', current);
+        if (context !== null) {
+          useAgentMemoryStore.getState().setMemory(pid, context);
+        }
+      },
+    });
+
     // ─── Plugin: Register ──────────────────────────────
     result.push({
       id: 'cmd-register-plugin',

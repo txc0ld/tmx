@@ -138,8 +138,19 @@ export function AgentTile({ tile }: AgentTileProps) {
       agentType: agentType as 'Claude' | 'Codex' | 'Gemini',
       cwd: tile.cwd || '~',
       ...(tile.command ? { customCommand: tile.command } : {}),
-    }).then(id => {
+    }).then(async (id) => {
       useCanvasStore.getState().updateTile(tile.id, { ptyId: id, status: 'working' } as Partial<AgentTileType>);
+      // Inject agent memory context if set for this project
+      const { useAgentMemoryStore } = await import('@/stores/agentMemoryStore');
+      const { ptyWrite: ptyWriteCtx } = await import('@/utils/ipc');
+      const pid = useCanvasStore.getState().activeProject;
+      const memory = useAgentMemoryStore.getState().getMemory(pid);
+      if (memory) {
+        setTimeout(() => {
+          ptyWriteCtx(id, `Project context: ${memory}`).catch(() => {});
+          setTimeout(() => ptyWriteCtx(id, '\r').catch(() => {}), 300);
+        }, 2000);
+      }
     }).catch(err => {
       const msg = String(err);
       termRef.current?.write(`\x1b[1m--- Agent Spawn Failed ---\x1b[0m\r\n\r\n`);

@@ -6,22 +6,30 @@ const EMPTY_PROVIDERS: OpenUsageProvider[] = [];
 const EMPTY_SESSIONS: AgentSession[] = [];
 
 function computeStats(sessions: AgentSession[]) {
-  const byAgent: Record<string, { sessions: number; durationMins: number }> = {};
+  const byAgent: Record<string, { sessions: number; durationMins: number; tokens: number; cost: number }> = {};
   let totalDuration = 0;
   let activeSessions = 0;
+  let totalTokens = 0;
+  let totalCost = 0;
 
   for (const s of sessions) {
     const dur = s.endedAt ? s.durationSecs : Math.round((Date.now() - s.startedAt) / 1000);
     if (!s.endedAt) activeSessions++;
     totalDuration += dur;
-    if (!byAgent[s.agent]) byAgent[s.agent] = { sessions: 0, durationMins: 0 };
+    totalTokens += s.estimatedTokens || 0;
+    totalCost += s.estimatedCost || 0;
+    if (!byAgent[s.agent]) byAgent[s.agent] = { sessions: 0, durationMins: 0, tokens: 0, cost: 0 };
     byAgent[s.agent].sessions++;
     byAgent[s.agent].durationMins += Math.round(dur / 60);
+    byAgent[s.agent].tokens += s.estimatedTokens || 0;
+    byAgent[s.agent].cost += s.estimatedCost || 0;
   }
 
   return {
     totalSessions: sessions.length,
     totalDurationMins: Math.round(totalDuration / 60),
+    totalTokens,
+    totalCost: Math.round(totalCost * 100) / 100,
     byAgent,
     activeSessions,
   };
@@ -77,6 +85,8 @@ export function UsageTile() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
           <StatCard label="Sessions" value={String(stats.totalSessions)} />
           <StatCard label="Total Time" value={formatDuration(stats.totalDurationMins)} />
+          <StatCard label="Est. Tokens" value={stats.totalTokens > 1000 ? `${Math.round(stats.totalTokens / 1000)}k` : String(stats.totalTokens)} />
+          <StatCard label="Est. Cost" value={`$${stats.totalCost.toFixed(2)}`} />
         </div>
 
         {/* Per-agent breakdown */}
@@ -102,6 +112,11 @@ export function UsageTile() {
                 <span style={{ ...typography.labelSm, color: colors.secondary }}>
                   {formatDuration(data.durationMins)}
                 </span>
+                {data.cost > 0 && (
+                  <span style={{ ...typography.labelSm, color: colors.yellow, fontFamily: fonts.mono }}>
+                    ${data.cost.toFixed(2)}
+                  </span>
+                )}
               </div>
             ))}
           </div>

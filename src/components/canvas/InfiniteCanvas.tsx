@@ -32,6 +32,7 @@ import { WorkspaceTabs } from './WorkspaceTabs';
 import type { Tile, CanvasTransform, GroupTile, RunnerTile, SshTile as SshTileType, DockerTile as DockerTileType, KanbanTile, GitTile as GitTileType } from '@/types';
 
 const EMPTY_TILES: Tile[] = [];
+const EMPTY_STICKIES: { id: string; x: number; y: number; text: string; color: string }[] = [];
 const DEFAULT_TRANSFORM: CanvasTransform = { x: 0, y: 0, scale: 1 };
 
 function TileLoadingFallback() {
@@ -93,11 +94,36 @@ export function InfiniteCanvas() {
   const zStack = useCanvasStore(s => s.zStack);
   const focusModeActive = useCanvasStore(s => s.focusModeActive);
   const snapGuides = useCanvasStore(s => s.snapGuides);
+  const stickyNotes = useCanvasStore(s => s.stickyNotes[s.activeProject] || EMPTY_STICKIES);
 
   const tiles = tilesMap[activeProject] ?? EMPTY_TILES;
   const transform = transformsMap[activeProject] ?? DEFAULT_TRANSFORM;
 
   const [altHeld, setAltHeld] = useState(false);
+
+  // ─── Auto-snapshot for time travel (every 5 min) ────
+  useEffect(() => {
+    if (!activeProject) return;
+    const interval = setInterval(() => {
+      try {
+        const s = useCanvasStore.getState();
+        const pid = s.activeProject;
+        if (!pid) return;
+        const data = {
+          tiles: (s.tiles[pid] || []).map(t => { const { ...r } = t as unknown as Record<string, unknown>; delete r.ptyId; return r; }),
+          transform: s.transforms[pid] || { x: 0, y: 0, scale: 1 },
+        };
+        const key = `tx-autosnapshot-${pid}-${Date.now()}`;
+        localStorage.setItem(key, JSON.stringify(data));
+        // Keep max 12 snapshots (1 hour of history)
+        const allKeys = Object.keys(localStorage).filter(k => k.startsWith(`tx-autosnapshot-${pid}-`)).sort();
+        while (allKeys.length > 12) {
+          localStorage.removeItem(allKeys.shift()!);
+        }
+      } catch { /* storage full */ }
+    }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [activeProject]);
 
   // ─── Rubber-band selection state ────────────────────
   const [selRect, setSelRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -333,6 +359,43 @@ export function InfiniteCanvas() {
         ))}
 
         <WiringLayer />
+
+        {/* Sticky notes */}
+        {stickyNotes.map(note => (
+          <div key={note.id} style={{
+            position: 'absolute',
+            left: note.x, top: note.y,
+            width: 180, minHeight: 60,
+            background: note.color + '22',
+            border: `1px solid ${note.color}44`,
+            borderRadius: 6,
+            padding: 8,
+            zIndex: 9990,
+            fontSize: '0.6875rem',
+            fontFamily: fonts.body,
+            color: colors.onSurface,
+          }}>
+            <div
+              contentEditable
+              suppressContentEditableWarning
+              onBlur={e => useCanvasStore.getState().updateStickyNote(note.id, e.currentTarget.textContent || '')}
+              style={{ outline: 'none', minHeight: 30, lineHeight: 1.4 }}
+            >
+              {note.text}
+            </div>
+            <button
+              onClick={() => useCanvasStore.getState().removeStickyNote(note.id)}
+              style={{
+                position: 'absolute', top: 2, right: 4,
+                background: 'none', border: 'none',
+                color: note.color, cursor: 'pointer',
+                fontSize: 9, opacity: 0.6,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
 
         {/* Snap alignment guides */}
         {snapGuides.map((g, i) => (

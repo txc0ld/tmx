@@ -11,6 +11,8 @@ export interface AgentSession {
   endedAt?: number;
   durationSecs: number;
   tileId: string;
+  estimatedTokens: number;
+  estimatedCost: number;
 }
 
 export interface UsageStats {
@@ -63,7 +65,6 @@ export const useUsageStore = create<UsageState>((set, get) => ({
 
   trackSessionStart: (tileId, agent) => {
     set(s => {
-      // Don't duplicate if already tracked
       if (s.sessions.some(ss => ss.tileId === tileId && !ss.endedAt)) return s;
       const session: AgentSession = {
         id: crypto.randomUUID(),
@@ -71,18 +72,32 @@ export const useUsageStore = create<UsageState>((set, get) => ({
         startedAt: Date.now(),
         durationSecs: 0,
         tileId,
+        estimatedTokens: 0,
+        estimatedCost: 0,
       };
       return { sessions: [...s.sessions.slice(-MAX_SESSIONS), session] };
     });
   },
 
   trackSessionEnd: (tileId) => {
+    // Estimate tokens from wireData output
+    const wireData = useCanvasStore.getState().wireData[tileId] || '';
+    // ~4 chars per token is a rough estimate
+    const estimatedTokens = Math.round(wireData.length / 4);
+    const COST_PER_1K: Record<string, number> = { claude: 0.015, codex: 0.01, gemini: 0.005 };
+
     set(s => ({
-      sessions: s.sessions.map(ss =>
-        ss.tileId === tileId && !ss.endedAt
-          ? { ...ss, endedAt: Date.now(), durationSecs: Math.round((Date.now() - ss.startedAt) / 1000) }
-          : ss,
-      ),
+      sessions: s.sessions.map(ss => {
+        if (ss.tileId !== tileId || ss.endedAt) return ss;
+        const cost = (estimatedTokens / 1000) * (COST_PER_1K[ss.agent] || 0.01);
+        return {
+          ...ss,
+          endedAt: Date.now(),
+          durationSecs: Math.round((Date.now() - ss.startedAt) / 1000),
+          estimatedTokens,
+          estimatedCost: Math.round(cost * 1000) / 1000,
+        };
+      }),
     }));
   },
 

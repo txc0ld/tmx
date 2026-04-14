@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useToastStore } from '@/stores/toastStore';
 import { ptyWrite } from '@/utils/ipc';
+import { sendNotification } from '@tauri-apps/plugin-notification';
 import type { Wire, Tile, AgentTile } from '@/types';
 
 const EMPTY_WIRES: Wire[] = [];
@@ -188,6 +189,46 @@ export function useWiringEngine() {
             }, 2000);
             pendingTimers.current.add(diffTimerId);
           }
+        }
+      }
+
+      // Auto-recovery: if a runner tile fails, dispatch error to connected agent
+      for (const tile of tiles) {
+        if (tile.type !== 'runner') continue;
+        const runner = tile as import('@/types').RunnerTile;
+        if (runner.status !== 'fail') continue;
+        // Check if there's a wire from this runner to an agent
+        const wire = wires.find(w => w.fromTile === runner.id);
+        if (!wire) continue;
+        const targetTile = tileById.get(wire.toTile);
+        if (!targetTile || targetTile.type !== 'agent') continue;
+        const agentPty = (targetTile as AgentTile).ptyId;
+        if (!agentPty) continue;
+        const output = wireData[runner.ptyId || ''] || '';
+        if (!output) continue;
+        // Only auto-recover once per failure (check if we already sent)
+        const recoveryKey = `recovery-${runner.id}-${runner.status}`;
+        if (prevWireDataRef.current[recoveryKey]) continue;
+        prevWireDataRef.current[recoveryKey] = 'sent';
+        const errorLines = output.split('\n').slice(-30).join('\n');
+        ptyWrite(agentPty, `Build/test failed. Fix this error:\n${errorLines}`).catch(() => {});
+        setTimeout(() => ptyWrite(agentPty, '\r').catch(() => {}), 500);
+        state.setWireActive(wire.id, true);
+        const rid = window.setTimeout(() => {
+          pendingTimers.current.delete(rid);
+          useCanvasStore.getState().setWireActive(wire.id, false);
+        }, 3000);
+        pendingTimers.current.add(rid);
+      }
+
+      // Desktop notification when any agent completes
+      for (const tileId of Object.keys(nextStatuses)) {
+        const prev = prevStatuses[tileId];
+        const curr = nextStatuses[tileId];
+        if (prev && prev !== 'done' && prev !== 'error' && (curr === 'done' || curr === 'error')) {
+          const agentTile = tileById.get(tileId);
+          const name = agentTile?.title || agentTile?.type || 'Agent';
+          try { sendNotification({ title: 'TerminalX', body: `${name} ${curr === 'done' ? 'completed' : 'failed'}` }); } catch { /* ignore */ }
         }
       }
 
