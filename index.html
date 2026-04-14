@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TerminalX</title>
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Plus+Jakarta+Sans:wght@700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+      body { background: var(--tx-bg, #000000); color: var(--tx-on-surface-variant, #c4c4c4); font-family: 'Public Sans', sans-serif; }
+      ::-webkit-scrollbar { width: 4px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: var(--tx-outline-variant, rgba(255,255,255,0.15)); border-radius: 2px; }
+      /* Global focus-visible for keyboard accessibility */
+      button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--tx-accent); outline-offset: 1px; border-radius: 4px; }
+      input:focus-visible, textarea:focus-visible { outline: 2px solid var(--tx-accent); outline-offset: 0; }
+      /* Smooth transitions on all interactive elements */
+      button, [role="button"] { transition: background 150ms ease, color 150ms ease, opacity 150ms ease; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

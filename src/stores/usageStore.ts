@@ -1,0 +1,163 @@
+import { create } from 'zustand';
+import { useCanvasStore } from './canvasStore';
+import type { AgentTile } from '@/types';
+
+// ─── Internal usage tracking ────────────────────────────
+
+export interface AgentSession {
+  id: string;
+  agent: string;       // claude, codex, gemini
+  startedAt: number;    // timestamp ms
+  endedAt?: number;
+  durationSecs: number;
+  tileId: string;
+}
+
+export interface UsageStats {
+  totalSessions: number;
+  totalDurationMins: number;
+  byAgent: Record<string, { sessions: number; durationMins: number }>;
+  activeSessions: number;
+}
+
+// ─── OpenUsage API types ────────────────────────────────
+
+export interface OpenUsageLine {
+  type: 'progress' | 'text' | 'badge';
+  label: string;
+  value?: number;
+  maxValue?: number;
+  resetAt?: string;
+  scope?: string;
+}
+
+export interface OpenUsageProvider {
+  id: string;
+  name: string;
+  plan?: string;
+  lines: OpenUsageLine[];
+  fetchedAt: string;
+}
+
+// ─── Store ──────────────────────────────────────────────
+
+interface UsageState {
+  sessions: AgentSession[];
+  openUsageData: OpenUsageProvider[];
+  openUsageConnected: boolean;
+  openUsageError: string | null;
+
+  trackSessionStart: (tileId: string, agent: string) => void;
+  trackSessionEnd: (tileId: string) => void;
+  getStats: () => UsageStats;
+  fetchOpenUsage: () => Promise<void>;
+}
+
+const MAX_SESSIONS = 500;
+
+export const useUsageStore = create<UsageState>((set, get) => ({
+  sessions: [],
+  openUsageData: [],
+  openUsageConnected: false,
+  openUsageError: null,
+
+  trackSessionStart: (tileId, agent) => {
+    set(s => {
+      // Don't duplicate if already tracked
+      if (s.sessions.some(ss => ss.tileId === tileId && !ss.endedAt)) return s;
+      const session: AgentSession = {
+        id: crypto.randomUUID(),
+        agent,
+        startedAt: Date.now(),
+        durationSecs: 0,
+        tileId,
+      };
+      return { sessions: [...s.sessions.slice(-MAX_SESSIONS), session] };
+    });
+  },
+
+  trackSessionEnd: (tileId) => {
+    set(s => ({
+      sessions: s.sessions.map(ss =>
+        ss.tileId === tileId && !ss.endedAt
+          ? { ...ss, endedAt: Date.now(), durationSecs: Math.round((Date.now() - ss.startedAt) / 1000) }
+          : ss,
+      ),
+    }));
+  },
+
+  getStats: () => {
+    const { sessions } = get();
+    const byAgent: Record<string, { sessions: number; durationMins: number }> = {};
+    let totalDuration = 0;
+    let activeSessions = 0;
+
+    for (const s of sessions) {
+      const dur = s.endedAt
+        ? s.durationSecs
+        : Math.round((Date.now() - s.startedAt) / 1000);
+
+      if (!s.endedAt) activeSessions++;
+      totalDuration += dur;
+
+      if (!byAgent[s.agent]) byAgent[s.agent] = { sessions: 0, durationMins: 0 };
+      byAgent[s.agent].sessions++;
+      byAgent[s.agent].durationMins += Math.round(dur / 60);
+    }
+
+    return {
+      totalSessions: sessions.length,
+      totalDurationMins: Math.round(totalDuration / 60),
+      byAgent,
+      activeSessions,
+    };
+  },
+
+  fetchOpenUsage: async () => {
+    try {
+      const res = await fetch('http://127.0.0.1:6736/v1/usage', {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: OpenUsageProvider[] = await res.json();
+      set({ openUsageData: data, openUsageConnected: true, openUsageError: null });
+    } catch {
+      set({ openUsageConnected: false, openUsageError: 'OpenUsage not running' });
+    }
+  },
+}));
+
+// ─── Auto-track agent sessions from canvasStore ─────────
+
+let trackedAgents = new Set<string>();
+
+useCanvasStore.subscribe((state) => {
+  const pid = state.activeProject;
+  if (!pid) return;
+  const tiles = state.tiles[pid] || [];
+  const currentAgentIds = new Set<string>();
+
+  for (const t of tiles) {
+    if (t.type !== 'agent') continue;
+    const agent = t as AgentTile;
+    currentAgentIds.add(agent.id);
+
+    if ((agent.status === 'working' || agent.status === 'spawning') && !trackedAgents.has(agent.id)) {
+      trackedAgents.add(agent.id);
+      useUsageStore.getState().trackSessionStart(agent.id, agent.agent);
+    }
+
+    if ((agent.status === 'done' || agent.status === 'error') && trackedAgents.has(agent.id)) {
+      trackedAgents.delete(agent.id);
+      useUsageStore.getState().trackSessionEnd(agent.id);
+    }
+  }
+
+  // Clean up tracked agents that were removed
+  for (const id of trackedAgents) {
+    if (!currentAgentIds.has(id)) {
+      trackedAgents.delete(id);
+      useUsageStore.getState().trackSessionEnd(id);
+    }
+  }
+});

@@ -1,0 +1,58 @@
+[package]
+name = "terminalx"
+version = "0.1.0"
+description = "Infinite canvas terminal workspace"
+authors = ["Fantom Labs"]
+edition = "2021"
+
+[lib]
+name = "terminalx_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri core
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-dialog = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# PTY management
+portable-pty = "0.8"
+
+# Filesystem watching
+notify = "7"
+notify-debouncer-mini = "0.4"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client for MCP API proxy
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Utilities
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"
+shellexpand = "3"
+parking_lot = "0.12"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
