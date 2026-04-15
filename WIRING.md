@@ -64,15 +64,20 @@ TerminalX picks the right wire type automatically based on what you connect. You
 
 **Why explicit?** Auto-piping every keystroke would spam the agent. Manual pipe means YOU decide when the agent gets fresh context — usually right before asking it a question.
 
-**Want hands-free mode?** Enable **Auto-Pipe** on the agent tile:
+**Want hands-free mode?** Each agent tile now has an **Auto** toggle right next to the Pipe button:
 
-1. Focus the agent tile (click its header)
-2. Press `Ctrl+K` / `⌘K` → search **"Toggle Agent Auto-Pipe"** → Enter
-3. Optionally press `Ctrl+K` / `⌘K` → **"Set Agent Auto-Prompt"** → type something like `"Analyze the output above and explain what happened."`
+1. **Click Auto** — it glows green, auto-pipe is now on
+2. **Right-click Auto** — opens a dialog to set your auto-prompt (what the agent should do after receiving context)
 
-Now when the terminal produces output and goes silent for 2 seconds, the agent **auto-pipes the new content + auto-sends your prompt**. Claude answers without you lifting a finger. Full hands-free chain: terminal → agent → response.
+Once enabled, when the terminal produces output and goes silent for 2 seconds, the agent **auto-pipes the new content + auto-sends your prompt**. Claude answers without you lifting a finger. Full hands-free chain: terminal → agent → response.
 
-The button label changes to **"Auto-Pipe"** so you know the mode is active.
+> The Auto toggle is the same pattern as the Todo tile's auto-dispatch toggle — click once to turn on, right-click to configure.
+
+**Example auto-prompts:**
+- `"Analyze the output above and explain what happened."`
+- `"If there are errors, suggest fixes."`
+- `"Summarize in one sentence."`
+- Leave blank = pipe silently (context loaded, no automatic response)
 
 **Example workflow:**
 

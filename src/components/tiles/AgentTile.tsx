@@ -571,7 +571,22 @@ function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPrompt
     }, 20);
   };
 
+  const toggleAuto = () => {
+    useCanvasStore.getState().updateTile(tileId, { autoPipe: !autoPipe } as Partial<import('@/types').AgentTile>);
+  };
+
+  const editAutoPrompt = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const input = prompt(
+      'What should the agent do after auto-pipe? (leave blank = pipe silently)\nExamples:\n- Analyze the output above and explain what happened.\n- If there are errors, fix them.\n- Summarize in one paragraph.',
+      autoPromptTemplate,
+    );
+    if (input === null) return;
+    useCanvasStore.getState().updateTile(tileId, { autoPromptTemplate: input } as Partial<import('@/types').AgentTile>);
+  };
+
   return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
     <button
       onClick={handleClick}
       onContextMenu={handleResetAndPipeAll}
@@ -599,7 +614,7 @@ function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPrompt
         width: 5, height: 5, borderRadius: '50%',
         background: hasUnread ? colors.primary : colors.secondary,
       }} />
-      {autoPipe ? 'Auto-Pipe' : 'Pipe'}{hasUnread ? ` (${unreadBytes > 999 ? `${Math.round(unreadBytes/1000)}k` : unreadBytes})` : ''}
+      Pipe{hasUnread ? ` (${unreadBytes > 999 ? `${Math.round(unreadBytes/1000)}k` : unreadBytes})` : ''}
       <style>{`
         @keyframes pipe-pulse {
           0%, 100% { box-shadow: 0 0 8px ${alpha(colors.primary, 30)}; }
@@ -607,5 +622,33 @@ function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPrompt
         }
       `}</style>
     </button>
+
+    {/* Auto toggle — mirrors TodoTile auto-dispatch UX */}
+    <button
+      onClick={toggleAuto}
+      onContextMenu={editAutoPrompt}
+      title={autoPipe
+        ? `Auto-pipe ON — fires ${autoPipeIdleMs / 1000}s after source goes silent${autoPromptTemplate ? `\n\nAuto-prompt: "${autoPromptTemplate.slice(0, 80)}${autoPromptTemplate.length > 80 ? '...' : ''}"` : '\n\n(silent pipe — right-click to set auto-prompt)'}`
+        : 'Auto-pipe OFF — click to enable hands-free piping (right-click to edit auto-prompt)'}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 3,
+        padding: '2px 6px', borderRadius: radius.sm,
+        border: `1px solid ${autoPipe ? colors.green : colors.outlineGhost}`,
+        background: autoPipe ? alpha(colors.green, 12) : 'transparent',
+        color: autoPipe ? colors.green : colors.secondary,
+        cursor: 'pointer',
+        fontFamily: fonts.mono,
+        fontSize: '0.625rem',
+        fontWeight: autoPipe ? 600 : 500,
+        transition: 'all 150ms ease',
+      }}
+    >
+      <span style={{
+        width: 5, height: 5, borderRadius: '50%',
+        background: autoPipe ? colors.green : colors.secondary,
+      }} />
+      Auto
+    </button>
+    </div>
   );
 }
