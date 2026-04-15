@@ -424,6 +424,9 @@ function tailLines(text: string, maxLines: number): string {
 
 const MAX_PIPE_LINES = 50;
 
+const EMPTY_WIRES: import('@/types').Wire[] = [];
+const EMPTY_TILES: import('@/types').Tile[] = [];
+
 interface PipeBtnProps {
   tileId: string;
   ptyId: string | undefined;
@@ -433,9 +436,9 @@ interface PipeBtnProps {
 }
 
 function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPromptTemplate }: PipeBtnProps) {
-  const wires = useCanvasStore(s => s.wires[s.activeProject] || []);
+  const wires = useCanvasStore(s => s.wires[s.activeProject] ?? EMPTY_WIRES);
   const wireData = useCanvasStore(s => s.wireData);
-  const tiles = useCanvasStore(s => s.tiles[s.activeProject] || []);
+  const tiles = useCanvasStore(s => s.tiles[s.activeProject] ?? EMPTY_TILES);
   const [pipedOffsets, setPipedOffsets] = useState<Record<string, number>>({});
   // Remember what the buffer looked like when this button first mounted —
   // anything already there is "history", not unread context. Only new output
