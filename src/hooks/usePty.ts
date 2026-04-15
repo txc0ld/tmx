@@ -47,7 +47,14 @@ export function usePty(
   }, [ptyId]);
 
   const write = useCallback((data: string) => {
-    if (ptyId) ptyWrite(ptyId, data).catch(console.error);
+    if (!ptyId) return;
+    ptyWrite(ptyId, data).catch(console.error);
+    // Detect user pressing Enter (carriage return) — marks that a command
+    // was submitted. Auto-pipe uses this as the trigger instead of raw idle,
+    // so it only fires after you've actually run something.
+    if (data.includes('\r') || data.includes('\n')) {
+      useCanvasStore.getState().markCommandSubmitted(ptyId);
+    }
   }, [ptyId]);
 
   const resize = useCallback((cols: number, rows: number) => {

@@ -525,6 +525,13 @@ function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPrompt
 
   const autoPipeTimerRef = useRef<number | null>(null);
   const lastUnreadRef = useRef(0);
+  // Track the last command-submit timestamp we piped for, per source PTY,
+  // so we only fire once per command (not continuously during streaming).
+  const lastPipedCommandAtRef = useRef<Record<string, number>>({});
+
+  // Subscribe to the latest command-submit map so this effect re-runs when
+  // the user presses Enter in a connected terminal.
+  const commandSubmittedAt = useCanvasStore(s => s.commandSubmittedAt);
 
   useEffect(() => {
     if (!autoPipe || !ptyId) {
@@ -533,23 +540,41 @@ function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPrompt
       return;
     }
     if (unreadBytes === 0) {
-      // Source went back to zero (we just piped) — reset so the next
-      // batch of terminal output re-arms the timer
       lastUnreadRef.current = 0;
       return;
     }
-    // Every time unreadBytes grows, reset the idle timer
+
+    // Only arm the timer if the user has actually submitted a command since
+    // our last auto-pipe for at least one source. This prevents firing on
+    // ambient output (e.g. a long-running tail) that the user didn't kick off.
+    const hasNewCommand = sources.some(({ srcPtyId }) => {
+      const submittedAt = commandSubmittedAt[srcPtyId] || 0;
+      const lastPipedAt = lastPipedCommandAtRef.current[srcPtyId] || 0;
+      return submittedAt > lastPipedAt;
+    });
+    if (!hasNewCommand) {
+      // No command pressed since last pipe — wait for user to actually run something
+      if (autoPipeTimerRef.current) { clearTimeout(autoPipeTimerRef.current); autoPipeTimerRef.current = null; }
+      return;
+    }
+
+    // Every time unreadBytes grows, reset the idle timer — command output
+    // is streaming, wait for it to settle before piping
     if (unreadBytes !== lastUnreadRef.current) {
       lastUnreadRef.current = unreadBytes;
       if (autoPipeTimerRef.current) clearTimeout(autoPipeTimerRef.current);
       autoPipeTimerRef.current = window.setTimeout(() => {
         autoPipeTimerRef.current = null;
+        // Record which commands we're firing for BEFORE the pipe (sources
+        // snapshot here is captured by the ref closure)
+        for (const { srcPtyId } of sources) {
+          lastPipedCommandAtRef.current[srcPtyId] = commandSubmittedAt[srcPtyId] || Date.now();
+        }
         pipeRef.current(autoPromptTemplate);
       }, autoPipeIdleMs);
     }
-    // NOTE: intentionally no cleanup here — we want the timer to survive
-    // re-renders so it actually fires. Unmount cleanup is handled below.
-  }, [autoPipe, autoPipeIdleMs, autoPromptTemplate, unreadBytes, ptyId]);
+    // NOTE: no cleanup — timer must survive re-renders. Unmount cleanup below.
+  }, [autoPipe, autoPipeIdleMs, autoPromptTemplate, unreadBytes, ptyId, commandSubmittedAt, sources]);
 
   // Clean up any pending auto-pipe timer on unmount
   useEffect(() => () => {

@@ -124,11 +124,22 @@ From now on, every command you run in the connected terminal will be piped to th
 | `"What's the next step based on this?"` | Continuous workflow guidance |
 | *(empty)* | Pipe silently — context loaded, no response until you prompt manually |
 
-**Why the 2-second delay?**
+**How the trigger actually works:**
 
-Piping every keystroke would spam the agent with partial output mid-command. Waiting for 2 seconds of silence catches the natural "command finished, shell returned to prompt" state. It's enough time for most commands to fully complete their output.
+Auto-pipe doesn't fire on arbitrary silence — it fires **after you press Enter in the connected terminal AND the resulting output settles**. The flow:
 
-> **Adjusting the idle timer:** Press `Ctrl+K` / `⌘K` → search **"Set Agent Idle Threshold"** → enter a value in seconds (1-300). Lower = snappier, higher = waits longer for slow commands.
+1. You type a command (nothing happens — no Enter yet)
+2. You press `Enter` → TerminalX records a "command submitted" timestamp for that PTY
+3. Command starts running, output streams into the buffer
+4. Output stops for 2 seconds → auto-pipe fires exactly once for that command
+5. Next command → new timestamp → next fire
+
+This means:
+- **Ambient output** (e.g. a `tail -f` you started 10 minutes ago) won't trigger auto-pipe
+- **Mid-typing pauses** won't trigger — no Enter means no pending command
+- **Each Enter = at most one auto-pipe** — won't spam-fire during long streaming output
+
+> **Adjusting the settle timer:** Press `Ctrl+K` / `⌘K` → search **"Set Agent Idle Threshold"** → enter a value in seconds (1-300). Default is 2s after last output byte.
 
 **Safety caps on what gets piped:**
 

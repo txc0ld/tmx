@@ -109,6 +109,12 @@ interface CanvasState {
   appendWireData: (tileId: string, data: string) => void;
   getWireDataForTile: (tileId: string) => string;
 
+  // Command-submit tracker — updated whenever the user presses Enter in a PTY.
+  // Used by auto-pipe to only fire AFTER a command was actually submitted,
+  // instead of on any random idle period.
+  commandSubmittedAt: Record<string, number>;  // ptyId -> timestamp (ms)
+  markCommandSubmitted: (ptyId: string) => void;
+
   // Selectors
   currentTiles: () => Tile[];
   currentWires: () => Wire[];
@@ -133,6 +139,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   stickyNotes: {},
   snapGuides: [],
   wireData: {},
+  commandSubmittedAt: {},
+
+  markCommandSubmitted: (ptyId: string) =>
+    set(s => ({ commandSubmittedAt: { ...s.commandSubmittedAt, [ptyId]: Date.now() } })),
 
   // ─── Multi-select ─────────────────────────────────────
   toggleSelectTile: (tileId) =>
