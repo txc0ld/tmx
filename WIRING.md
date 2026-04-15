@@ -108,6 +108,10 @@ The Auto toggle (the second button, next to Pipe) turns on full automation. When
    Type something like `"Analyze the output above and explain what happened."` → OK
 2. **Click the Auto toggle** → it glows green → hands-free mode is live
 
+![Auto-pipe tooltip showing ON state and configured prompt](./docs/img/auto-pipe-tooltip.png)
+
+*Hovering the green Auto toggle shows the current state + your configured prompt — useful for verifying the agent is set up correctly before you walk away.*
+
 From now on, every command you run in the connected terminal will be piped to the agent with your prompt, automatically. Close the loop and walk away.
 
 **Example auto-prompts:**
