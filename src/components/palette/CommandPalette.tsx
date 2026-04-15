@@ -520,6 +520,90 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
       },
     });
 
+    // ─── Wire Blueprints: Save + apply whole patterns ───
+    // Blueprints are multi-tile compositions with wires. Save = capture
+    // the current canvas (or selection) as a named pattern. Apply =
+    // materialize those tiles + wires on the active canvas.
+    import('@/stores/blueprintStore').then(({ useBlueprintStore, captureBlueprint, instantiateBlueprint }) => {
+      const blueprints = useBlueprintStore.getState().blueprints;
+
+      // One palette entry per blueprint (Apply)
+      for (const bp of blueprints) {
+        result.push({
+          id: `blueprint-apply-${bp.id}`,
+          label: `${bp.icon ? bp.icon + ' ' : '🧩 '}Apply: ${bp.name}`,
+          category: 'workspace',
+          action: async () => {
+            const store = useCanvasStore.getState();
+            const transform = store.transforms[store.activeProject] ?? { x: 0, y: 0, scale: 1 };
+            const anchor = screenToCanvas(window.innerWidth / 2 - 300, 100, transform);
+            const { tiles: newTiles, wires: newWires } = instantiateBlueprint(bp, anchor);
+            for (const t of newTiles) store.addTile(t);
+            for (const w of newWires) store.addWire(w);
+            const { useToastStore } = await import('@/stores/toastStore');
+            useToastStore.getState().addToast(
+              `Applied "${bp.name}" — ${newTiles.length} tiles + ${newWires.length} wires.`,
+              'info',
+            );
+          },
+        });
+      }
+
+      // Save canvas as blueprint
+      result.push({
+        id: 'cmd-save-blueprint',
+        label: '💾 Save Canvas as Blueprint…',
+        category: 'workspace',
+        action: async () => {
+          const store = useCanvasStore.getState();
+          const pid = store.activeProject;
+          const tiles = store.tiles[pid] || [];
+          const wires = store.wires[pid] || [];
+          if (tiles.length === 0) {
+            const { useToastStore } = await import('@/stores/toastStore');
+            useToastStore.getState().addToast('Canvas is empty — nothing to save.', 'warning');
+            return;
+          }
+          const name = prompt(`Blueprint name (captures ${tiles.length} tiles + ${wires.length} wires):`);
+          if (!name) return;
+          const description = prompt('Short description:') || '';
+          const bp = captureBlueprint(name, description, tiles, wires);
+          useBlueprintStore.getState().saveBlueprint(bp);
+          const { useToastStore } = await import('@/stores/toastStore');
+          useToastStore.getState().addToast(`Blueprint "${name}" saved.`, 'info');
+        },
+      });
+
+      // Save selection as blueprint
+      result.push({
+        id: 'cmd-save-selection-blueprint',
+        label: '💾 Save Selection as Blueprint…',
+        category: 'workspace',
+        action: async () => {
+          const store = useCanvasStore.getState();
+          const pid = store.activeProject;
+          const selected = store.selectedTiles;
+          if (selected.length === 0) {
+            const { useToastStore } = await import('@/stores/toastStore');
+            useToastStore.getState().addToast('No tiles selected. Shift-drag to select first.', 'warning');
+            return;
+          }
+          const allTiles = store.tiles[pid] || [];
+          const allWires = store.wires[pid] || [];
+          const selectedSet = new Set(selected);
+          const selTiles = allTiles.filter(t => selectedSet.has(t.id));
+          const selWires = allWires.filter(w => selectedSet.has(w.fromTile) && selectedSet.has(w.toTile));
+          const name = prompt(`Blueprint name (${selTiles.length} tiles + ${selWires.length} wires):`);
+          if (!name) return;
+          const description = prompt('Short description:') || '';
+          const bp = captureBlueprint(name, description, selTiles, selWires);
+          useBlueprintStore.getState().saveBlueprint(bp);
+          const { useToastStore } = await import('@/stores/toastStore');
+          useToastStore.getState().addToast(`Blueprint "${name}" saved from selection.`, 'info');
+        },
+      });
+    });
+
     // ─── Starter Layout: Detect + apply ────────────────
     // Scans the active project's cwd, guesses the language/framework,
     // and spawns a matching starter tile set. Idempotent — if the
