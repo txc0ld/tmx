@@ -12,7 +12,7 @@ Run Claude, Codex, and Gemini side-by-side. Wire them together. Ship 10× faster
 [![Rust](https://img.shields.io/badge/Rust-1.90+-000000?logo=rust)](https://rust-lang.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript)](https://typescriptlang.org)
 
-[Features](#features) · [Install](#installation) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Contributing](#contributing)
+[Website](https://txc0ld.github.io/tmx) · [Features](#features) · [Install](#installation) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Contributing](#contributing)
 
 </div>
 
