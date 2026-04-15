@@ -1,8 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useWiringStore } from '@/stores/wiringStore';
 import { colors } from '@/design/tokens';
-import { screenToCanvas } from '@/utils/layout';
 import type { Wire, Tile } from '@/types';
 
 const EMPTY: never[] = [];
@@ -43,6 +42,8 @@ export function WiringLayer() {
     };
   }, [dragging]);
 
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
   if (wires.length === 0 && !dragging) return null;
 
   const tileMap = new Map(tiles.map(t => [t.id, t]));
@@ -50,6 +51,7 @@ export function WiringLayer() {
 
   return (
     <svg
+      ref={svgRef}
       style={{
         position: 'absolute',
         inset: 0,
@@ -77,7 +79,13 @@ export function WiringLayer() {
 
       {/* Live preview wire while dragging */}
       {dragging && fromTile && (
-        <PreviewWire from={fromTile} cursorScreenX={cursorX} cursorScreenY={cursorY} transform={transform} />
+        <PreviewWire
+          from={fromTile}
+          cursorScreenX={cursorX}
+          cursorScreenY={cursorY}
+          transform={transform}
+          svgRef={svgRef}
+        />
       )}
     </svg>
   );
@@ -120,12 +128,36 @@ function WirePath({ wire, from, to }: { wire: Wire; from: Tile; to: Tile }) {
   );
 }
 
-function PreviewWire({ from, cursorScreenX, cursorScreenY, transform }:
-  { from: Tile; cursorScreenX: number; cursorScreenY: number; transform: { x: number; y: number; scale: number } }) {
+function PreviewWire({ from, cursorScreenX, cursorScreenY, transform, svgRef }:
+  {
+    from: Tile;
+    cursorScreenX: number;
+    cursorScreenY: number;
+    transform: { x: number; y: number; scale: number };
+    svgRef: React.RefObject<SVGSVGElement | null>;
+  }) {
   const sx = from.x + from.w;
   const sy = from.y + from.h / 2;
-  // Convert cursor screen coords to canvas coords
-  const { x: ex, y: ey } = screenToCanvas(cursorScreenX, cursorScreenY, transform);
+
+  // Convert viewport cursor → canvas (pre-transform) coords.
+  // The SVG sits INSIDE the transformed canvas layer, so we can read its
+  // current bounding rect to find where canvas (0,0) is on screen. This
+  // is the only correct way to account for the sidebar + top-bar offset
+  // AND the current pan/zoom — `screenToCanvas` alone assumed the viewport
+  // origin was the canvas origin, which it isn't.
+  let ex: number;
+  let ey: number;
+  const svg = svgRef.current;
+  if (svg) {
+    const rect = svg.getBoundingClientRect();
+    ex = (cursorScreenX - rect.left) / transform.scale;
+    ey = (cursorScreenY - rect.top) / transform.scale;
+  } else {
+    // First-render fallback (ref not attached yet) — next render corrects it
+    ex = (cursorScreenX - transform.x) / transform.scale;
+    ey = (cursorScreenY - transform.y) / transform.scale;
+  }
+
   const dx = Math.max(40, Math.abs(ex - sx) / 2);
   const d = `M ${sx},${sy} C ${sx + dx},${sy} ${ex - dx},${ey} ${ex},${ey}`;
 
