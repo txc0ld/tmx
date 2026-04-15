@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useMcpStore, MCP_DEFINITIONS, type McpTask, type McpType } from '@/stores/mcpStore';
 import { ptyWrite } from '@/utils/ipc';
+import { MCP_SYNC_INTERVAL_MS } from '@/utils/constants';
 import { colors, radius, spacing, typography, fonts, motion, alpha } from '@/design/tokens';
 import type { TodoTile as TodoTileType, TodoItem, AgentTile as AgentTileType, Wire } from '@/types';
 
@@ -32,7 +33,7 @@ export function TodoTile({ tile }: TodoTileProps) {
   useEffect(() => {
     if (mcpConnections.length === 0) return;
     useMcpStore.getState().syncAll();
-    const interval = setInterval(() => useMcpStore.getState().syncAll(), 5 * 60 * 1000);
+    const interval = setInterval(() => useMcpStore.getState().syncAll(), MCP_SYNC_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [mcpConnections.length]);
 

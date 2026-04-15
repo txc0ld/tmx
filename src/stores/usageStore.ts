@@ -143,36 +143,49 @@ export const useUsageStore = create<UsageState>((set, get) => ({
 }));
 
 // ─── Auto-track agent sessions from canvasStore ─────────
+// Exposed as an init hook (not a module-side-effect) so the subscription
+// can be cleaned up on unmount / HMR. Previously registered at import
+// time with no unsubscribe — duplicate subscriptions accumulated on HMR
+// reloads and on long sessions with multiple project switches.
 
-let trackedAgents = new Set<string>();
+let usageTrackerInstalled = false;
+const trackedAgents = new Set<string>();
 
-useCanvasStore.subscribe((state) => {
-  const pid = state.activeProject;
-  if (!pid) return;
-  const tiles = state.tiles[pid] || [];
-  const currentAgentIds = new Set<string>();
+export function initUsageTracking(): () => void {
+  if (usageTrackerInstalled) return () => {};
+  usageTrackerInstalled = true;
+  const unsub = useCanvasStore.subscribe((state) => {
+    const pid = state.activeProject;
+    if (!pid) return;
+    const tiles = state.tiles[pid] || [];
+    const currentAgentIds = new Set<string>();
 
-  for (const t of tiles) {
-    if (t.type !== 'agent') continue;
-    const agent = t as AgentTile;
-    currentAgentIds.add(agent.id);
+    for (const t of tiles) {
+      if (t.type !== 'agent') continue;
+      const agent = t as AgentTile;
+      currentAgentIds.add(agent.id);
 
-    if ((agent.status === 'working' || agent.status === 'spawning') && !trackedAgents.has(agent.id)) {
-      trackedAgents.add(agent.id);
-      useUsageStore.getState().trackSessionStart(agent.id, agent.agent);
+      if ((agent.status === 'working' || agent.status === 'spawning') && !trackedAgents.has(agent.id)) {
+        trackedAgents.add(agent.id);
+        useUsageStore.getState().trackSessionStart(agent.id, agent.agent);
+      }
+
+      if ((agent.status === 'done' || agent.status === 'error') && trackedAgents.has(agent.id)) {
+        trackedAgents.delete(agent.id);
+        useUsageStore.getState().trackSessionEnd(agent.id);
+      }
     }
 
-    if ((agent.status === 'done' || agent.status === 'error') && trackedAgents.has(agent.id)) {
-      trackedAgents.delete(agent.id);
-      useUsageStore.getState().trackSessionEnd(agent.id);
+    // Clean up tracked agents that were removed
+    for (const id of trackedAgents) {
+      if (!currentAgentIds.has(id)) {
+        trackedAgents.delete(id);
+        useUsageStore.getState().trackSessionEnd(id);
+      }
     }
-  }
-
-  // Clean up tracked agents that were removed
-  for (const id of trackedAgents) {
-    if (!currentAgentIds.has(id)) {
-      trackedAgents.delete(id);
-      useUsageStore.getState().trackSessionEnd(id);
-    }
-  }
-});
+  });
+  return () => {
+    usageTrackerInstalled = false;
+    unsub();
+  };
+}

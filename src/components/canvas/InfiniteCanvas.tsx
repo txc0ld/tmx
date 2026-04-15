@@ -3,6 +3,7 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { useCanvas } from '@/hooks/useCanvas';
 import { useWiringEngine } from '@/hooks/useWiringEngine';
 import { saveWorkspace } from '@/utils/ipc';
+import { AUTO_SNAPSHOT_INTERVAL_MS } from '@/utils/constants';
 import { screenToCanvas } from '@/utils/layout';
 import { colors, fonts, alpha } from '@/design/tokens';
 import { CanvasGrid } from './CanvasGrid';
@@ -138,7 +139,7 @@ export function InfiniteCanvas() {
           localStorage.removeItem(allKeys.shift()!);
         }
       } catch { /* storage full */ }
-    }, 5 * 60 * 1000);
+    }, AUTO_SNAPSHOT_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [activeProject]);
 

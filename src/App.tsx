@@ -16,8 +16,8 @@ import { SessionTimeline } from '@/components/timeline/SessionTimeline';
 import type { TileType, Tile } from '@/types';
 import type { TileTemplate } from '@/stores/templateStore';
 import '@/stores/clipboardStore'; // Initialize clipboard listener
-import '@/stores/usageStore'; // Initialize agent usage auto-tracking
 import { initMcpProjectSync } from '@/stores/mcpStore';
+import { initUsageTracking } from '@/stores/usageStore';
 
 export const TILE_DEFAULTS: Record<TileType, { w: number; h: number }> = {
   terminal: { w: 600, h: 400 },
@@ -94,10 +94,11 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
-  // Install MCP project-switch subscription at app mount (not module import).
-  // This avoids leaking a duplicate subscription if the module is re-loaded
-  // under HMR.
+  // Install per-app subscriptions at mount (not module import). Avoids
+  // leaking a duplicate subscription if the module is re-loaded under HMR
+  // or the app re-renders at the root.
   useEffect(() => initMcpProjectSync(), []);
+  useEffect(() => initUsageTracking(), []);
 
   // Load persisted projects then init canvas + restore workspace
   useEffect(() => {
