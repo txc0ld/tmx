@@ -159,6 +159,24 @@ fn read_dir_recursive(dir: &PathBuf, depth: u32, max_depth: u32) -> Vec<FileNode
     nodes
 }
 
+/// Return the byte size of a file. Used by EditorTile to decide whether
+/// to warn the user before loading a multi-megabyte file into Monaco.
+/// Scope-checked so callers can't probe arbitrary system paths.
+#[tauri::command]
+pub async fn get_file_size(path: String) -> Result<u64, String> {
+    if path.contains('\0') {
+        return Err("Invalid path".to_string());
+    }
+    let raw = PathBuf::from(shellexpand::tilde(&path).to_string());
+    let canonical_raw = raw.canonicalize().map_err(|e| format!("Path error: {}", e))?;
+    let canonical = strip_verbatim_prefix(&canonical_raw);
+    if !is_path_allowed(&canonical) {
+        return Err("Path is outside the allowed roots".to_string());
+    }
+    let metadata = fs::metadata(&canonical).map_err(|e| format!("Stat error: {}", e))?;
+    Ok(metadata.len())
+}
+
 /// Read a file as UTF-8 text, validated against the same allowed-roots
 /// list as `read_file_tree`. Used by EditorTile and DiffTile so users can
 /// open any file under their home directory (the Tauri fs plugin scope is

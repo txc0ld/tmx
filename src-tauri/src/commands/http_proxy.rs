@@ -1,7 +1,86 @@
+use parking_lot::Mutex;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 use url::Url;
+
+/// Client cache entry. Each cache hit reuses the underlying HTTP/TLS
+/// connection pool — saving ~20-40 ms per MCP sync request by skipping
+/// the TLS handshake. Address list is pinned at build time so the request
+/// can't be redirected to a rebound private IP between cache refreshes.
+struct CachedClient {
+    client: Client,
+    addrs: Vec<SocketAddr>,
+    created_at: Instant,
+}
+
+const CLIENT_CACHE_TTL: Duration = Duration::from_secs(60);
+const CLIENT_CACHE_MAX: usize = 16;
+
+fn client_cache() -> &'static Mutex<HashMap<String, CachedClient>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, CachedClient>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn addrs_match(a: &[SocketAddr], b: &[SocketAddr]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    // Order-sensitive by design — if DNS returns a different primary
+    // address, treat it as a rebind signal and rebuild the client.
+    a.iter().zip(b.iter()).all(|(x, y)| x == y)
+}
+
+fn build_client(host: &str, addrs: &[SocketAddr]) -> Result<Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .pool_idle_timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none());
+    if !addrs.is_empty() {
+        builder = builder.resolve_to_addrs(host, addrs);
+    }
+    builder.build().map_err(|e| format!("HTTP client error: {}", e))
+}
+
+/// Fetch a pooled client for the given host, building (and caching) a new
+/// one if we don't have a warm one or if the resolved addresses changed.
+/// The cache has a short TTL (60 s) so a long-lived DNS entry eventually
+/// gets re-validated, and is size-bounded so pathological use can't blow
+/// memory via infinite hosts.
+fn get_or_build_client(host: &str, port: u16, addrs: &[SocketAddr]) -> Result<Client, String> {
+    let key = format!("{}:{}", host, port);
+    let mut cache = client_cache().lock();
+
+    if let Some(entry) = cache.get(&key) {
+        if entry.created_at.elapsed() < CLIENT_CACHE_TTL && addrs_match(&entry.addrs, addrs) {
+            return Ok(entry.client.clone());
+        }
+    }
+
+    // Evict expired + oldest if we're at the cap
+    if cache.len() >= CLIENT_CACHE_MAX {
+        cache.retain(|_, entry| entry.created_at.elapsed() < CLIENT_CACHE_TTL);
+        if cache.len() >= CLIENT_CACHE_MAX {
+            if let Some(oldest_key) = cache.iter()
+                .min_by_key(|(_, v)| v.created_at)
+                .map(|(k, _)| k.clone())
+            {
+                cache.remove(&oldest_key);
+            }
+        }
+    }
+
+    let client = build_client(host, addrs)?;
+    cache.insert(key, CachedClient {
+        client: client.clone(),
+        addrs: addrs.to_vec(),
+        created_at: Instant::now(),
+    });
+    Ok(client)
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,21 +232,12 @@ pub async fn http_fetch(req: ProxyRequest) -> Result<ProxyResponse, String> {
         }
     }
 
-    let mut client_builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::none());
-
-    // Pin DNS resolution to the addresses we just validated so reqwest
-    // doesn't do a second (potentially rebinding) lookup at connect time.
-    if !pinned_addrs.is_empty() {
-        if let Some(host) = url.host_str() {
-            client_builder = client_builder.resolve_to_addrs(host, &pinned_addrs);
-        }
-    }
-
-    let client = client_builder
-        .build()
-        .map_err(|e| format!("HTTP client error: {}", e))?;
+    // Pool clients per (host, port) with pinned resolution. The cache
+    // reuses TLS connections across MCP sync calls while still rejecting
+    // DNS rebinds (cache invalidates if resolved IPs drift).
+    let host = url.host_str().unwrap_or("");
+    let port = url.port_or_known_default().unwrap_or(0);
+    let client = get_or_build_client(host, port, &pinned_addrs)?;
 
     let method = req.method.as_deref().unwrap_or("GET").to_ascii_uppercase();
 

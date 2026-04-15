@@ -1,6 +1,13 @@
 use portable_pty::{Child, MasterPty, PtySize};
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
+use std::time::Duration;
+
+/// Hard cap on concurrent PTY sessions. Each PTY owns a reader thread, a
+/// writer, file descriptors, and a terminal buffer. The macOS soft fd limit
+/// is 256 per process; 64 PTYs leaves headroom for Tauri's own fds and the
+/// webview's fds. Breach → pty_spawn returns an error the UI can toast.
+pub const MAX_CONCURRENT_PTYS: usize = 64;
 
 struct PtyEntry {
     writer: Box<dyn Write + Send>,
@@ -25,6 +32,12 @@ impl PtyManager {
         master: Box<dyn MasterPty + Send>,
         child: Box<dyn Child + Send>,
     ) -> Result<(), String> {
+        if self.sessions.len() >= MAX_CONCURRENT_PTYS {
+            return Err(format!(
+                "Too many active PTYs ({} in use, max {}). Close a terminal or agent tile before spawning more.",
+                self.sessions.len(), MAX_CONCURRENT_PTYS
+            ));
+        }
         if self.sessions.contains_key(&id) {
             return Err(format!("PTY session {} already exists", id));
         }
@@ -37,12 +50,29 @@ impl PtyManager {
     pub fn write(&mut self, id: &str, data: &[u8]) -> Result<(), String> {
         let entry = self.sessions.get_mut(id)
             .ok_or_else(|| format!("PTY session not found: {}", id))?;
-        // Chunk writes to avoid Windows PTY pipe buffer overflow
+        // Chunk writes to 256 bytes to avoid Windows PTY pipe buffer overflow.
+        // Retry transient WouldBlock/Interrupted errors a handful of times
+        // with a short sleep — without this, a busy PTY can silently drop
+        // bytes from large pastes or multi-agent writes.
         for chunk in data.chunks(256) {
-            entry.writer.write_all(chunk)
-                .map_err(|e| format!("Write error: {}", e))?;
-            entry.writer.flush()
-                .map_err(|e| format!("Flush error: {}", e))?;
+            let mut retries = 5u32;
+            loop {
+                match entry.writer.write_all(chunk) {
+                    Ok(()) => break,
+                    Err(e)
+                        if (e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::Interrupted)
+                            && retries > 0 =>
+                    {
+                        retries -= 1;
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(e) => return Err(format!("Write error: {}", e)),
+                }
+            }
+            if let Err(e) = entry.writer.flush() {
+                // Flush errors are usually "pipe closed" on a dying shell.
+                return Err(format!("Flush error: {}", e));
+            }
         }
         Ok(())
     }
