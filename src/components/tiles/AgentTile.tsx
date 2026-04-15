@@ -333,40 +333,7 @@ export function AgentTile({ tile }: AgentTileProps) {
         </span>
 
         {/* Pipe context from incoming wires */}
-        <button
-          onClick={() => {
-            if (!tile.ptyId) return;
-            const store = useCanvasStore.getState();
-            const pid = store.activeProject;
-            const wires = store.wires[pid] || [];
-            const incoming = wires.filter(w => w.toTile === tile.id && w.wireType === 'context-pipe');
-            if (incoming.length === 0) return;
-            let context = '';
-            for (const wire of incoming) {
-              const tiles = store.tiles[pid] || [];
-              const src = tiles.find(t => t.id === wire.fromTile);
-              if (!src) continue;
-              const srcPtyId = 'ptyId' in src ? (src as { ptyId?: string }).ptyId : undefined;
-              if (!srcPtyId) continue;
-              const data = store.wireData[srcPtyId] || '';
-              if (data) {
-                context += `--- Piped from ${src.title || src.id} ---\n${data}\n`;
-              }
-            }
-            if (context) {
-              ptyWrite(tile.ptyId, context).catch(() => {});
-            }
-          }}
-          title="Pipe context from connected tiles"
-          style={{
-            background: 'none', border: `1px solid ${colors.outlineGhost}`,
-            borderRadius: radius.sm, cursor: 'pointer',
-            color: colors.secondary, fontSize: '0.5625rem', padding: '1px 4px',
-            fontFamily: fonts.mono,
-          }}
-        >
-          Pipe
-        </button>
+        <PipeContextButton tileId={tile.id} ptyId={tile.ptyId} />
 
         {/* Config gear */}
         <button
@@ -419,5 +386,101 @@ export function AgentTile({ tile }: AgentTileProps) {
         style={{ flex: 1, background: colors.bg, padding: '4px 0 0 4px', cursor: 'text' }}
       />
     </div>
+  );
+}
+
+// ─── Pipe Context Button ─────────────────────────────────────────────
+// Pulls accumulated output from any tile wired into this agent (Terminal,
+// Runner, or another Agent via context-pipe) and writes it into the
+// agent's PTY as a labelled context block.
+//
+// Glows accent-colored when there's unread data available to pipe — so
+// users discover it. After piping, we track 'pipedUpTo' (byte offset)
+// per source so the button dims again until more output arrives.
+function PipeContextButton({ tileId, ptyId }: { tileId: string; ptyId: string | undefined }) {
+  const wires = useCanvasStore(s => s.wires[s.activeProject] || []);
+  const wireData = useCanvasStore(s => s.wireData);
+  const tiles = useCanvasStore(s => s.tiles[s.activeProject] || []);
+  const [pipedOffsets, setPipedOffsets] = useState<Record<string, number>>({});
+
+  const incoming = wires.filter(w => w.toTile === tileId && w.wireType === 'context-pipe');
+
+  // Compute unread bytes available across all incoming wires
+  let unreadBytes = 0;
+  const sources: { srcPtyId: string; srcName: string; fresh: string }[] = [];
+  for (const wire of incoming) {
+    const src = tiles.find(t => t.id === wire.fromTile);
+    if (!src) continue;
+    const srcPtyId = 'ptyId' in src ? (src as { ptyId?: string }).ptyId : undefined;
+    if (!srcPtyId) continue;
+    const data = wireData[srcPtyId] || '';
+    const offset = pipedOffsets[srcPtyId] || 0;
+    const fresh = data.slice(offset);
+    if (fresh.length > 0) {
+      unreadBytes += fresh.length;
+      sources.push({ srcPtyId, srcName: src.title || src.type, fresh });
+    }
+  }
+
+  const hasIncoming = incoming.length > 0;
+  const hasUnread = unreadBytes > 0;
+
+  const handleClick = () => {
+    if (!ptyId || sources.length === 0) return;
+    let context = '';
+    const newOffsets = { ...pipedOffsets };
+    for (const { srcPtyId, srcName, fresh } of sources) {
+      context += `--- Piped from ${srcName} ---\n${fresh}\n`;
+      newOffsets[srcPtyId] = (pipedOffsets[srcPtyId] || 0) + fresh.length;
+    }
+    ptyWrite(ptyId, context).catch(() => {});
+    setPipedOffsets(newOffsets);
+    // Toast confirmation
+    import('@/stores/toastStore').then(({ useToastStore }) => {
+      useToastStore.getState().addToast(
+        `Piped ${unreadBytes} bytes from ${sources.length} source${sources.length === 1 ? '' : 's'}`,
+        'success',
+      );
+    });
+  };
+
+  // Don't render at all if no incoming context-pipe wires
+  if (!hasIncoming) return null;
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={!hasUnread || !ptyId}
+      title={hasUnread
+        ? `Click to pipe ${unreadBytes} bytes from ${sources.length} connected tile${sources.length === 1 ? '' : 's'}`
+        : 'No new context to pipe'}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 3,
+        background: hasUnread ? alpha(colors.primary, 20) : 'none',
+        border: `1px solid ${hasUnread ? colors.primary : colors.outlineGhost}`,
+        borderRadius: radius.sm,
+        cursor: hasUnread ? 'pointer' : 'default',
+        color: hasUnread ? colors.primary : colors.secondary,
+        fontSize: '0.625rem',
+        padding: '2px 6px',
+        fontFamily: fonts.mono,
+        fontWeight: hasUnread ? 600 : 500,
+        transition: 'all 150ms ease',
+        boxShadow: hasUnread ? `0 0 8px ${alpha(colors.primary, 30)}` : 'none',
+        animation: hasUnread ? 'pipe-pulse 2s ease-in-out infinite' : 'none',
+      }}
+    >
+      <span style={{
+        width: 5, height: 5, borderRadius: '50%',
+        background: hasUnread ? colors.primary : colors.secondary,
+      }} />
+      Pipe{hasUnread ? ` (${unreadBytes > 999 ? `${Math.round(unreadBytes/1000)}k` : unreadBytes})` : ''}
+      <style>{`
+        @keyframes pipe-pulse {
+          0%, 100% { box-shadow: 0 0 8px ${alpha(colors.primary, 30)}; }
+          50%      { box-shadow: 0 0 14px ${alpha(colors.primary, 50)}; }
+        }
+      `}</style>
+    </button>
   );
 }

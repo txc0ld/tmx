@@ -52,10 +52,27 @@ TerminalX picks the right wire type automatically based on what you connect. You
 
 **What you wire:** Terminal → Agent (or Runner → Agent)
 
-**What it does:** Everything printed in the terminal gets piped into the agent as context when the agent finishes its next task. Think of it as giving your agent a live view of your shell.
+**What it does:** Accumulates everything the terminal prints into a buffer. You **explicitly pipe it into the agent** by clicking the glowing **"Pipe"** button in the agent's tile header.
 
-**Example prompt to use in the agent:**
-> "Review what I just ran in the terminal and suggest improvements."
+**How the Pipe button works:**
+
+- The Pipe button appears on any agent tile with an incoming context-pipe wire
+- It **glows accent-colored and shows a byte count** (`Pipe (142)`) whenever there's fresh terminal output to pipe
+- Click it → the accumulated output is injected into the agent with a `--- Piped from <source> ---` header
+- A toast confirms how many bytes were piped
+- After clicking, the button dims until more output arrives — so you can pipe incrementally
+
+**Why explicit?** Auto-piping every keystroke would spam the agent. Manual pipe means YOU decide when the agent gets fresh context — usually right before asking it a question.
+
+**Example workflow:**
+
+1. Wire Terminal → Claude agent
+2. Run a command in the terminal: `npm test`
+3. See failing test output
+4. Pipe button glows with byte count
+5. Click Pipe → test output goes into Claude's context
+6. Type in Claude: "Fix the failing tests above"
+7. Claude reads the piped output + your prompt → fixes the code
 
 ---
 
@@ -232,6 +249,12 @@ Slack #tasks  →  Todo tile  →  Claude agent  →  Git tile
 ### My wire snaps to a different tile than I intended
 
 - The drop target is the tile whose **left edge** you released over. If two tiles are close together, zoom in (scroll up) to give yourself more space, or drag the tiles apart first.
+
+### I wired Terminal → Agent but nothing is happening
+
+That's by design for `context-pipe` — the wire just *connects* them. You need to **click the glowing Pipe button** in the agent tile's header to actually inject the terminal's output. The button shows a byte count (`Pipe (142)`) whenever there's fresh output available.
+
+If you don't see a Pipe button on the agent tile, the wire wasn't created correctly. Hover the tiles — the wire should be visible as a line between them. Right-click it to delete and re-wire.
 
 ### The agent finishes but the wire doesn't fire
 
