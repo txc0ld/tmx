@@ -75,13 +75,6 @@ impl PtyManager {
         }
     }
 
-    pub fn active_count(&self) -> usize {
-        self.sessions.len()
-    }
-
-    pub fn session_ids(&self) -> Vec<String> {
-        self.sessions.keys().cloned().collect()
-    }
 }
 
 impl Drop for PtyManager {

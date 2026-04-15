@@ -4,11 +4,9 @@ use super::pty_manager::PtyManager;
 use notify::RecommendedWatcher;
 use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::Arc;
 use tauri::AppHandle;
 
 pub struct AppState {
-    pub app_handle: AppHandle,
     pub pty_manager: Mutex<PtyManager>,
     pub agent_registry: Mutex<HashMap<String, AgentInfo>>,
     pub timeline: Mutex<Vec<TimelineEvent>>,
@@ -16,9 +14,8 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(app_handle: AppHandle) -> Self {
+    pub fn new(_app_handle: AppHandle) -> Self {
         Self {
-            app_handle,
             pty_manager: Mutex::new(PtyManager::new()),
             agent_registry: Mutex::new(HashMap::new()),
             timeline: Mutex::new(Vec::new()),

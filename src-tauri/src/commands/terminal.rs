@@ -1,19 +1,9 @@
 use crate::state::app_state::AppState;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::io::Read;
-use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PtySession {
-    pub id: String,
-    pub shell: String,
-    pub cwd: String,
-    pub cols: u16,
-    pub rows: u16,
-}
 
 #[derive(Debug, Serialize, Clone)]
 pub struct PtyOutput {

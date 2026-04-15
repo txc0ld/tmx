@@ -1,7 +1,5 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use parking_lot::Mutex;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
