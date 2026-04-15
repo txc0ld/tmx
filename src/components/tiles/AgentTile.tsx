@@ -5,10 +5,13 @@ import '@xterm/xterm/css/xterm.css';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { usePty } from '@/hooks/usePty';
+import { useCanvasZoom } from '@/hooks/useCanvasZoom';
 import { agentSpawn, onAgentStatus, ptyWrite } from '@/utils/ipc';
 import { colors, fonts, spacing, typography, radius, agentColors, alpha } from '@/design/tokens';
 import { attachKeyboardCapture } from './xtermInput';
 import type { AgentTile as AgentTileType } from '@/types';
+
+const BASE_FONT_SIZE = 13;
 
 function isLightTheme(t: { bg: string }): boolean {
   const hex = t.bg.replace('#', '');
@@ -48,6 +51,8 @@ export function AgentTile({ tile }: AgentTileProps) {
   const fitRef = useRef<FitAddon | null>(null);
   const spawnedRef = useRef(false);
   const resizeTimerRef = useRef<number | null>(null);
+  const zoomFitTimerRef = useRef<number | null>(null);
+  const canvasZoom = useCanvasZoom();
   const [configOpen, setConfigOpen] = useState(false);
   const [customCmd, setCustomCmd] = useState(tile.command || '');
 
@@ -155,7 +160,7 @@ export function AgentTile({ tile }: AgentTileProps) {
     const terminal = new Terminal({
       theme: getXtermTheme(),
       fontFamily: fonts.mono,
-      fontSize: 13,
+      fontSize: BASE_FONT_SIZE * canvasZoom,
       lineHeight: 1.3,
       cursorBlink: true,
       cursorStyle: 'bar',
@@ -292,6 +297,28 @@ export function AgentTile({ tile }: AgentTileProps) {
     };
   }, [resize]);
 
+  // Canvas zoom → xterm fontSize + debounced fit + PTY resize. Keeps agent
+  // tile text crisp at any outer zoom level.
+  useEffect(() => {
+    const term = termRef.current;
+    const fit = fitRef.current;
+    if (!term || !fit) return;
+    const targetFont = BASE_FONT_SIZE * canvasZoom;
+    if (term.options.fontSize !== targetFont) {
+      term.options.fontSize = targetFont;
+    }
+    if (zoomFitTimerRef.current) clearTimeout(zoomFitTimerRef.current);
+    zoomFitTimerRef.current = window.setTimeout(() => {
+      try { fit.fit(); resize(term.cols, term.rows); } catch { /* disposed */ }
+    }, 150);
+    return () => {
+      if (zoomFitTimerRef.current) {
+        clearTimeout(zoomFitTimerRef.current);
+        zoomFitTimerRef.current = null;
+      }
+    };
+  }, [canvasZoom, resize]);
+
   // Elapsed timer — use getState() to avoid effect cascade from tile.elapsed dep
   useEffect(() => {
     if (tile.status !== 'working') return;
@@ -409,11 +436,24 @@ export function AgentTile({ tile }: AgentTileProps) {
         </div>
       )}
 
-      {/* Terminal */}
-      <div
-        ref={containerRef}
-        style={{ flex: 1, background: colors.bg, padding: '4px 0 0 4px', cursor: 'text' }}
-      />
+      {/* Terminal — inflate wrapper keeps xterm backing store at
+          canvasZoom × dimensions so text stays crisp when the outer
+          canvas zooms. See TerminalTile for the full rationale. */}
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: colors.bg }}>
+        <div style={{
+          position: 'absolute',
+          top: 0, left: 0,
+          width: `${100 * canvasZoom}%`,
+          height: `${100 * canvasZoom}%`,
+          transform: `scale(${1 / canvasZoom})`,
+          transformOrigin: '0 0',
+        }}>
+          <div
+            ref={containerRef}
+            style={{ width: '100%', height: '100%', padding: '4px 0 0 4px', cursor: 'text' }}
+          />
+        </div>
+      </div>
     </div>
   );
 }

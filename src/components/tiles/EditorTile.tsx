@@ -4,6 +4,11 @@ import { readFileText, writeFileText, getFileSize } from '@/utils/ipc';
 import { colors, spacing, typography } from '@/design/tokens';
 import type { EditorTile as EditorTileType } from '@/types';
 
+// Monaco uses DOM divs for text rendering (not canvas), so CSS `zoom`
+// on the outer canvas layer re-rasterizes its text natively — no inner
+// fontSize bump needed. Minimap is disabled, which is the only canvas
+// layer that would stretch-blur under outer zoom.
+
 // Tiered load strategy — Monaco's sync tokenizer pass costs roughly
 // 100-200 ms per MB on modern hardware, and semantic/bracket features add
 // more. We match thresholds to perceived pain thresholds:

@@ -360,13 +360,23 @@ export function InfiniteCanvas() {
     >
       <CanvasGrid transform={transform} />
 
-      {/* Transform layer — tiles live in canvas coordinate space */}
+      {/* Transform layer — tiles live in canvas coordinate space.
+          Uses CSS `zoom` instead of `transform: scale` so text, Monaco,
+          and DOM content re-rasterize at the new size (crisp at any
+          zoom) instead of being bitmap-stretched. Canvas-based content
+          like xterm WebGL doesn't benefit from outer zoom on its own —
+          those tiles apply a counter-zoom + internal font-size bump
+          (see useCanvasZoom + TerminalTile / EditorTile).
+
+          Translate stays in `transform` because we want pan in raw
+          screen pixels (independent of zoom), not zoom-space pixels. */}
       <div
         data-canvas-layer="transform"
         style={{
           position: 'absolute',
           inset: 0,
-          transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+          zoom: transform.scale,
+          transform: `translate(${transform.x}px, ${transform.y}px)`,
           transformOrigin: '0 0',
         }}
       >
