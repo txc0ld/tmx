@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileNode {
@@ -21,6 +21,7 @@ const IGNORED_DIRS: &[&str] = &[
     "node_modules", ".git", "target", "dist", ".next",
     "__pycache__", ".turbo", "build", ".cache",
 ];
+const MAX_TEXT_WRITE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Read directory tree recursively (max depth 4).
 /// Rejects paths that resolve outside the user's home / well-known project roots
@@ -60,27 +61,46 @@ pub async fn read_file_tree(
 }
 
 fn is_path_allowed(canonical: &std::path::Path) -> bool {
+    // TerminalX is a terminal/cmd/powershell upgrade — users need broad access
+    // to do real work. We scope out only the obviously non-user paths; we do
+    // not try to sandbox the user's own disks.
     if let Some(home) = dirs::home_dir() {
         let home_clean = strip_verbatim_prefix(&home);
         if canonical.starts_with(&home_clean) { return true; }
     }
     #[cfg(windows)]
     {
-        // Allow common Windows roots: user profile dir, project dirs under drives
-        let roots = [
-            r"C:\Users", r"D:\", r"E:\",       // drive letters
-            r"C:\workspace", r"C:\src",
-        ];
-        if roots.iter().any(|r| canonical.starts_with(r)) { return true; }
+        // Allow any drive letter (A-Z) at the root. UNC verbatim prefix is
+        // already stripped upstream, and mapped/network drives get picked up
+        // here too.
+        let s = canonical.to_string_lossy();
+        if let Some(bytes) = s.as_bytes().get(..3) {
+            if bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/') {
+                return true;
+            }
+        }
+        // Bare UNC path \\server\share\...
+        if s.starts_with(r"\\") { return true; }
     }
     #[cfg(not(windows))]
     {
+        // Broad list covering macOS/Linux layouts: temps, user roots, mounts,
+        // container paths, common tool dirs, system config. We do NOT allow
+        // `/proc`, `/sys`, `/dev` (not real files) or `/root`.
+        //
+        // On macOS, `/tmp` and `/var` are symlinks to `/private/tmp` and
+        // `/private/var` — canonicalize() follows those, so we include the
+        // resolved forms explicitly.
         let roots = [
-            "/tmp", "/var/folders",               // macOS temp
-            "/Users",                             // macOS home root
-            "/Volumes",                           // external drives
-            "/workspace", "/workspaces", "/srv",  // common container mounts
-            "/home",                              // Linux home root
+            "/tmp", "/var/folders", "/var/tmp",           // linux temp
+            "/private/tmp", "/private/var",               // macOS resolved temp
+            "/Users", "/Volumes",                          // macOS user + external
+            "/Library", "/Applications",                   // macOS system (read-only-ish)
+            "/home",                                        // linux home root
+            "/mnt", "/media",                              // mounts
+            "/workspace", "/workspaces", "/srv",           // container paths
+            "/opt", "/usr/local", "/usr/share", "/etc",    // tools & config
+            "/data",
         ];
         if roots.iter().any(|r| canonical.starts_with(r)) { return true; }
     }
@@ -173,6 +193,9 @@ pub async fn write_file_text(path: String, contents: String) -> Result<(), Strin
     if path.contains('\0') {
         return Err("Invalid path".to_string());
     }
+    if contents.len() > MAX_TEXT_WRITE_BYTES {
+        return Err(format!("File too large ({} bytes - 10 MB cap)", contents.len()));
+    }
     let raw = PathBuf::from(shellexpand::tilde(&path).to_string());
     // For writes the file may not exist yet — canonicalize the parent dir
     // and rejoin with the file name.
@@ -184,8 +207,18 @@ pub async fn write_file_text(path: String, contents: String) -> Result<(), Strin
         return Err("Path is outside the allowed roots".to_string());
     }
     let final_path = canonical_parent.join(file_name);
-    if final_path.is_dir() {
-        return Err("Path is a directory".to_string());
+    if let Ok(metadata) = fs::symlink_metadata(&final_path) {
+        if metadata.file_type().is_symlink() {
+            return Err("Refusing to write through a symlink".to_string());
+        }
+        if metadata.is_dir() {
+            return Err("Path is a directory".to_string());
+        }
+        let canonical_final_raw = final_path.canonicalize().map_err(|e| format!("Path error: {}", e))?;
+        let canonical_final = strip_verbatim_prefix(&canonical_final_raw);
+        if !is_path_allowed(&canonical_final) {
+            return Err("Path is outside the allowed roots".to_string());
+        }
     }
     fs::write(&final_path, contents).map_err(|e| format!("Write error: {}", e))
 }
@@ -202,19 +235,19 @@ pub async fn watch_directory(
     if path.contains('\0') {
         return Err("Invalid path".to_string());
     }
-    let expanded = shellexpand::tilde(&path).to_string();
-
-    // Validate the path exists and is a directory before creating a watcher
-    let watch_path = PathBuf::from(&expanded);
-    if !watch_path.exists() {
-        return Err(format!("Path does not exist: {}", expanded));
+    let raw = PathBuf::from(shellexpand::tilde(&path).to_string());
+    let canonical_raw = raw.canonicalize().map_err(|e| format!("Path error: {}", e))?;
+    let watch_path = strip_verbatim_prefix(&canonical_raw);
+    if !is_path_allowed(&watch_path) {
+        return Err("Path is outside the allowed roots".to_string());
     }
     if !watch_path.is_dir() {
-        return Err(format!("Path is not a directory: {}", expanded));
+        return Err(format!("Path is not a directory: {}", watch_path.to_string_lossy()));
     }
+    let watch_key = watch_path.to_string_lossy().to_string();
 
     // Skip if already watching this path
-    if state.watchers.lock().contains_key(&expanded) {
+    if state.watchers.lock().contains_key(&watch_key) {
         return Ok(());
     }
 
@@ -237,7 +270,7 @@ pub async fn watch_directory(
         .map_err(|e| format!("Watch error: {}", e))?;
 
     // Store watcher in AppState for proper cleanup
-    state.watchers.lock().insert(expanded, watcher);
+    state.watchers.lock().insert(watch_key, watcher);
 
     Ok(())
 }
@@ -248,9 +281,78 @@ pub async fn unwatch_directory(
     state: tauri::State<'_, crate::state::app_state::AppState>,
     path: String,
 ) -> Result<(), String> {
+    if path.contains('\0') {
+        return Err("Invalid path".to_string());
+    }
     let expanded = shellexpand::tilde(&path).to_string();
+    let key = PathBuf::from(&expanded)
+        .canonicalize()
+        .map(|p| strip_verbatim_prefix(&p).to_string_lossy().to_string())
+        .unwrap_or(expanded);
     // Removing the watcher drops it, which stops watching
-    state.watchers.lock().remove(&expanded)
+    state.watchers.lock().remove(&key)
         .ok_or_else(|| format!("No watcher found for: {}", path))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn home_directory_is_allowed() {
+        let home = dirs::home_dir().expect("home dir available in test env");
+        assert!(is_path_allowed(&home));
+        assert!(is_path_allowed(&home.join("some-file.txt")));
+        assert!(is_path_allowed(&home.join("projects/terminalx")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_drive_letters_are_allowed() {
+        assert!(is_path_allowed(&PathBuf::from(r"C:\Users\foo")));
+        assert!(is_path_allowed(&PathBuf::from(r"D:\")));
+        assert!(is_path_allowed(&PathBuf::from(r"E:\data\file.txt")));
+        // All drive letters should be allowed now — it's a power-user terminal
+        assert!(is_path_allowed(&PathBuf::from(r"Z:\backup")));
+        assert!(is_path_allowed(&PathBuf::from(r"F:\external")));
+        // UNC network shares
+        assert!(is_path_allowed(&PathBuf::from(r"\\server\share\file")));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn macos_and_linux_roots_are_allowed() {
+        assert!(is_path_allowed(&PathBuf::from("/Users/foo/code")));
+        assert!(is_path_allowed(&PathBuf::from("/Volumes/External/file")));
+        assert!(is_path_allowed(&PathBuf::from("/home/foo/code")));
+        assert!(is_path_allowed(&PathBuf::from("/tmp/scratch")));
+        assert!(is_path_allowed(&PathBuf::from("/opt/homebrew/bin/git")));
+        assert!(is_path_allowed(&PathBuf::from("/mnt/disk1/data")));
+        // macOS: /tmp canonicalizes to /private/tmp — must be explicitly allowed
+        assert!(is_path_allowed(&PathBuf::from("/private/tmp/foo")));
+        assert!(is_path_allowed(&PathBuf::from("/private/var/folders/xx")));
+        // System dirs users commonly need
+        assert!(is_path_allowed(&PathBuf::from("/Library/Logs")));
+        assert!(is_path_allowed(&PathBuf::from("/Applications/MyApp.app")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_rejects_non_path_strings() {
+        // These aren't real absolute paths — allowlist should reject.
+        assert!(!is_path_allowed(&PathBuf::from("not-a-path")));
+        // Only absolute drive-letter paths — no shell shortcuts
+        assert!(!is_path_allowed(&PathBuf::from("C:no-slash")));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_rejects_sensitive_virtual_filesystems() {
+        assert!(!is_path_allowed(&PathBuf::from("/proc/1/environ")));
+        assert!(!is_path_allowed(&PathBuf::from("/sys/class/net")));
+        assert!(!is_path_allowed(&PathBuf::from("/dev/null")));
+        assert!(!is_path_allowed(&PathBuf::from("/root/.ssh/id_rsa")));
+    }
 }

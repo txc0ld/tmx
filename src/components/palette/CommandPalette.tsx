@@ -11,6 +11,7 @@ import { colors, glass, radius, spacing, typography, fonts, motion as motionToke
 import { saveSnapshot, listSnapshots, loadSnapshot } from '@/utils/ipc';
 import { save as dialogSave, open as dialogOpen } from '@tauri-apps/plugin-dialog';
 import { readFileText, writeFileText } from '@/utils/ipc';
+import { validateWorkspaceImport, WorkspaceImportError } from '@/utils/workspaceImport';
 import type { TileType } from '@/types';
 
 interface CommandPaletteProps {
@@ -203,17 +204,30 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
           });
           if (!filePath) return;
           const raw = await readFileText(filePath as string);
-          const data = JSON.parse(raw);
-          if (!data || typeof data.version !== 'number' || !Array.isArray(data.tiles)) {
-            alert('Invalid workspace file.');
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            alert('Workspace file is not valid JSON.');
             return;
           }
+          let validated;
+          try {
+            validated = validateWorkspaceImport(parsed);
+          } catch (err) {
+            const msg = err instanceof WorkspaceImportError ? err.message : 'Invalid workspace file';
+            alert(`Import rejected: ${msg}`);
+            return;
+          }
+          const exportedAt = typeof (parsed as { exportedAt?: unknown }).exportedAt === 'string'
+            ? (parsed as { exportedAt: string }).exportedAt
+            : new Date().toISOString();
           useCanvasStore.getState().loadSnapshot({
             name: '__import__',
-            tiles: data.tiles,
-            wires: data.wires ?? [],
-            transform: data.transform ?? { x: 0, y: 0, scale: 1 },
-            createdAt: data.exportedAt ?? new Date().toISOString(),
+            tiles: validated.tiles,
+            wires: validated.wires,
+            transform: validated.transform,
+            createdAt: exportedAt,
           });
           useTimelineStore.getState().recordEvent('snapshot-saved', `Imported workspace from file`);
         } catch (e) {
@@ -546,9 +560,11 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
+      if (results.length === 0) return;
       setSelectedIndex(i => (i + 1) % results.length);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      if (results.length === 0) return;
       setSelectedIndex(i => (i - 1 + results.length) % results.length);
     } else if (e.key === 'Enter' && results[selectedIndex]) {
       e.preventDefault();

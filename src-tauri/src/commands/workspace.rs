@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 const MAX_SNAPSHOTS: usize = 10000;
+const MAX_WORKSPACE_JSON_BYTES: usize = 10 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,10 +60,40 @@ async fn atomic_write(path: &std::path::Path, contents: &str) -> Result<(), Stri
     tokio::fs::write(&tmp, contents)
         .await
         .map_err(|e| format!("Write error: {}", e))?;
-    tokio::fs::rename(&tmp, path)
-        .await
-        .map_err(|e| format!("Rename error: {}", e))?;
+    match tokio::fs::rename(&tmp, path).await {
+        Ok(()) => Ok(()),
+        Err(first_err) => {
+            if path.exists() {
+                if let Err(remove_err) = tokio::fs::remove_file(path).await {
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    return Err(format!("Rename error: {}; cleanup failed: {}", first_err, remove_err));
+                }
+                if let Err(rename_err) = tokio::fs::rename(&tmp, path).await {
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    return Err(format!("Rename error: {}", rename_err));
+                }
+                Ok(())
+            } else {
+                let _ = tokio::fs::remove_file(&tmp).await;
+                Err(format!("Rename error: {}", first_err))
+            }
+        }
+    }
+}
+
+fn ensure_json_size(json: &str) -> Result<(), String> {
+    if json.len() > MAX_WORKSPACE_JSON_BYTES {
+        return Err(format!("Workspace too large ({} bytes, max {}MB)", json.len(), MAX_WORKSPACE_JSON_BYTES / (1024 * 1024)));
+    }
     Ok(())
+}
+
+async fn read_workspace_json(path: PathBuf) -> Result<String, String> {
+    let metadata = tokio::fs::metadata(&path).await.map_err(|e| format!("Stat error: {}", e))?;
+    if metadata.len() as usize > MAX_WORKSPACE_JSON_BYTES {
+        return Err(format!("Workspace file too large ({} bytes, max {}MB)", metadata.len(), MAX_WORKSPACE_JSON_BYTES / (1024 * 1024)));
+    }
+    tokio::fs::read_to_string(path).await.map_err(|e| format!("Read error: {}", e))
 }
 
 #[tauri::command]
@@ -72,6 +103,7 @@ pub async fn save_workspace(state: WorkspaceState) -> Result<(), String> {
     let path = workspace_dir().join(format!("{}.json", state.project_id));
     let json = serde_json::to_string_pretty(&state)
         .map_err(|e| format!("Serialize error: {}", e))?;
+    ensure_json_size(&json)?;
     atomic_write(&path, &json).await
 }
 
@@ -82,7 +114,7 @@ pub async fn load_workspace(project_id: String) -> Result<Option<WorkspaceState>
     if !path.exists() {
         return Ok(None);
     }
-    let json = tokio::fs::read_to_string(path).await.map_err(|e| format!("Read error: {}", e))?;
+    let json = read_workspace_json(path).await?;
     let state = serde_json::from_str(&json).map_err(|e| format!("Parse error: {}", e))?;
     Ok(Some(state))
 }
@@ -101,6 +133,7 @@ pub async fn save_snapshot(project_id: String, name: String, state: WorkspaceSta
     let path = snapshots_dir.join(format!("{}.json", name));
     let json = serde_json::to_string_pretty(&state)
         .map_err(|e| format!("Serialize error: {}", e))?;
+    ensure_json_size(&json)?;
     atomic_write(&path, &json).await
 }
 
@@ -112,7 +145,7 @@ pub async fn load_snapshot(project_id: String, name: String) -> Result<Option<Wo
     if !path.exists() {
         return Ok(None);
     }
-    let json = tokio::fs::read_to_string(path).await.map_err(|e| format!("Read error: {}", e))?;
+    let json = read_workspace_json(path).await?;
     let state = serde_json::from_str(&json).map_err(|e| format!("Parse error: {}", e))?;
     Ok(Some(state))
 }
@@ -150,4 +183,51 @@ pub async fn list_snapshots(project_id: String) -> Result<Vec<String>, String> {
         }
     }
     Ok(names)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_name_rejects_path_escapes() {
+        assert!(sanitize_name("..").is_err());
+        assert!(sanitize_name(".").is_err());
+        assert!(sanitize_name("..\\etc\\passwd").is_err());
+        assert!(sanitize_name("../etc/passwd").is_err());
+        assert!(sanitize_name("foo/bar").is_err());
+        assert!(sanitize_name("foo\\bar").is_err());
+    }
+
+    #[test]
+    fn sanitize_name_rejects_dangerous_chars() {
+        assert!(sanitize_name("").is_err());
+        assert!(sanitize_name("bad\0byte").is_err());
+        assert!(sanitize_name("C:name").is_err(), "colon looks like a drive");
+        assert!(sanitize_name("foo..bar").is_err(), "embedded double-dot");
+    }
+
+    #[test]
+    fn sanitize_name_accepts_normal_names() {
+        assert!(sanitize_name("default").is_ok());
+        assert!(sanitize_name("my-project").is_ok());
+        assert!(sanitize_name("project_1").is_ok());
+        assert!(sanitize_name("Work Session 2026-04-15").is_ok());
+    }
+
+    #[test]
+    fn sanitize_name_enforces_length() {
+        assert!(sanitize_name(&"a".repeat(255)).is_ok());
+        assert!(sanitize_name(&"a".repeat(256)).is_err());
+    }
+
+    #[test]
+    fn ensure_json_size_enforces_cap() {
+        let small = "a".repeat(1024);
+        assert!(ensure_json_size(&small).is_ok());
+
+        let huge = "a".repeat(MAX_WORKSPACE_JSON_BYTES + 1);
+        let err = ensure_json_size(&huge).expect_err("huge payload must be rejected");
+        assert!(err.contains("too large"));
+    }
 }

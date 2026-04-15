@@ -389,3 +389,91 @@ pub async fn git_commit(repo_path: String, message: String) -> Result<String, St
         Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn git_url_rejects_remote_helpers() {
+        // `ext::` can execute arbitrary commands when git clones — CVE-class.
+        assert!(validate_git_url("ext::sh -c 'rm -rf /'").is_err());
+        assert!(validate_git_url("transport::tar /etc/passwd").is_err());
+        assert!(validate_git_url("EXT::anything").is_err(), "case-insensitive");
+        // Scheme::ext:: form (URL that starts with scheme but immediately
+        // hands off to an ext:: helper).
+        assert!(validate_git_url("https://ext::evil").is_err());
+    }
+
+    #[test]
+    fn git_url_rejects_option_like_inputs() {
+        // A URL starting with `-` would be interpreted as a git CLI flag.
+        assert!(validate_git_url("--upload-pack=evil").is_err());
+        assert!(validate_git_url("-config=user.email=a").is_err());
+    }
+
+    #[test]
+    fn git_url_rejects_null_bytes_and_over_length() {
+        assert!(validate_git_url("https://github.com/\0/bar").is_err());
+        let too_long = format!("https://github.com/{}", "a".repeat(2100));
+        assert!(validate_git_url(&too_long).is_err());
+    }
+
+    #[test]
+    fn git_url_rejects_loopback_hosts() {
+        assert!(validate_git_url("https://localhost/foo.git").is_err());
+        assert!(validate_git_url("https://127.0.0.1/foo.git").is_err());
+        assert!(validate_git_url("ssh://localhost/foo.git").is_err());
+        // SCP-style too
+        assert!(validate_git_url("git@localhost:foo/bar.git").is_err());
+        assert!(validate_git_url("git@127.0.0.1:foo/bar.git").is_err());
+    }
+
+    #[test]
+    fn git_url_accepts_common_patterns() {
+        assert!(validate_git_url("https://github.com/openai/terminalx.git").is_ok());
+        assert!(validate_git_url("ssh://git@github.com/openai/terminalx.git").is_ok());
+        assert!(validate_git_url("git@github.com:openai/terminalx.git").is_ok());
+        assert!(validate_git_url("git://github.com/openai/terminalx.git").is_ok());
+    }
+
+    #[test]
+    fn git_url_rejects_other_schemes() {
+        assert!(validate_git_url("file:///etc/passwd").is_err());
+        assert!(validate_git_url("ftp://ftp.example.com/foo.git").is_err());
+        assert!(validate_git_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn branch_name_rejects_refname_traps() {
+        assert!(validate_branch_name("").is_err(), "empty rejected");
+        assert!(validate_branch_name("-flag").is_err(), "leading dash rejected");
+        assert!(validate_branch_name("..").is_err(), "double-dot rejected");
+        assert!(validate_branch_name("foo..bar").is_err(), "embedded .. rejected");
+        assert!(validate_branch_name("foo@{now}").is_err(), "reflog syntax rejected");
+        assert!(validate_branch_name("foo bar").is_err(), "space rejected");
+        assert!(validate_branch_name("foo\tbar").is_err(), "control char rejected");
+        assert!(validate_branch_name("foo~1").is_err(), "tilde rejected");
+        assert!(validate_branch_name("foo^HEAD").is_err(), "caret rejected");
+        assert!(validate_branch_name("foo:bar").is_err(), "colon rejected");
+        assert!(validate_branch_name("foo?bar").is_err(), "question mark rejected");
+        assert!(validate_branch_name("foo*bar").is_err(), "asterisk rejected");
+        assert!(validate_branch_name("foo[bar").is_err(), "open bracket rejected");
+        assert!(validate_branch_name("foo\0bar").is_err(), "null byte rejected");
+    }
+
+    #[test]
+    fn branch_name_accepts_normal_refs() {
+        assert!(validate_branch_name("main").is_ok());
+        assert!(validate_branch_name("feature/new-ui").is_ok());
+        assert!(validate_branch_name("release-v1.2.3").is_ok());
+        assert!(validate_branch_name("dependabot/npm_and_yarn/react-19").is_ok());
+    }
+
+    #[test]
+    fn repo_path_rejects_null_bytes() {
+        assert!(validate_repo_path("/foo\0/bar").is_err());
+        assert!(validate_repo_path("").is_ok() || validate_repo_path("").is_err()); // either behavior OK
+        assert!(validate_repo_path("/Users/foo/code").is_ok());
+    }
+}

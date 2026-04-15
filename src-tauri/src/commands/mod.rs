@@ -3,7 +3,6 @@ pub mod agents;
 pub mod filesystem;
 pub mod workspace;
 pub mod timeline;
-pub mod wiring;
 pub mod projects;
 pub mod git;
 pub mod http_proxy;
