@@ -44,7 +44,7 @@
 
 ---
 
-## The 5 wire types
+## The 6 wire types
 
 TerminalX picks the right wire type automatically based on what you connect. You don't configure it — just drag.
 
@@ -152,9 +152,13 @@ This means:
 
 ### 2. agent-chain
 
-**What you wire:** Agent A → Agent B
+**What you wire:** Agent A → Agent B (or chain three+ together: A → B → C)
 
-**What it does:** When Agent A completes, its entire output gets fed into Agent B as context. Agent B sees `--- Context from previous agent (A's name) ---` followed by A's final 50 lines.
+**What it does:** When Agent A completes, its last 50 lines get fed into Agent B as context. Agent B sees `--- Context from previous agent (A's name) ---` followed by A's final output.
+
+![agent-chain wire connecting three Claude agents in series](./docs/img/agent-chain-wire.png)
+
+In the screenshot, three Claude agents are wired left-to-right. As the leftmost agent completes a task, the next one wakes up with full context — no manual handoff.
 
 **Example — design → build pipeline:**
 
@@ -162,6 +166,17 @@ This means:
 2. Prompt Claude: *"Design a REST API for a todo app. When complete, output DONE on a new line."*
 3. Claude responds with the schema → outputs DONE → wire fires.
 4. Codex receives Claude's full response → you tell Codex *"Implement the API above in TypeScript/Express."*
+
+#### Does agent-chain need an Auto toggle?
+
+**No — agent-chain is already automatic, by design.** The Auto toggle you see on `context-pipe` (Terminal → Agent) is for *streaming* sources where the engine has no way of knowing "is the user done yet?" — so we use idle detection or a Pipe button.
+
+Agent-chain has a clearer signal: the source agent's **status flips to `done`**. That happens via two triggers (covered in detail in the [DONE signal](#the-done-signal--making-agent-chain-reliable) section):
+
+- **DONE sentinel** — the agent prints `DONE` (or `✅ DONE`, `[DONE]`, etc.) on its own line.
+- **Idle fallback** — 8s of no output after the agent has produced ≥50 bytes (configurable per agent).
+
+When either fires, the wire activates immediately and pipes A's last 50 lines into B's PTY. No toggle, no Pipe button, no waiting. If you want to disable it, remove the wire — there's no "off" state for an installed agent-chain wire.
 
 ---
 
@@ -191,6 +206,30 @@ This means:
 **What you wire:** Agent → Diff
 
 **What it does:** When the agent completes, the diff tile receives a refresh signal. Pair this with a diff tile pointed at a specific file you care about.
+
+---
+
+### 6. file-open
+
+**What you wire:** FileTree → Editor (or FileTree → Diff)
+
+**What it does:** Routes file-clicks from the FileTree into the wired tile instead of spawning a new editor every time. One file tree on the left, one editor (or one diff) on the right — click your way through the project, content updates in place.
+
+![file-open wire from a FileTree to an Editor and a Diff tile](./docs/img/file-open-wire.png)
+
+In the screenshot above, the FileTree on the left is wired to **both** an Editor (top right, showing `CONTRIBUTING.md`) and a Diff tile (bottom right, comparing two versions). One click in the tree fires both wires — the Editor swaps content and the Diff repopulates.
+
+**Smart routing for the Diff tile** depends on its current mode:
+
+| Diff mode | What clicking a file does |
+|-----------|---------------------------|
+| **Git changes** | If the file lives under the diff's `repoPath`, sets it as the active change to view (HEAD vs working tree). |
+| **Compare files** | Fills the first empty slot — Original first, then Modified. |
+| **Paste** | Switches the tile to Compare mode and seeds the Modified side with the file. |
+
+Multi-target works — wire one FileTree to several Editors and Diffs, every click hits all of them. The wires pulse for ~1.5s on each click so you can see the route fire.
+
+**No wire?** Original behavior: clicking a file in the FileTree spawns a fresh Editor tile next to it.
 
 ---
 

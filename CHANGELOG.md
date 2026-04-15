@@ -7,7 +7,20 @@ All notable changes to TerminalX are documented here. Format follows [Keep a Cha
 ## [Unreleased]
 
 ### Added
-- Comprehensive README, CONTRIBUTING guide, LICENSE (MIT)
+- **Drag-to-connect wiring UI** — hover a tile, drag from the right-edge port onto another tile's left port. Wire type is inferred from source/target tile types.
+- **Pipe button on Agent tiles** — glows with a live byte count when upstream terminals/agents have fresh context waiting. Click to pipe the last 50 lines (ANSI-stripped) as a prompt; right-click to pipe the full history with a custom prompt.
+- **Inline Auto toggle** next to the Pipe button (same UX pattern as the TodoTile auto-dispatch). When ON, fresh upstream output is piped automatically — fully hands-free Terminal → Agent loops.
+- **Command-gated auto-pipe** — auto-pipe now only fires after you press Enter in the source terminal, not on raw idle. Kills spurious fires from `tail -f`, dev servers, and other chatty processes.
+- **Agent auto-complete** — agent-chain wires now fire without needing the agent process to exit. Detects completion via idle (8s of no output after a warmup) or an explicit `DONE` sentinel (`✅ DONE`, `[DONE]`, `## DONE`, etc.).
+- **WIRING.md** — comprehensive drag-to-connect tutorial with per-OS interaction table, 5 wire-type walkthroughs, Auto-Pipe playbooks, and troubleshooting. Linked from README.
+- Vitest 4 test suite (63 tests, happy-dom) covering wire inference, engine dispatch, DONE-sentinel regex, and agent auto-complete.
+- Comprehensive README, CONTRIBUTING guide, LICENSE (MIT).
+
+### Fixed
+- **Preview wire now tracks the actual cursor** during drag-to-connect. Previously offset by the sidebar width because `screenToCanvas` didn't account for canvas container position; now uses the SVG's own bounding rect as the canvas-origin anchor.
+- **Auto-pipe timer no longer killed by effect re-runs** — `pipe` callback stabilised via ref so useEffect cleanup doesn't cancel the pending fire.
+- **Wiring engine infinite loop** caught by tests — `setWireActive` inside subscription handler recursively re-triggered the same subscription with stale `prevAgentStatusRef`. Guarded with a re-entry flag and commit-before-dispatch.
+- First Pipe click no longer dumps the PowerShell welcome banner and session history. Initial offsets snapshot on mount; output is ANSI-stripped and tail-capped at 50 lines (right-click pipes everything if you want it).
 
 ---
 

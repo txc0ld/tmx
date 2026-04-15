@@ -143,15 +143,32 @@ TerminalX is a desktop app that lets you run multiple AI coding agents, terminal
 
 ## Wiring System
 
-Connect tiles with data-flow wires. Hover a tile → drag from the accent-colored port on the right edge → drop on another tile's left port. Wire type is inferred automatically from the source/target tile types.
+Connect tiles with data-flow wires. Hover a tile → drag from the accent-colored port on the right edge → drop on another tile's left port. Wire type is inferred automatically from the source/target tile types. Right-click any wire to delete it.
+
+See [**WIRING.md**](./WIRING.md) for the full per-OS drag-to-connect tutorial, Auto-Pipe playbooks, and troubleshooting.
 
 | Wire Type | From → To | Behavior |
 |-----------|-----------|----------|
-| **context-pipe** | Terminal/Agent → Agent | Pipes last 50 lines of output as context on completion |
-| **agent-chain** | Agent → Agent | Chains agent output to next agent's input |
-| **refresh-trigger** | Agent → Browser | Notifies browser tile to refresh on agent completion |
-| **task-assign** | Agent → Todo | Adds agent's last output line as a new task |
-| **diff-feed** | Agent → Diff | Signals diff tile to refresh on agent completion |
+| **context-pipe** | Terminal/Agent → Agent | Manual Pipe button (glows with byte count when fresh) or Auto toggle for hands-free firing |
+| **agent-chain** | Agent → Agent | Fires when upstream agent idles or prints a `DONE` sentinel — downstream gets the output as its next prompt |
+| **refresh-trigger** | Agent → Browser | Browser tile auto-refreshes on agent completion |
+| **task-assign** | Agent → Todo | Agent's last output line becomes a new task |
+| **diff-feed** | Agent → Diff | Diff tile refreshes on agent completion |
+
+### Context-pipe controls (Agent tile)
+
+| Control | Behavior |
+|---------|----------|
+| **Pipe button** | Click to send the last 50 lines of upstream output as a prompt. Button glows with byte count when fresh data is available. |
+| **Right-click Pipe** | Pipe the full upstream history with a custom prompt (prompted inline). |
+| **Auto toggle** | When ON, fires the pipe automatically ~2s after you press Enter in the source terminal. Fully hands-free Terminal → Agent loop. |
+
+### Agent auto-complete triggers
+
+Agent-chain wires don't need the agent process to exit. The engine fires a handoff when:
+
+- The agent prints an explicit `DONE` sentinel — matches `✅ DONE`, `✓ DONE`, `[DONE]`, `## DONE`, `DONE!`, `DONE.` on its own line.
+- OR the agent goes idle for 8s after at least 50 bytes of output (configurable via `autoIdleMs`).
 
 ---
 

@@ -36,7 +36,7 @@ TerminalX is a native desktop app that turns your terminal workflow into a spati
 **Core**
 - 🎨 **Infinite canvas** — pan, zoom, snap-to-edge alignment, rubber-band selection, workspace tabs
 - 🤖 **15 tile types** — Terminal, Agent, Editor, Diff, Git, Docker, SSH, Note, Todo, Kanban, Browser, Runner, File Tree, Usage, Group
-- 🔗 **[Wiring system](./WIRING.md)** — drag-to-connect tiles for automated data flow (5 wire types, DONE-sentinel detection, auto-idle)
+- 🔗 **[Wiring system](./WIRING.md)** — drag-to-connect tiles for automated data flow. 5 wire types, glowing Pipe button with byte count, inline Auto toggle for hands-free Terminal→Agent loops, command-gated firing, DONE-sentinel + idle auto-complete for agent chains
 - 🎯 **6 themes** — Electric, Phantom, Ember, Ice, Snow, Slate (light mode)
 
 **Integrations**
