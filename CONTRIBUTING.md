@@ -150,6 +150,20 @@ Before opening a PR, confirm:
 
 ---
 
+## Security posture
+
+This is a power-user terminal/workspace app, so the trust model is different from a web app:
+
+- **Local filesystem access is intentionally broad** (see `is_path_allowed` in `src-tauri/src/commands/filesystem.rs`) — users need to read/write anywhere they can reach. Correctness safeguards (null-byte rejection, symlink-write rejection, 10 MB text caps) are fine; tightening the path allowlist breaks real workflows.
+- **Shell PTY spawning is allowlisted** (`SHELL_ALLOWLIST` in `terminal.rs`) — but agent spawns use `pty_spawn_internal` which bypasses the allowlist on purpose.
+- **HTTP proxy is SSRF-hardened** — private IPs (10.x, 172.16-31.x, 192.168.x, 100.64-127.x), loopback, link-local, IPv6 ULA, URL credentials, and redirect following are all blocked. After validation, DNS resolution is pinned via `reqwest::ClientBuilder::resolve_to_addrs` to prevent DNS-rebinding TOCTOU between validation and connect.
+- **CSP allowances are intentional:** `script-src 'unsafe-eval'` is required by Monaco's language tokenizers and worker bootstrap. `style-src 'unsafe-inline'` is required by Vite's HMR `<style>` injection and by xterm's runtime style tags. `frame-src https:` backs `BrowserTile`. `img-src https:` backs agent-output image previews and browser-tile scraping. Each allowance is justified by a feature — do not remove without replacing the feature too.
+- **Plugin sandbox** — `PluginTile` was removed as unused; if it's resurrected, the iframe must stay `sandbox="allow-scripts allow-forms"` (no `allow-same-origin`) and `postMessage` must target the plugin's exact origin, not `*`.
+
+When adding new IPC commands, validate every user-reachable argument at the boundary: length caps, null-byte rejection, scheme/enum checks. Write a `#[cfg(test)]` block covering the validator. Tests for existing validators are in `src-tauri/src/commands/*.rs`.
+
+---
+
 ## Reporting Bugs
 
 File an issue at [github.com/txc0ld/tmx/issues](https://github.com/txc0ld/tmx/issues) with:
