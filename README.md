@@ -60,6 +60,19 @@ See [**FEATURES.md**](./FEATURES.md) for the complete feature guide.
 
 ---
 
+## Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| **Windows** | ✅ Fully supported | Primary development target. Requires VS Build Tools for dev. |
+| **macOS** | ✅ Fully supported | Native traffic lights on title bar, `⌘` modifier shown in UI. |
+| **Linux** | ✅ Fully supported | Uses native shell (`$SHELL`), standard PATH. |
+| **iOS / Android** | ❌ Not feasible | Terminal architecture requires PTY/subprocess spawning which mobile OS sandboxes forbid. See [#mobile-roadmap](#mobile-roadmap) below. |
+
+### Mobile Roadmap
+
+The PTY model is incompatible with iOS/Android app sandboxes. A future "TerminalX Mobile" could ship as an **SSH-only** client — pair your mobile device with a desktop or remote server, and control agents there. Not planned for v1.
+
 ## Installation
 
 ### Prerequisites

@@ -4,6 +4,7 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { useProjectStore } from '@/stores/projectStore';
 import { useTemplateStore, type TileTemplate } from '@/stores/templateStore';
 import { colors, spacing, typography, glass, radius, motion, tileColors, fonts, alpha } from '@/design/tokens';
+import { isMac, modShortcut } from '@/utils/platform';
 import type { Project, TileType, Tile } from '@/types';
 
 interface TopBarProps {
@@ -51,7 +52,8 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette }: TopBarProp
         height: 44,
         display: 'flex',
         alignItems: 'center',
-        padding: `0 ${spacing.md}`,
+        // macOS: leave room for traffic lights on the left
+        padding: isMac() ? `0 ${spacing.md} 0 80px` : `0 ${spacing.md}`,
         background: colors.surfaceLowest,
         borderBottom: `1px solid ${colors.outlineGhost}`,
         gap: spacing.md,
@@ -190,24 +192,26 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette }: TopBarProp
         onMouseEnter={e => { e.currentTarget.style.background = 'var(--tx-outline-variant)'; }}
         onMouseLeave={e => { e.currentTarget.style.background = 'var(--tx-outline-ghost)'; }}
       >
-        Ctrl+K
+        {modShortcut('K')}
       </button>
 
       {/* Local time */}
       <LocalClock />
 
-      {/* Window controls */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        // @ts-expect-error webkit
-        WebkitAppRegion: 'no-drag',
-      }}>
-        <button onPointerDown={e => e.stopPropagation()} onClick={() => appWindow.minimize()} style={windowBtnStyle} onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }} onMouseLeave={e => { e.currentTarget.style.opacity = '0.7'; }}>
-          <span style={{ width: 8, height: 1.5, background: 'var(--tx-bg)', borderRadius: 1, display: 'block' }} />
-        </button>
-        <button onPointerDown={e => e.stopPropagation()} onClick={() => appWindow.toggleMaximize()} style={windowBtnStyle} onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }} onMouseLeave={e => { e.currentTarget.style.opacity = '0.7'; }}>□</button>
-        <button onPointerDown={e => e.stopPropagation()} onClick={() => appWindow.close()} style={windowBtnStyle} onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }} onMouseLeave={e => { e.currentTarget.style.opacity = '0.7'; }}>✕</button>
-      </div>
+      {/* Window controls — hidden on macOS where native traffic lights are used */}
+      {!isMac() && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          // @ts-expect-error webkit
+          WebkitAppRegion: 'no-drag',
+        }}>
+          <button aria-label="Minimize window" onPointerDown={e => e.stopPropagation()} onClick={() => appWindow.minimize()} style={windowBtnStyle} onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }} onMouseLeave={e => { e.currentTarget.style.opacity = '0.7'; }}>
+            <span style={{ width: 8, height: 1.5, background: 'var(--tx-bg)', borderRadius: 1, display: 'block' }} />
+          </button>
+          <button aria-label="Maximize window" onPointerDown={e => e.stopPropagation()} onClick={() => appWindow.toggleMaximize()} style={windowBtnStyle} onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }} onMouseLeave={e => { e.currentTarget.style.opacity = '0.7'; }}>□</button>
+          <button aria-label="Close window" onPointerDown={e => e.stopPropagation()} onClick={() => appWindow.close()} style={windowBtnStyle} onMouseEnter={e => { e.currentTarget.style.opacity = '1'; }} onMouseLeave={e => { e.currentTarget.style.opacity = '0.7'; }}>✕</button>
+        </div>
+      )}
     </div>
   );
 }

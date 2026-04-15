@@ -26,9 +26,6 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# PTY management
-portable-pty = "0.8"
-
 # Filesystem watching
 notify = "7"
 notify-debouncer-mini = "0.4"
@@ -50,6 +47,10 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 shellexpand = "3"
 parking_lot = "0.12"
+
+# PTY management — desktop only (iOS/Android don't allow subprocess spawning)
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+portable-pty = "0.8"
 
 [profile.release]
 panic = "abort"
