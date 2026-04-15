@@ -113,6 +113,10 @@ export async function writeFileText(path: string, contents: string): Promise<voi
   return invoke('write_file_text', { path, contents });
 }
 
+export async function getFileSize(path: string): Promise<number> {
+  return invoke('get_file_size', { path });
+}
+
 export async function watchDirectory(path: string): Promise<void> {
   return invoke('watch_directory', { path });
 }

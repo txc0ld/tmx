@@ -1,8 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
-import { readFileText, writeFileText } from '@/utils/ipc';
+import { readFileText, writeFileText, getFileSize } from '@/utils/ipc';
 import { colors, spacing, typography } from '@/design/tokens';
 import type { EditorTile as EditorTileType } from '@/types';
+
+// Files larger than this threshold prompt the user before loading into
+// Monaco. Monaco parses the entire source synchronously for syntax
+// highlighting — above a few MB, opening freezes the UI for seconds.
+const LARGE_FILE_THRESHOLD = 2 * 1024 * 1024; // 2 MB
 
 interface EditorTileProps {
   tile: EditorTileType;
@@ -24,6 +29,7 @@ export function EditorTile({ tile }: EditorTileProps) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [plainTextMode, setPlainTextMode] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filePathRef = useRef(tile.filePath);
 
@@ -39,26 +45,45 @@ export function EditorTile({ tile }: EditorTileProps) {
       setContent(null);
       setLoading(false);
       setError(null);
+      setPlainTextMode(false);
       return;
     }
 
     setLoading(true);
     setError(null);
+    setPlainTextMode(false);
 
-    readFileText(tile.filePath)
-      .then((text) => {
-        // Only update if still the same file
-        if (filePathRef.current === tile.filePath) {
-          setContent(text);
-          setLoading(false);
+    // Check size BEFORE reading. Reading a 50 MB log into memory then
+    // deciding to cancel is too late — we want to fail cheap.
+    const load = async () => {
+      try {
+        const size = await getFileSize(tile.filePath);
+        if (filePathRef.current !== tile.filePath) return;
+        let goPlain = false;
+        if (size > LARGE_FILE_THRESHOLD) {
+          const mb = (size / (1024 * 1024)).toFixed(1);
+          const ok = window.confirm(
+            `This file is ${mb} MB. Loading large files freezes the editor while Monaco parses. Open in plain-text mode (no syntax highlighting) for better performance?\n\nOK = plain text, Cancel = don't open`,
+          );
+          if (!ok) {
+            setContent(null);
+            setLoading(false);
+            return;
+          }
+          goPlain = true;
         }
-      })
-      .catch((err) => {
-        if (filePathRef.current === tile.filePath) {
-          setError(String(err));
-          setLoading(false);
-        }
-      });
+        const text = await readFileText(tile.filePath);
+        if (filePathRef.current !== tile.filePath) return;
+        setPlainTextMode(goPlain);
+        setContent(text);
+        setLoading(false);
+      } catch (err) {
+        if (filePathRef.current !== tile.filePath) return;
+        setError(String(err));
+        setLoading(false);
+      }
+    };
+    load();
   }, [tile.filePath]);
 
   // Cleanup save timer on unmount
@@ -134,7 +159,7 @@ export function EditorTile({ tile }: EditorTileProps) {
     );
   }
 
-  const language = tile.language || detectLanguage(tile.filePath);
+  const language = plainTextMode ? 'plaintext' : (tile.language || detectLanguage(tile.filePath));
 
   return (
     <div style={{ width: '100%', height: '100%' }}>

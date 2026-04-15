@@ -21,5 +21,19 @@ export default defineConfig({
     target: 'esnext',
     minify: 'esbuild',
     sourcemap: false,
+    // Split vendor code into its own chunks so the main bundle doesn't bloat
+    // past a megabyte. xterm + framer-motion are the heaviest dependencies
+    // that every tile path pulls eventually.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          xterm: ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-webgl'],
+          motion: ['framer-motion'],
+          fuse: ['fuse.js'],
+          react: ['react', 'react-dom'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 600,
   },
 });

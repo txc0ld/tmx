@@ -224,18 +224,41 @@ export function AgentTile({ tile }: AgentTileProps) {
       ...(tile.command ? { customCommand: tile.command } : {}),
     }).then(async (id) => {
       useCanvasStore.getState().updateTile(tile.id, { ptyId: id, status: 'working' } as Partial<AgentTileType>);
-      // Inject agent memory context if set for this project
+      // Inject agent memory context once the agent is ready. Ready =
+      // 1.2 s of PTY silence after any output arrives, indicating the
+      // agent has finished its startup banner and is sitting at a prompt.
+      // Fallback hard ceiling of 15 s prevents hanging on a silent agent.
       const { useAgentMemoryStore } = await import('@/stores/agentMemoryStore');
-      const { ptyWrite: ptyWriteCtx } = await import('@/utils/ipc');
+      const { ptyWrite: ptyWriteCtx, onPtyOutput } = await import('@/utils/ipc');
       const pid = useCanvasStore.getState().activeProject;
       const memory = useAgentMemoryStore.getState().getMemory(pid);
       if (memory) {
-        // Strip control chars and ANSI escapes to prevent terminal injection
+        // Strip control chars and ANSI escapes to prevent terminal injection.
         const safeMem = memory.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-        setTimeout(() => {
+
+        let injected = false;
+        let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+        let cleanupOutput: (() => void) | null = null;
+        const fallbackTimer = setTimeout(() => inject(), 15_000);
+
+        const inject = () => {
+          if (injected) return;
+          injected = true;
+          if (silenceTimer !== null) clearTimeout(silenceTimer);
+          clearTimeout(fallbackTimer);
+          cleanupOutput?.();
           ptyWriteCtx(id, `Project context: ${safeMem}`).catch(() => {});
           setTimeout(() => ptyWriteCtx(id, '\r').catch(() => {}), 300);
-        }, 2000);
+        };
+
+        onPtyOutput(({ id: evId }) => {
+          if (evId !== id || injected) return;
+          if (silenceTimer !== null) clearTimeout(silenceTimer);
+          silenceTimer = setTimeout(() => inject(), 1200);
+        }).then(fn => {
+          if (injected) { fn(); return; }
+          cleanupOutput = fn;
+        });
       }
     }).catch(err => {
       const msg = String(err);
