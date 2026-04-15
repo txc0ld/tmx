@@ -334,14 +334,65 @@ async function proxyPost(url: string, headers: Record<string, string>, body: unk
   return JSON.parse(res.body);
 }
 
+export function buildGitHubIssuesUrl(repo?: string): string {
+  const cleanRepo = repo?.trim();
+  if (!cleanRepo) {
+    return 'https://api.github.com/issues?filter=assigned&state=open&per_page=20';
+  }
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(cleanRepo)) {
+    throw new Error('GitHub repo must be in owner/name format');
+  }
+  const [owner, name] = cleanRepo.split('/');
+  return `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues?state=open&per_page=20`;
+}
+
+export function buildSlackHistoryUrl(channel: string): string {
+  const cleanChannel = channel.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{1,255}$/.test(cleanChannel)) {
+    throw new Error('Slack channel ID is invalid');
+  }
+  const params = new URLSearchParams({ channel: cleanChannel, limit: '20' });
+  return `https://slack.com/api/conversations.history?${params.toString()}`;
+}
+
+function cleanJiraHost(host: string): string {
+  const cleanHost = host.trim().toLowerCase();
+  if (!/^[a-z0-9.-]{1,253}$/.test(cleanHost)
+    || cleanHost.startsWith('.')
+    || cleanHost.endsWith('.')
+    || cleanHost.includes('..')) {
+    throw new Error('Jira host must be a bare hostname');
+  }
+  return cleanHost;
+}
+
+export function buildJiraSearchUrl(host: string): string {
+  const cleanHost = cleanJiraHost(host);
+  const params = new URLSearchParams({
+    jql: 'assignee=currentUser() AND status!=Done',
+    maxResults: '20',
+  });
+  return `https://${cleanHost}/rest/api/3/search?${params.toString()}`;
+}
+
+export function buildJiraBrowseUrl(host: string, key: string): string {
+  return `https://${cleanJiraHost(host)}/browse/${encodeURIComponent(key)}`;
+}
+
+export function buildNotionQueryUrl(databaseId: string): string {
+  const cleanDatabaseId = databaseId.trim();
+  if (!/^[A-Za-z0-9-]{1,128}$/.test(cleanDatabaseId)) {
+    throw new Error('Notion database ID is invalid');
+  }
+  return `https://api.notion.com/v1/databases/${encodeURIComponent(cleanDatabaseId)}/query`;
+}
+
 async function fetchGitHubTasks(config: Record<string, string>): Promise<McpTask[]> {
   const { token, repo } = config;
   if (!token) throw new Error('GitHub token required');
 
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' };
-  const url = repo
-    ? `https://api.github.com/repos/${repo}/issues?state=open&per_page=20`
-    : `https://api.github.com/issues?filter=assigned&state=open&per_page=20`;
+  const url = buildGitHubIssuesUrl(repo);
 
   const issues = await proxyGet(url, headers) as { id: number; number: number; title: string; html_url: string; labels: { name: string }[]; pull_request?: unknown }[];
 
@@ -364,7 +415,7 @@ async function fetchSlackTasks(config: Record<string, string>): Promise<McpTask[
   if (!channel) throw new Error('Slack channel ID required');
 
   const data = await proxyGet(
-    `https://slack.com/api/conversations.history?channel=${channel}&limit=20`,
+    buildSlackHistoryUrl(channel),
     { Authorization: `Bearer ${token}` },
   ) as { ok: boolean; error?: string; messages?: { ts: string; text: string }[] };
 
@@ -410,7 +461,7 @@ async function fetchJiraTasks(config: Record<string, string>): Promise<McpTask[]
 
   const auth = btoa(`${email}:${token}`);
   const data = await proxyGet(
-    `https://${host}/rest/api/3/search?jql=assignee=currentUser() AND status!=Done&maxResults=20`,
+    buildJiraSearchUrl(host),
     { Authorization: `Basic ${auth}`, Accept: 'application/json' },
   ) as { issues?: { id: string; key: string; fields: { summary: string } }[] };
 
@@ -420,7 +471,7 @@ async function fetchJiraTasks(config: Record<string, string>): Promise<McpTask[]
     sourceId: i.key,
     text: `${i.key} ${i.fields.summary}`,
     done: false,
-    url: `https://${host}/browse/${i.key}`,
+    url: buildJiraBrowseUrl(host, i.key),
   }));
 }
 
@@ -429,7 +480,7 @@ async function fetchNotionTasks(config: Record<string, string>): Promise<McpTask
   if (!token || !databaseId) throw new Error('Notion token and database ID required');
 
   const data = await proxyPost(
-    `https://api.notion.com/v1/databases/${databaseId}/query`,
+    buildNotionQueryUrl(databaseId),
     { Authorization: `Bearer ${token}`, 'Notion-Version': '2022-06-28' },
     { page_size: 20 },
   ) as { results?: { id: string; url: string; properties: Record<string, { title?: { plain_text: string }[] }> }[] };

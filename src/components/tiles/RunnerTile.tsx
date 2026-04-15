@@ -6,6 +6,7 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { usePty } from '@/hooks/usePty';
 import { ptySpawn, ptyWrite } from '@/utils/ipc';
+import { isWindows } from '@/utils/platform';
 import { colors, fonts, spacing, typography, radius } from '@/design/tokens';
 import { attachKeyboardCapture } from './xtermInput';
 import type { RunnerTile as RunnerTileType } from '@/types';
@@ -48,6 +49,22 @@ const STATUS_LABEL_COLORS: Record<string, string> = {
   fail: colors.onSurfaceVariant,
 };
 
+function buildRunnerScript(command: string): string {
+  if (isWindows()) {
+    return [
+      '$global:LASTEXITCODE = $null',
+      command,
+      '$txSucceeded = $?',
+      '$txExit = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($txSucceeded) { 0 } else { 1 }',
+      'Write-Output "__TX_EXIT:$txExit"',
+      'exit $txExit',
+      '',
+    ].join('\r\n');
+  }
+
+  return `${command}\ntx_exit=$?\nprintf '\\n__TX_EXIT:%s\\n' "$tx_exit"\nexit "$tx_exit"\n`;
+}
+
 export function RunnerTile({ tile }: RunnerTileProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -65,7 +82,10 @@ export function RunnerTile({ tile }: RunnerTileProps) {
     const store = useCanvasStore.getState();
     const wireData = store.wireData[tile.ptyId || ''] || '';
     const lower = wireData.toLowerCase();
-    const failed = lower.includes('fail') || lower.includes('error') || lower.includes('exit code 1');
+    const exitMatch = wireData.match(/__TX_EXIT:(\d+)/);
+    const failed = exitMatch
+      ? Number(exitMatch[1]) !== 0
+      : lower.includes('fail') || lower.includes('error') || lower.includes('exit code 1');
     const status = failed ? 'fail' : 'pass';
     store.updateTile(tile.id, { status, ptyId: undefined } as Partial<RunnerTileType>);
   }, [tile.id, tile.ptyId]);
@@ -168,7 +188,10 @@ export function RunnerTile({ tile }: RunnerTileProps) {
       useCanvasStore.getState().updateTile(tile.id, { ptyId: id } as Partial<RunnerTileType>);
       // Write the command followed by exit so we detect completion
       setTimeout(() => {
-        ptyWrite(id, command.trim() + '\n');
+        ptyWrite(id, buildRunnerScript(command.trim())).catch((err) => {
+          termRef.current?.write(`\x1b[31mFailed to write command: ${err}\x1b[0m\r\n`);
+          useCanvasStore.getState().updateTile(tile.id, { status: 'fail' } as Partial<RunnerTileType>);
+        });
       }, 200);
     } catch (err) {
       termRef.current?.write(`\x1b[31mFailed to spawn: ${err}\x1b[0m\r\n`);

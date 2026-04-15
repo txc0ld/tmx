@@ -30,6 +30,10 @@ export function EditorTile({ tile }: EditorTileProps) {
   // Load file content when filePath changes
   useEffect(() => {
     filePathRef.current = tile.filePath;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
 
     if (!tile.filePath) {
       setContent(null);
@@ -67,12 +71,13 @@ export function EditorTile({ tile }: EditorTileProps) {
   const handleChange = useCallback((value: string | undefined) => {
     if (value === undefined) return;
     setContent(value);
+    const pathAtEdit = filePathRef.current;
 
     // Debounced auto-save (1s)
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      if (filePathRef.current) {
-        writeFileText(filePathRef.current, value).catch(console.error);
+      if (pathAtEdit && filePathRef.current === pathAtEdit) {
+        writeFileText(pathAtEdit, value).catch(console.error);
       }
     }, 1000);
   }, []);

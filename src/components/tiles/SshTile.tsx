@@ -9,6 +9,19 @@ interface SshTileProps {
   tile: SshTileType;
 }
 
+const SSH_USER_RE = /^[A-Za-z0-9._-]{1,64}$/;
+const SSH_HOST_RE = /^[A-Za-z0-9.:-]{1,253}$/;
+
+function validateSshTarget(user: string, host: string): string | null {
+  if (!SSH_USER_RE.test(user) || user.startsWith('-')) {
+    return 'User may only contain letters, numbers, dot, underscore, and hyphen';
+  }
+  if (!SSH_HOST_RE.test(host) || host.startsWith('-') || host.includes('..')) {
+    return 'Host must be a hostname or IP address without whitespace or option prefixes';
+  }
+  return null;
+}
+
 export function SshTile({ tile }: SshTileProps) {
   const [host, setHost] = useState(tile.host || '');
   const [port, setPort] = useState(String(tile.port || 22));
@@ -17,10 +30,17 @@ export function SshTile({ tile }: SshTileProps) {
   const [error, setError] = useState('');
 
   const handleConnect = useCallback(async () => {
-    if (!host.trim() || !user.trim()) return;
+    const safeHost = host.trim();
+    const safeUser = user.trim();
+    if (!safeHost || !safeUser) return;
     const portNum = Number(port);
     if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
       setError('Port must be a number between 1 and 65535');
+      return;
+    }
+    const validationError = validateSshTarget(safeUser, safeHost);
+    if (validationError) {
+      setError(validationError);
       return;
     }
     setConnecting(true);
@@ -28,10 +48,10 @@ export function SshTile({ tile }: SshTileProps) {
     try {
       const id = await ptySpawn({
         shell: 'ssh',
-        args: ['-p', port, `${user}@${host}`],
+        args: ['-p', String(portNum), '--', `${safeUser}@${safeHost}`],
       });
       useCanvasStore.getState().updateTile(tile.id, {
-        ptyId: id, connected: true, host, port: Number(port), user,
+        ptyId: id, connected: true, host: safeHost, port: portNum, user: safeUser,
       } as Partial<SshTileType>);
     } catch (e) {
       setError(String(e));

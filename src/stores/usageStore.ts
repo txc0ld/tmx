@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { useCanvasStore } from './canvasStore';
+import { httpFetch } from '@/utils/ipc';
 import type { AgentTile } from '@/types';
 
 // ─── Internal usage tracking ────────────────────────────
@@ -130,11 +131,10 @@ export const useUsageStore = create<UsageState>((set, get) => ({
 
   fetchOpenUsage: async () => {
     try {
-      const res = await fetch('http://127.0.0.1:6736/v1/usage', {
-        signal: AbortSignal.timeout(3000),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: OpenUsageProvider[] = await res.json();
+      const res = await httpFetch({ url: 'http://127.0.0.1:6736/v1/usage', method: 'GET' });
+      if (res.status < 200 || res.status >= 300) throw new Error(`HTTP ${res.status}`);
+      const data = JSON.parse(res.body) as OpenUsageProvider[];
+      if (!Array.isArray(data)) throw new Error('Invalid OpenUsage response');
       set({ openUsageData: data, openUsageConnected: true, openUsageError: null });
     } catch {
       set({ openUsageConnected: false, openUsageError: 'OpenUsage not running' });

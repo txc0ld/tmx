@@ -462,7 +462,7 @@ function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPrompt
 
   // Compute unread bytes across all incoming wires
   let unreadBytes = 0;
-  const sources: { srcPtyId: string; srcName: string; fresh: string }[] = [];
+  const sources: { srcPtyId: string; srcName: string; fresh: string; nextOffset: number }[] = [];
   for (const wire of incoming) {
     const src = tiles.find(t => t.id === wire.fromTile);
     if (!src) continue;
@@ -474,7 +474,7 @@ function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPrompt
     const fresh = data.slice(offset);
     if (fresh.length > 0) {
       unreadBytes += fresh.length;
-      sources.push({ srcPtyId, srcName: src.title || src.type, fresh });
+      sources.push({ srcPtyId, srcName: src.title || src.type, fresh, nextOffset: offset + fresh.length });
     }
   }
 
@@ -485,13 +485,12 @@ function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPrompt
     if (!ptyId || sources.length === 0) return;
     let context = '';
     const newOffsets = { ...pipedOffsets };
-    for (const { srcPtyId, srcName, fresh } of sources) {
+    for (const { srcPtyId, srcName, fresh, nextOffset } of sources) {
       const cleaned = tailLines(cleanPtyOutput(fresh).trim(), MAX_PIPE_LINES);
       if (cleaned) {
         context += `--- Piped from ${srcName} ---\n${cleaned}\n--- End piped context ---\n`;
       }
-      newOffsets[srcPtyId] = (initialOffsetsRef.current?.[srcPtyId] ?? 0)
-        + (pipedOffsets[srcPtyId] ?? 0) + fresh.length;
+      newOffsets[srcPtyId] = nextOffset;
     }
     if (context) {
       // Write context, then (if autoPrompt set) append the template + Enter
@@ -602,7 +601,7 @@ function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPrompt
         const srcPtyId = 'ptyId' in src ? (src as { ptyId?: string }).ptyId : undefined;
         if (!srcPtyId) continue;
         const data = wireData[srcPtyId] || '';
-        if (data) freshSources.push({ srcPtyId, srcName: src.title || src.type, fresh: data });
+        if (data) freshSources.push({ srcPtyId, srcName: src.title || src.type, fresh: data, nextOffset: data.length });
       }
       let ctx = '';
       for (const { srcName, fresh } of freshSources) {
