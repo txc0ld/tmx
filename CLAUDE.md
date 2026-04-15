@@ -4,106 +4,139 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is TerminalX
 
-TerminalX is a native desktop app (Tauri 2) — an infinite canvas workspace for orchestrating multiple CLI agents (Claude Code, Codex, Gemini CLI) in parallel. Tiles (terminals, agents, editors, browsers, etc.) are arranged spatially on a canvas and wired together for data flow.
+Native desktop app (Tauri 2) — infinite canvas workspace for orchestrating multiple CLI agents (Claude Code, Codex, Gemini CLI) in parallel. Tiles (terminals, agents, editors, browsers, etc.) are arranged spatially and wired together for data flow.
 
-**Stack:** Tauri 2 (Rust backend, `portable-pty` for PTY, `reqwest` for HTTP proxy) + React 19 + TypeScript 5 + Vite 6 + Zustand 5 + xterm.js 5.5 + Monaco Editor
+**Stack:** Tauri 2 (Rust, `portable-pty`, `reqwest`) + React 19 + TypeScript 5 + Vite 6 + Zustand 5 + xterm.js 5.5 + Monaco Editor
 
 ## Build & Dev Commands
 
 ```bash
-pnpm tauri dev        # Full dev mode (Rust + Vite hot reload)
-pnpm tauri build      # Production binary (Windows MSI / macOS DMG)
-pnpm dev              # Frontend-only dev server (Vite, port 5173)
-npx tsc --noEmit      # Type-check without emitting
-npx vite build        # Frontend-only production build
+pnpm tauri dev        # Full dev (Rust + Vite HMR). First run compiles ~500 crates (~3 min).
+pnpm tauri build      # Production binary (MSI / DMG / AppImage / .deb)
+pnpm dev              # Frontend only (Vite :5173, no Tauri)
+npx tsc --noEmit      # Frontend type-check
+cd src-tauri && cargo check    # Rust type-check
+cd src-tauri && cargo test     # Rust tests
 ```
 
-**Windows-specific:** Cargo must find the MSVC linker. If `cargo` isn't in PATH, add `$USERPROFILE/.cargo/bin` to PATH. The git-bash `link` command shadows MSVC's `link.exe` — build from PowerShell or cmd with VS env. On Windows, agent CLIs (claude, codex, gemini) are `.cmd` scripts — the agent spawn wraps them through `cmd.exe /C` automatically.
+**Windows:** Cargo needs MSVC linker. If `cargo` isn't in PATH, add `%USERPROFILE%\.cargo\bin`. Git-bash's `link` command shadows MSVC's `link.exe` — build from PowerShell or `cmd.exe`. Agent CLIs (claude/codex/gemini) are npm `.cmd` scripts; the agent spawn auto-wraps them with `cmd.exe /C`.
 
-**macOS:** Install Xcode Command Line Tools + Rust (`rustup`). Then `pnpm install && pnpm tauri dev`.
+**macOS:** `xcode-select --install` + `rustup`. Native traffic lights render via `titleBarStyle: "Overlay"` — the custom window buttons in `TopBar.tsx` are hidden on macOS.
+
+**Linux:** Needs `libwebkit2gtk-4.1-dev` + `libayatana-appindicator3-dev` + `librsvg2-dev`.
+
+**iOS/Android:** Not supported — `portable-pty` is target-gated out in `Cargo.toml` because mobile sandboxes forbid subprocess spawning. Terminal architecture is fundamentally incompatible.
 
 ## Architecture
 
 ### Frontend (`src/`)
 
-Entry: `main.tsx` → `AppErrorBoundary` → `App.tsx`. All inline styles, no CSS files (except xterm.css import). Colors via CSS custom properties set by `themeStore`. Heavy components (Monaco Editor/Diff) are lazy-loaded via `React.lazy()`.
+Entry: `main.tsx` → `AppErrorBoundary` → `App.tsx`. All inline styles (except `xterm.css`). Colors via CSS custom properties set by `themeStore`. Monaco Editor/DiffEditor are lazy-loaded.
 
-**Stores** (`stores/`): Zustand 5, 13 stores total:
-- `canvasStore` — Central: tiles, wires, transforms, z-stack, focus mode, multi-select, bookmarks, workspace tabs, snap guides, sticky notes, wire data bus
-- `projectStore` — Project CRUD, active project persistence
-- `themeStore` — 6 themes, CSS variable application, light/dark detection
-- `mcpStore` — MCP integrations (Slack, GitHub, Linear, Jira, Notion), per-project connections, HTTP proxy through Rust
-- `usageStore` — Agent session tracking, token/cost estimation, OpenUsage API polling
-- `agentMemoryStore` — Per-project persistent context injected into agent spawns
-- `recordingStore` — Session recording (PTY output with timestamps)
-- `commandHistoryStore` — Per-terminal command buffer
-- `templateStore` — 16 built-in + user-saved tile templates
-- `pluginStore` — Custom tile type registration via iframe sandbox
-- `toastStore`, `timelineStore`, `clipboardStore`, `paletteStore`
+**Stores (`stores/`, Zustand 5, 14 total):**
+- `canvasStore` — Central state: tiles, wires, transforms, z-stack, focus mode, multi-select, bookmarks, workspace tabs, snap guides, sticky notes, wire data bus (500KB cap per PTY)
+- `projectStore` — Project CRUD, active-project persistence. Starts empty — users add projects via the + button in the sidebar.
+- `themeStore` — 6 themes (5 dark + 1 light `Slate`). CSS var application via `applyThemeToDOM()`. Light themes get dark tile surfaces + dark chrome.
+- `mcpStore` — Per-project MCP connections (Slack/GitHub/Linear/Jira/Notion). Subscribed to `projectStore` for project-switch reloads. Sync is sequential with 250ms jitter. Error toasts on failures (once per connection per session).
+- `usageStore` — Agent session tracking + token/cost estimation. Auto-tracks via `canvasStore` subscription.
+- `agentMemoryStore` — Per-project persistent context injected into every new agent spawn (after 2s delay, with ANSI escape stripping).
+- `recordingStore` — Session replay. Events coalesced within 10ms window. Auto-stops at 50k events.
+- `commandHistoryStore` — Per-terminal command buffer.
+- `templateStore` — 16 built-in + user templates in localStorage.
+- `pluginStore` — Custom tile types via sandboxed iframes.
+- `toastStore`, `timelineStore`, `clipboardStore`, `paletteStore`.
 
-**Tile system**: 15 tile types (discriminated union on `type` field in `types/index.ts`): agent, terminal, editor, diff, note, todo, kanban, filetree, git, browser, runner, ssh, docker, usage, group. Each tile component in `components/tiles/`. All wrapped by `TileShell.tsx` (memo'd) which provides: drag-to-move with tile-to-tile snapping, edge resize, z-ordering, focus mode dimming, title bar with clone/pin/detach/template/close buttons.
+**Tile system:** 15 types via discriminated union in `types/index.ts` (agent, terminal, editor, diff, note, todo, kanban, filetree, git, browser, runner, ssh, docker, usage, group). Each has a component in `components/tiles/`. `TileShell.tsx` (memo'd) wraps every tile with drag + resize + snap + z-order + title-bar chrome (5 buttons: pin/clone/detach/template/close, shown on hover).
 
-**Canvas** (`components/canvas/`): `InfiniteCanvas.tsx` — transform layer, rubber-band selection (Shift+drag), snap alignment guides, sticky notes, workspace tabs, minimap, tile dock, auto-save (2s disk + 500ms localStorage cache), auto-snapshot (every 5 min for time-travel). `useCanvas.ts` hook handles pan/zoom.
+**Canvas (`components/canvas/`):** `InfiniteCanvas.tsx` is the workhorse — transform layer, rubber-band (Shift+drag), snap guides, sticky notes, workspace tabs, minimap, tile dock, auto-save (2s disk + 500ms localStorage cache), auto-snapshot (every 5 min for time-travel).
 
-**IPC** (`utils/ipc.ts`): All Tauri `invoke()` calls wrapped here. Components never call `invoke()` directly. Includes wrappers for PTY, agents, git (11 commands), docker, workspace, filesystem, projects, timeline, and HTTP proxy.
-
-**Theme** (`design/tokens.ts` + `stores/themeStore.ts`): All color values in tokens.ts are CSS `var(--tx-*)` references. 6 themes: Electric, Phantom, Ember, Ice, Snow (dark), Slate (light). Light themes get dark tile surfaces, dark chrome bars, and white text automatically via `isLightBg()` detection in `applyThemeToDOM()`.
+**IPC (`utils/ipc.ts`):** All `invoke()` calls wrapped here. Components never call `invoke()` directly. Includes: PTY, agents, 11 git commands, docker, workspace, filesystem, projects, timeline, and `http_fetch` (HTTP proxy with SSRF guards).
 
 ### Backend (`src-tauri/`)
 
-Entry: `main.rs` → `lib.rs` (Tauri builder, plugins, command registration, PTY cleanup on window destroy).
+Entry: `main.rs` → `lib.rs` (Tauri builder, plugin registration, PTY cleanup on `WindowEvent::Destroyed`).
 
-**Commands** (`commands/`):
-- `terminal.rs` — PTY spawn/write/resize/kill. Writes are chunked to 256 bytes to prevent Windows pipe buffer overflow.
-- `agents.rs` — CLI agent lifecycle. On Windows, spawns through `cmd.exe /C` for `.cmd` scripts. Validates binary names against path injection.
-- `git.rs` — 11 commands: available, clone, status, log, branches, checkout, diff_summary, files_status, stage, unstage, commit. UTF-8-safe string parsing.
-- `docker.rs` — docker_available, docker_list_containers via `tokio::process::Command`.
-- `http_proxy.rs` — `http_fetch` command proxies HTTP requests through Rust (bypasses WebView CSP/CORS for MCP API calls). HTTPS-only with User-Agent header.
-- `workspace.rs` — Canvas state persistence + snapshots. Path traversal sanitization.
-- `filesystem.rs` — Directory tree + watcher. Duplicate watch prevention.
-- `projects.rs` — CRUD persisted to `~/.config/terminalx/projects.json`.
-- `timeline.rs` — Event recording, capped at 10k.
+**Commands (`commands/`):**
+- `terminal.rs` — PTY lifecycle. Writes chunked to 256 bytes (Windows pipe buffer safety). **Public `pty_spawn` uses `SHELL_ALLOWLIST`** (bash/zsh/sh/fish/powershell/cmd/ssh/docker). **Internal `pty_spawn_internal`** bypasses the allowlist for trusted callers (agent spawn).
+- `agents.rs` — Claude/Codex/Gemini. Windows wraps through `cmd.exe /C` for `.cmd` scripts. Validates custom command args (null bytes + 16KB cap). Routes through `pty_spawn_internal`.
+- `git.rs` — 11 commands. `validate_git_url()` rejects `ext::` / `transport::` remote helpers, loopback hosts, malformed URLs. Clone uses `git -c protocol.ext.allow=never -c protocol.file.allow=never` + `--` to block remote-helper RCE. Branch names validated against refname rules.
+- `http_proxy.rs` — `http_fetch` for MCP API calls. **SSRF-hardened:** blocks RFC 1918 private IPs, CGNAT (100.64/10), link-local, loopback, multicast, IPv6 ULA (fc00::/7), URL credentials. HTTPS-only for non-loopback hosts. 10MB response / 5MB body caps.
+- `filesystem.rs` — `read_file_tree` canonicalizes paths and rejects anything outside `$HOME`, `/tmp`, `/Users`, `/Volumes`, `/workspace`, `/workspaces`, `/srv`, `/home`. Symlink skip prevents infinite recursion. Directory watchers validated (exists + is_dir) and deduplicated.
+- `docker.rs` — `tokio::process::Command` (not PTY). UTF-8-safe truncation + 500-container cap.
+- `workspace.rs` — Atomic writes via temp-file + rename. `sanitize_name` rejects path separators, `..`, null bytes, colons, 255+ chars. Snapshot list capped at 10k.
+- `projects.rs` — Persisted to `~/.config/terminalx/projects.json`.
+- `timeline.rs` — Event recording capped at 10k with `rotate_left + truncate`.
 
-**State** (`state/`): `AppState` holds `PtyManager` (PTY sessions with 256-byte chunked writes), agent registry, timeline events, file watchers — all behind `parking_lot::Mutex`. `shutdown_all()` called on window destroy.
+**State (`state/`):** `AppState` owns `PtyManager`, `AgentRegistry`, `Timeline`, `Watchers` — all behind `parking_lot::Mutex`. `PtyManager` implements `Drop` for automatic cleanup. Session IDs are uniqueness-checked on insert.
+
+**Security (`capabilities/default.json`):** `fs:default` has explicit allow (`$APPDATA/**`, `$APPCONFIG/**`, `$APPLOCALDATA/**`, `$DOCUMENT/**`, `$DESKTOP/**`, `$HOME/Projects/**`) and deny (`**/.env`, `.ssh/**`, `.aws/**`, `.config/gcloud/**`). CSP has no `'unsafe-inline'` in `script-src`.
 
 ## Critical Patterns
 
-### Zustand selector infinite loop (THE #1 CRASH CAUSE)
-NEVER create new objects/arrays inside a Zustand selector. This causes infinite re-renders:
+### #1 CRASH CAUSE: Zustand selectors creating new objects
+
+NEVER create new objects/arrays inside a Zustand selector. This is THE source of infinite render loops.
+
 ```ts
-// BAD — creates new array every render → infinite loop
+// ❌ INFINITE LOOP — creates new array every render
 useCanvasStore(s => s.tiles[s.activeProject] || [])
-useCanvasStore(s => s.workspaceNames[s.activeProject] || ['Default'])
 
-// GOOD — module-level constant, stable identity
-const EMPTY: Tile[] = [];
-useCanvasStore(s => s.tiles[s.activeProject] ?? EMPTY)
+// ✅ CORRECT — stable reference via module-level constant
+const EMPTY_TILES: Tile[] = [];
+useCanvasStore(s => s.tiles[s.activeProject] ?? EMPTY_TILES)
 ```
-This applies to `|| []`, `|| {}`, `?? []`, `?? {}` inside ANY `useXxxStore(s => ...)` call. Always use a module-level constant for fallback values.
 
-### xterm.js keyboard capture
-xterm's hidden `<textarea>` cannot receive focus inside WebView2's CSS-transformed canvas. `xtermInput.ts` bypasses it entirely — captures `keydown` on the container div and translates keys to VT sequences. Also handles image paste (saves to file, pastes path). Applied in all 4 xterm consumers: TerminalTile, AgentTile, TerminalPane, RunnerTile.
+Applies to `|| []`, `|| {}`, `?? []`, `?? {}` inside ANY `useXxxStore(s => ...)`.
+
+### xterm keyboard capture
+
+xterm's hidden `<textarea>` can't receive focus inside WebView2's CSS-transformed canvas. `xtermInput.ts` bypasses it entirely — captures `keydown` on the container div and translates keys to VT sequences. Also handles image paste (saves to file, pastes path). Applied in all 4 xterm consumers: TerminalTile, AgentTile, TerminalPane, RunnerTile.
 
 ### PTY write chunking
-Large text writes to PTY get truncated on Windows. The Rust `PtyManager.write()` chunks all writes to 256 bytes with flush between each chunk. Frontend `TodoTile` auto-dispatch also chunks at 128 bytes with 50ms delays for agent prompts.
+
+Large PTY writes get truncated on Windows. `PtyManager.write()` chunks ALL writes to 256 bytes with flush between each. Frontend auto-dispatch (TodoTile) additionally chunks at 128 bytes with 50ms delay before sending `\r`.
+
+### Agent spawn pipeline
+
+`agentSpawn` IPC → resolves binary (claude/codex/gemini or custom command) → validates args → on Windows wraps in `cmd.exe /C` → calls `pty_spawn_internal` (NOT `pty_spawn` — bypasses SHELL_ALLOWLIST because agents aren't shells) → injects agent memory context after 2s delay.
 
 ### Tauri event listener cleanup
-`onPtyOutput`, `onPtyExit`, `onAgentStatus` return `Promise<UnlistenFn>`. Use a `mounted` guard in useEffect cleanup to handle race conditions where the promise resolves after unmount.
+
+`onPtyOutput`, `onPtyExit`, `onAgentStatus` return `Promise<UnlistenFn>`. Use a `mounted` flag pattern in useEffect cleanup to handle the async resolution race.
 
 ### Canvas coordinate conversion
-Screen → canvas: `(screenX - transform.x) / transform.scale`. Use `screenToCanvas()` from `utils/layout.ts`.
+
+`(screenX - transform.x) / transform.scale`. Use `screenToCanvas()` from `utils/layout.ts`.
+
+### Platform detection
+
+`utils/platform.ts` — synchronous `isMac()` / `isWindows()` / `modShortcut('K')` helpers. Used to hide custom window buttons on macOS (native traffic lights render via `titleBarStyle: "Overlay"`) and to show `⌘K` vs `Ctrl+K` labels.
 
 ### Light theme surface inversion
-When `isLightBg()` is true, `applyThemeToDOM()` sets dark surface colors (`#262b22`, `#2d3228`) so tiles and chrome have dark backgrounds with white text, while the canvas stays light. xterm themes also flip via `isLightTheme()` in each terminal component.
+
+When `isLightBg()` is true, `applyThemeToDOM()` sets dark surface colors so tiles and chrome stay dark with white text while the canvas background is light. xterm terminals also flip via `isLightTheme()` in each terminal component.
+
+### HTTP proxy for MCP
+
+MCP API calls (Slack/GitHub/Linear/Jira/Notion) MUST go through `httpFetch` (Rust proxy) — direct `fetch()` is blocked by WebView CSP + CORS. The proxy also enforces SSRF guards.
+
+### Plugin sandbox boundary
+
+`PluginTile` iframe uses `sandbox="allow-scripts allow-forms"` — no `allow-same-origin`, no `allow-popups`. `postMessage` targets the plugin's origin specifically (not `*`). Received messages validate `e.origin` against `plugin.entryUrl`.
 
 ## Key Data Flows
 
-**PTY:** TerminalTile → `usePty` hook → `ipc.ts` (`ptySpawn`) → Rust `terminal.rs` → `portable-pty` → reader thread → Tauri `emit("pty-output")` → frontend `listen` → `xterm.write()` + `wireData` + `recordingStore`
+**PTY:** TerminalTile → `usePty` → `ipc.ts (ptySpawn)` → `terminal.rs` → `portable-pty` → reader thread → `emit("pty-output")` → frontend `listen` → `xterm.write()` + `canvasStore.wireData` + `recordingStore`.
 
-**Wiring:** `useWiringEngine` hook subscribes to canvasStore. 5 wire types: context-pipe, agent-chain, refresh-trigger, task-assign, diff-feed. Agent chains pipe last 50 lines on completion. Auto-recovery: runner failure → dispatches error to wired agent.
+**Wiring:** `useWiringEngine` subscribes to canvasStore. 5 wire types — `context-pipe`, `agent-chain`, `refresh-trigger`, `task-assign`, `diff-feed`. Agent chains pipe last 50 lines on completion. Auto-recovery: Runner `status === 'fail'` + wire to Agent → error auto-dispatched to agent PTY.
 
-**MCP Tasks:** Slack/GitHub/Linear/Jira/Notion → `mcpStore.syncConnection()` → `httpFetch` IPC (Rust proxy) → API response → filtered by `seenTaskIds` → displayed in TodoTile. Auto-dispatch: if "Auto" is on, new tasks are chunked-written to agent PTY.
+**MCP tasks:** `syncConnection` → `httpFetch` IPC → JSON parse → filter by `seenTaskIds` → TodoTile "FROM INTEGRATIONS" panel. Auto-dispatch: if "Auto" toggle on, new tasks are chunk-written to agent PTY with `\r` after.
 
-**Persistence:** 3 layers — localStorage cache (500ms), IPC disk save (2s debounce), `beforeunload` immediate save. Restore priority: disk first, localStorage fallback. Auto-snapshots every 5 min for time-travel rollback.
+**Persistence:** 3 layers — (1) localStorage cache (500ms, quota-exceeded handler GCs old auto-snapshots), (2) IPC disk save (2s debounce, atomic via temp+rename), (3) `beforeunload` immediate save. Restore priority: disk → localStorage fallback. Auto-snapshots every 5 min for time-travel (`Ctrl+K → Time Travel`).
 
-**Agent Spawn:** `agentSpawn` IPC → Rust resolves binary → Windows: wraps in `cmd.exe /C` → `pty_spawn` → injects agent memory context after 2s delay if set.
+## Docs
+
+- `README.md` — Install instructions (per-OS: macOS/Windows/Linux/Fedora/Arch) + AI-agent install prompts for Claude/Codex/Gemini
+- `FEATURES.md` — Feature guide + X-post social copy
+- `CHANGELOG.md` — Keep-a-Changelog format, semver
+- `CONTRIBUTING.md` — Development workflow, architecture rules, PR checklist

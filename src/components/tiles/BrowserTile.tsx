@@ -147,7 +147,9 @@ export function BrowserTile({ tile }: BrowserTileProps) {
           ref={iframeRef}
           src={tile.url}
           title={`Browser: ${tile.url}`}
-          sandbox="allow-scripts allow-forms allow-popups"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads allow-popups-to-escape-sandbox"
+          referrerPolicy="no-referrer-when-downgrade"
+          allow="clipboard-read; clipboard-write; fullscreen"
           onLoad={() => setLoading(false)}
           onError={() => { setLoading(false); setLoadError(true); }}
           style={{

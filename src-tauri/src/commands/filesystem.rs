@@ -25,6 +25,23 @@ const IGNORED_DIRS: &[&str] = &[
 /// Read directory tree recursively (max depth 4).
 /// Rejects paths that resolve outside the user's home / well-known project roots
 /// to limit what a compromised renderer can enumerate.
+/// Strip the Windows UNC verbatim prefix (`\\?\`) from a path so comparisons
+/// against `dirs::home_dir()` (which never includes it) work correctly.
+fn strip_verbatim_prefix(p: &std::path::Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = p.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            // UNC form: \\?\UNC\server\share\... -> \\server\share\...
+            if let Some(unc_rest) = rest.strip_prefix("UNC\\") {
+                return PathBuf::from(format!(r"\\{}", unc_rest));
+            }
+            return PathBuf::from(rest);
+        }
+    }
+    p.to_path_buf()
+}
+
 #[tauri::command]
 pub async fn read_file_tree(
     path: String,
@@ -34,7 +51,8 @@ pub async fn read_file_tree(
         return Err("Invalid path".to_string());
     }
     let root = PathBuf::from(shellexpand::tilde(&path).to_string());
-    let canonical = root.canonicalize().map_err(|e| format!("Path error: {}", e))?;
+    let canonical_raw = root.canonicalize().map_err(|e| format!("Path error: {}", e))?;
+    let canonical = strip_verbatim_prefix(&canonical_raw);
     if !is_path_allowed(&canonical) {
         return Err("Path is outside the allowed roots (home dir, common project folders)".to_string());
     }
@@ -42,17 +60,31 @@ pub async fn read_file_tree(
 }
 
 fn is_path_allowed(canonical: &std::path::Path) -> bool {
-    let home = match dirs::home_dir() { Some(h) => h, None => return false };
-    // Allow anything under $HOME, plus a few common project mount points.
-    if canonical.starts_with(&home) { return true; }
-    let roots = [
-        "/tmp", "/var/folders",               // macOS temp
-        "/Users",                             // macOS home root (tests, shared work)
-        "/Volumes",                           // external drives
-        "/workspace", "/workspaces", "/srv",  // common container mounts
-        "/home",                              // Linux home root
-    ];
-    roots.iter().any(|r| canonical.starts_with(r))
+    if let Some(home) = dirs::home_dir() {
+        let home_clean = strip_verbatim_prefix(&home);
+        if canonical.starts_with(&home_clean) { return true; }
+    }
+    #[cfg(windows)]
+    {
+        // Allow common Windows roots: user profile dir, project dirs under drives
+        let roots = [
+            r"C:\Users", r"D:\", r"E:\",       // drive letters
+            r"C:\workspace", r"C:\src",
+        ];
+        if roots.iter().any(|r| canonical.starts_with(r)) { return true; }
+    }
+    #[cfg(not(windows))]
+    {
+        let roots = [
+            "/tmp", "/var/folders",               // macOS temp
+            "/Users",                             // macOS home root
+            "/Volumes",                           // external drives
+            "/workspace", "/workspaces", "/srv",  // common container mounts
+            "/home",                              // Linux home root
+        ];
+        if roots.iter().any(|r| canonical.starts_with(r)) { return true; }
+    }
+    false
 }
 
 fn read_dir_recursive(dir: &PathBuf, depth: u32, max_depth: u32) -> Vec<FileNode> {
