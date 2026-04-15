@@ -52,42 +52,86 @@ TerminalX picks the right wire type automatically based on what you connect. You
 
 **What you wire:** Terminal → Agent (or Runner → Agent)
 
-**What it does:** Accumulates everything the terminal prints into a buffer. You **explicitly pipe it into the agent** by clicking the glowing **"Pipe"** button in the agent's tile header.
+**What it does:** Accumulates terminal output into a buffer, then lets you inject it into the agent as context. Two modes — **manual** (you click Pipe when ready) and **auto** (pipes automatically after source silence).
 
-**How the Pipe button works:**
+When an agent has an incoming `context-pipe` wire, two new buttons appear in its header:
 
-- The Pipe button appears on any agent tile with an incoming context-pipe wire
-- It **glows accent-colored and shows a byte count** (`Pipe (142)`) whenever there's fresh terminal output to pipe
-- Click it → the accumulated output is injected into the agent with a `--- Piped from <source> ---` header
-- A toast confirms how many bytes were piped
-- After clicking, the button dims until more output arrives — so you can pipe incrementally
+```
+Status dot    Elapsed    ┌──────────┐  ┌────────┐   Config
+     ●       3m 12s      │ ● Pipe   │  │ ● Auto │    ⚙
+                         │   (142)  │  │        │
+                         └──────────┘  └────────┘
+```
 
-**Why explicit?** Auto-piping every keystroke would spam the agent. Manual pipe means YOU decide when the agent gets fresh context — usually right before asking it a question.
+**Everything you can do:**
 
-**Want hands-free mode?** Each agent tile now has an **Auto** toggle right next to the Pipe button:
+| Control | Action | Result |
+|---------|--------|--------|
+| **Pipe button** — left-click | Manually inject buffered output | Piped + toast `"Piped N chars"` |
+| **Pipe button** — right-click | Pipe **full history** (including pre-wire buffer) | Resets offset to 0, sends everything |
+| **Pipe button** — hover | Tooltip shows exact byte count + source count | `"Click to pipe 142 bytes from 1 tile"` |
+| **Auto toggle** — left-click | Turn hands-free auto-pipe on/off | Green glow + green dot when ON |
+| **Auto toggle** — right-click | Edit the auto-prompt that gets sent after piping | Dialog with example prompts |
+| **Auto toggle** — hover when ON | Tooltip shows current prompt preview | `"Auto-pipe ON — Auto-prompt: 'Analyze...'"` |
 
-1. **Click Auto** — it glows green, auto-pipe is now on
-2. **Right-click Auto** — opens a dialog to set your auto-prompt (what the agent should do after receiving context)
+**Visual states of the Pipe button:**
 
-Once enabled, when the terminal produces output and goes silent for 2 seconds, the agent **auto-pipes the new content + auto-sends your prompt**. Claude answers without you lifting a finger. Full hands-free chain: terminal → agent → response.
+| State | Appearance | Meaning |
+|-------|-----------|---------|
+| No unread data | Dim grey outline, no glow | Nothing new to pipe — button is disabled |
+| Unread data available | Accent border + pulsing glow + byte count | Click to pipe; button gently pulses every 2s |
+| Auto is ON | Label stays **"Pipe"** (Auto indicator is the separate green toggle) | — |
 
-> The Auto toggle is the same pattern as the Todo tile's auto-dispatch toggle — click once to turn on, right-click to configure.
-
-**Example auto-prompts:**
-- `"Analyze the output above and explain what happened."`
-- `"If there are errors, suggest fixes."`
-- `"Summarize in one sentence."`
-- Leave blank = pipe silently (context loaded, no automatic response)
-
-**Example workflow:**
+**Manual mode — the standard flow:**
 
 1. Wire Terminal → Claude agent
-2. Run a command in the terminal: `npm test`
-3. See failing test output
-4. Pipe button glows with byte count
-5. Click Pipe → test output goes into Claude's context
-6. Type in Claude: "Fix the failing tests above"
-7. Claude reads the piped output + your prompt → fixes the code
+2. Run `npm test` in the terminal
+3. Test output scrolls, Pipe button lights up: `● Pipe (1.2k)`
+4. Click the Pipe button → context injected into Claude
+5. Type into Claude: *"Fix the failing tests above"*
+6. Claude reads your prompt + the `--- Piped from terminal ---` block and starts fixing
+
+**Hands-free mode (auto-pipe):**
+
+The Auto toggle (the second button, next to Pipe) turns on full automation. When enabled:
+
+- TerminalX watches the source tile's output buffer
+- When output has been **silent for 2 seconds** (configurable), it auto-pipes the accumulated text
+- If you've configured an **auto-prompt**, it's appended after the piped context and sent to the agent with `Enter` — so the agent starts responding immediately
+- A toast confirms: `"Auto-piped 142 chars + prompt"`
+
+**Two-step hands-free setup:**
+
+1. **Right-click the Auto toggle** → dialog opens:
+   > *"What should the agent do after auto-pipe? (leave blank = pipe silently)"*
+   
+   Type something like `"Analyze the output above and explain what happened."` → OK
+2. **Click the Auto toggle** → it glows green → hands-free mode is live
+
+From now on, every command you run in the connected terminal will be piped to the agent with your prompt, automatically. Close the loop and walk away.
+
+**Example auto-prompts:**
+
+| Prompt | Use case |
+|--------|----------|
+| `"Analyze the output above and explain what happened."` | Live log monitoring / debugging |
+| `"If there are errors, suggest fixes."` | Test-driven development |
+| `"Summarize in one sentence."` | High-level overview of long outputs |
+| `"What's the next step based on this?"` | Continuous workflow guidance |
+| *(empty)* | Pipe silently — context loaded, no response until you prompt manually |
+
+**Why the 2-second delay?**
+
+Piping every keystroke would spam the agent with partial output mid-command. Waiting for 2 seconds of silence catches the natural "command finished, shell returned to prompt" state. It's enough time for most commands to fully complete their output.
+
+> **Adjusting the idle timer:** Press `Ctrl+K` / `⌘K` → search **"Set Agent Idle Threshold"** → enter a value in seconds (1-300). Lower = snappier, higher = waits longer for slow commands.
+
+**Safety caps on what gets piped:**
+
+- **Only new output** — content that existed before the wire was created is ignored (no dumping the PowerShell welcome banner)
+- **Max 50 lines** per pipe — even if the terminal has 10,000 lines, only the last 50 get sent
+- **ANSI escape codes stripped** — no `\x1b[...]` junk reaches the agent
+- **Control chars removed** — keeps output clean and readable
 
 ---
 
@@ -132,6 +176,23 @@ Once enabled, when the terminal produces output and goes silent for 2 seconds, t
 **What you wire:** Agent → Diff
 
 **What it does:** When the agent completes, the diff tile receives a refresh signal. Pair this with a diff tile pointed at a specific file you care about.
+
+---
+
+## Agent tile — full button reference
+
+All the controls that appear on an agent tile's header, in left-to-right order:
+
+| Element | Purpose | Left-click | Right-click | Hover tooltip |
+|---------|---------|-----------|-------------|---------------|
+| 🟢 **Status dot** | Agent state (spawning / working / done / error / idle) | — | — | — |
+| **Elapsed** | Running time since spawn | — | — | — |
+| **Pipe (N)** | Inject buffered source context | Pipe new bytes only | Pipe full history | Byte count + source count |
+| **Auto** | Hands-free auto-pipe toggle | Toggle on/off | Edit auto-prompt | Current state + prompt preview |
+| ⚙ **Config gear** | Set custom CLI command | Open config panel | — | — |
+| ✕ **Close** | Remove the agent tile | Close tile | — | — |
+
+Only the **Pipe** and **Auto** buttons appear when an incoming `context-pipe` wire exists. The rest are always there.
 
 ---
 
@@ -253,6 +314,48 @@ Slack #tasks  →  Todo tile  →  Claude agent  →  Git tile
 
 ---
 
+## Hands-free Auto-Pipe playbooks
+
+Concrete configs you can copy. Set the auto-prompt via **right-click on the Auto toggle** of the agent tile.
+
+### Live log analysis
+
+**Setup:** Terminal tailing a log → Agent (Auto on)
+**Auto-prompt:** `"Explain any errors or warnings in the output above. If none, respond 'all good'."`
+**Result:** Every time a log entry appears and settles for 2s, Claude analyzes and speaks up only when something matters.
+
+### Command explainer
+
+**Setup:** Terminal → Agent (Auto on)
+**Auto-prompt:** `"In one sentence, explain what the command above does and what its output means."`
+**Result:** Every time you run something, Claude tells you what it did — great for learning new tools or reviewing output you don't fully understand.
+
+### SSH session babysitter
+
+**Setup:** SSH tile → Agent (Auto on)
+**Auto-prompt:** `"Watch for anomalies. If the output looks normal, stay silent. If something's wrong, alert me with details."`
+**Result:** A pair of eyes on your production SSH session. Silent when fine, loud when something breaks.
+
+### Docker container monitor
+
+**Setup:** Runner tile (`docker logs -f <container>`) → Agent (Auto on)
+**Auto-prompt:** `"If there's an error or unusual pattern, describe it. Otherwise respond 'ok'."`
+**Result:** Real-time container health narration from your AI.
+
+### Build error whisperer
+
+**Setup:** Runner tile (`cargo watch -x build`) → Agent (Auto on)
+**Auto-prompt:** `"If the build failed, diagnose the error and suggest the minimum fix."`
+**Result:** Every build failure gets an AI-generated fix suggestion automatically.
+
+### Pair-programming voiceover
+
+**Setup:** Terminal → Agent (Auto on), agent configured with **Agent Memory** set to `"You are my pair programmer. Explain what I'm doing and suggest improvements."`
+**Auto-prompt:** *(empty — silent pipe)*
+**Result:** Agent has full context of every command but only speaks up when you prompt it manually.
+
+---
+
 ## Troubleshooting
 
 ### The ports don't appear when I hover
@@ -270,6 +373,24 @@ Slack #tasks  →  Todo tile  →  Claude agent  →  Git tile
 That's by design for `context-pipe` — the wire just *connects* them. You need to **click the glowing Pipe button** in the agent tile's header to actually inject the terminal's output. The button shows a byte count (`Pipe (142)`) whenever there's fresh output available.
 
 If you don't see a Pipe button on the agent tile, the wire wasn't created correctly. Hover the tiles — the wire should be visible as a line between them. Right-click it to delete and re-wire.
+
+### I turned on Auto but it never auto-pipes
+
+Check these in order:
+
+1. **Is the Auto toggle actually green?** If it's still grey, the click didn't land. Try again.
+2. **Is there anything in the source buffer?** The Pipe button's byte count must be > 0. Run a command in the source terminal first to produce output.
+3. **Did you wait long enough?** Auto fires after 2 seconds of source silence. If your terminal is still outputting or being actively used, the timer keeps resetting.
+4. **Is the source tile hung?** If the terminal is waiting for input (e.g. a prompt like `(y/N)`), it's technically "silent" but you're the one blocking — this still counts as silence and auto-pipe will fire normally.
+5. **Does the auto-prompt look right?** Right-click the Auto toggle and check the dialog shows your prompt. Blank is valid (silent pipe, no agent response).
+
+### Auto-pipe is too aggressive — it fires while I'm still typing commands
+
+Increase the idle threshold: `Ctrl+K` / `⌘K` → **"Set Agent Idle Threshold"** → enter a higher number (e.g., 5 or 10 seconds).
+
+### Auto-pipe dumps junk into the agent (ANSI codes, welcome banners)
+
+Latest version strips all that automatically. If you're seeing escape codes in the piped content, you're on an old build — pull `main` and restart.
 
 ### The agent finishes but the wire doesn't fire
 
