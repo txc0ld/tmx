@@ -63,6 +63,16 @@ Drag from one tile's output port to another's input port. The app infers the wir
 | [**Auto-pipe**](./agents/auto-pipe.md) | Hands-free source → agent once the source goes idle |
 | [**Pipe Context button**](./agents/pipe-button.md) | Manual one-shot pipe for wired sources |
 
+## Workflows & patterns
+
+High-level composition features that wrap the primitives into reusable flows.
+
+| Page | Summary |
+|---|---|
+| [**Prompt library**](./workflows/prompt-library.md) | 8 curated prompts + your saves, one-click dispatch to any agent |
+| [**Starter layouts**](./workflows/starter-layouts.md) | Detect project type (Rust / Tauri / Next.js / …) → spawn matching tile set |
+| [**Wire blueprints**](./workflows/blueprints.md) | Save tile + wire compositions as reusable patterns — components for workflows |
+
 ## External integrations (MCP)
 
 | Page | Summary |
@@ -108,6 +118,7 @@ Drag from one tile's output port to another's input port. The app infers the wir
 | [**Bundle chunking**](./platform/bundle-chunking.md) | How xterm / motion / fuse are split |
 | [**Window chrome**](./platform/window-chrome.md) | Platform-aware title bar + controls |
 | [**Security**](./platform/security.md) | CSP, SSRF, shell allowlist, path scoping |
+| [**Keychain secrets**](./platform/keychain-secrets.md) | MCP tokens in OS keychain, not localStorage |
 
 ---
 

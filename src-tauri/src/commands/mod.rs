@@ -7,3 +7,4 @@ pub mod projects;
 pub mod git;
 pub mod http_proxy;
 pub mod docker;
+pub mod secrets;

@@ -74,21 +74,21 @@
       <span>MULTI_AGENT</span><span class="ticker-dot">&bull;</span>
       <span>6_WIRE_TYPES</span><span class="ticker-dot">&bull;</span>
       <span>15_TILE_TYPES</span><span class="ticker-dot">&bull;</span>
+      <span>WIRE_BLUEPRINTS</span><span class="ticker-dot">&bull;</span>
+      <span>PROMPT_LIBRARY</span><span class="ticker-dot">&bull;</span>
       <span>MCP_INTEGRATIONS</span><span class="ticker-dot">&bull;</span>
+      <span>OS_KEYCHAIN</span><span class="ticker-dot">&bull;</span>
       <span>NATIVE_PTY</span><span class="ticker-dot">&bull;</span>
       <span>RUST_BACKEND</span><span class="ticker-dot">&bull;</span>
-      <span>MONACO_EDITOR</span><span class="ticker-dot">&bull;</span>
-      <span>AUTO_SAVE</span><span class="ticker-dot">&bull;</span>
       <span>TIME_TRAVEL</span><span class="ticker-dot">&bull;</span>
-      <span>FOCUS_MODE</span><span class="ticker-dot">&bull;</span>
       <span>ZERO_ELECTRON</span><span class="ticker-dot">&bull;</span>
       <span>INFINITE_CANVAS</span><span class="ticker-dot">&bull;</span>
       <span>MULTI_AGENT</span><span class="ticker-dot">&bull;</span>
-      <span>6_WIRE_TYPES</span><span class="ticker-dot">&bull;</span>
-      <span>15_TILE_TYPES</span><span class="ticker-dot">&bull;</span>
-      <span>MCP_INTEGRATIONS</span><span class="ticker-dot">&bull;</span>
+      <span>WIRE_BLUEPRINTS</span><span class="ticker-dot">&bull;</span>
+      <span>PROMPT_LIBRARY</span><span class="ticker-dot">&bull;</span>
+      <span>STARTER_LAYOUTS</span><span class="ticker-dot">&bull;</span>
+      <span>OS_KEYCHAIN</span><span class="ticker-dot">&bull;</span>
       <span>NATIVE_PTY</span><span class="ticker-dot">&bull;</span>
-      <span>RUST_BACKEND</span><span class="ticker-dot">&bull;</span>
       <span>ZERO_ELECTRON</span><span class="ticker-dot">&bull;</span>
     </div>
   </div>
@@ -246,9 +246,9 @@
           <h4 class="specs-heading">HARDENED</h4>
           <ul class="specs-list">
             <li>SSRF-guarded HTTP with pinned DNS</li>
+            <li>MCP tokens in OS keychain, not localStorage</li>
             <li>64-PTY cap, shell allowlist, path scope</li>
             <li>Workspace schema validation on import</li>
-            <li>92 frontend + 38 Rust unit tests</li>
           </ul>
         </div>
         <div class="specs-col">
@@ -276,6 +276,15 @@
             <li>Templates: save tile config, pin to dock</li>
             <li>Per-PTY command history + recall</li>
             <li>Session recording &amp; replay (50k events)</li>
+          </ul>
+        </div>
+        <div class="specs-col">
+          <h4 class="specs-heading">WORKFLOWS</h4>
+          <ul class="specs-list">
+            <li>Prompt library: 8 built-in + your saves, ⌘K dispatch</li>
+            <li>Starter layouts: detect Rust / Tauri / Next.js / Python / Go</li>
+            <li>Wire blueprints: save tile + wire compositions as patterns</li>
+            <li>Multi-agent debate blueprint: Claude + Codex + Gemini side-by-side</li>
           </ul>
         </div>
       </div>

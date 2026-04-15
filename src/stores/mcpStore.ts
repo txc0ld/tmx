@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { httpFetch } from '@/utils/ipc';
+import { httpFetch, secretSet, secretGet, secretDelete } from '@/utils/ipc';
 
 // Per-connection backoff state. Keyed off connection id so replacing a
 // connection resets its state and swapping projects doesn't cross-pollinate.
@@ -133,6 +133,82 @@ function getProjectId(): string {
   }
 }
 
+// ─── Secret handling (OS keychain bridge) ────────────────
+// MCP config has two tiers: non-secret (channel ID, Jira host, GitHub
+// repo) lives in localStorage; secret (bot token, API key, OAuth token)
+// lives in the OS keychain via secretSet/Get/Delete IPC. The store
+// memoizes resolved secrets per-connection so we only pay the IPC hop
+// on project load, not every sync.
+
+function keychainAccount(connectionId: string, fieldKey: string): string {
+  return `mcp:${connectionId}:${fieldKey}`;
+}
+
+/** Connector-type-specific set of field keys that should live in the keychain. */
+function secretFieldsFor(type: McpType): string[] {
+  const def = MCP_DEFINITIONS.find(d => d.type === type);
+  if (!def) return [];
+  return def.configFields.filter(f => f.secret).map(f => f.key);
+}
+
+/** Split a config object into (nonSecret, secret) parts. */
+function splitSecrets(type: McpType, config: Record<string, string>): {
+  nonSecret: Record<string, string>;
+  secret: Record<string, string>;
+} {
+  const secretKeys = new Set(secretFieldsFor(type));
+  const nonSecret: Record<string, string> = {};
+  const secret: Record<string, string> = {};
+  for (const [k, v] of Object.entries(config)) {
+    if (secretKeys.has(k)) {
+      if (v) secret[k] = v;
+    } else {
+      nonSecret[k] = v;
+    }
+  }
+  return { nonSecret, secret };
+}
+
+/** Persist secret fields to the keychain. Silently ignores empty strings. */
+async function persistSecrets(
+  connectionId: string,
+  secretFields: Record<string, string>,
+): Promise<void> {
+  await Promise.all(
+    Object.entries(secretFields).map(([k, v]) =>
+      v ? secretSet(keychainAccount(connectionId, k), v) : Promise.resolve(),
+    ),
+  );
+}
+
+/** Delete all keychain entries for a connection. */
+async function clearSecrets(connectionId: string, type: McpType): Promise<void> {
+  await Promise.all(
+    secretFieldsFor(type).map(k =>
+      secretDelete(keychainAccount(connectionId, k)).catch(() => {}),
+    ),
+  );
+}
+
+/** Hydrate secret fields from the keychain into the in-memory config. */
+async function hydrateSecrets(conn: McpConnection): Promise<void> {
+  const keys = secretFieldsFor(conn.type);
+  if (keys.length === 0) return;
+  const results = await Promise.all(
+    keys.map(async k => {
+      try {
+        const val = await secretGet(keychainAccount(conn.id, k));
+        return [k, val] as const;
+      } catch {
+        return [k, null] as const;
+      }
+    }),
+  );
+  for (const [k, val] of results) {
+    if (val != null) conn.config[k] = val;
+  }
+}
+
 function loadConnections(): McpConnection[] {
   try {
     const pid = getProjectId();
@@ -145,7 +221,54 @@ function loadConnections(): McpConnection[] {
 
 function saveConnections(connections: McpConnection[]) {
   const pid = getProjectId();
-  localStorage.setItem(`tx-mcp-connections-${pid}`, JSON.stringify(connections));
+  // Strip secret fields before persisting — they live in the keychain.
+  const sanitized = connections.map(c => {
+    const { nonSecret } = splitSecrets(c.type, c.config);
+    return { ...c, config: nonSecret };
+  });
+  localStorage.setItem(`tx-mcp-connections-${pid}`, JSON.stringify(sanitized));
+}
+
+/**
+ * One-shot migration: on store creation, scan localStorage for any
+ * connections that still carry secret fields in their config (pre-
+ * keychain writes), move them into the keychain, and re-save without
+ * the plaintext.
+ *
+ * Runs per-project the first time that project's connections are loaded.
+ * Safe to run multiple times — idempotent.
+ */
+export async function migrateMcpSecretsToKeychain(): Promise<{ moved: number; scanned: number }> {
+  let moved = 0;
+  let scanned = 0;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('tx-mcp-connections-')) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      let conns: McpConnection[];
+      try { conns = JSON.parse(raw); } catch { continue; }
+      if (!Array.isArray(conns)) continue;
+
+      let changed = false;
+      for (const conn of conns) {
+        scanned += 1;
+        const { nonSecret, secret } = splitSecrets(conn.type, conn.config);
+        if (Object.keys(secret).length === 0) continue;
+        // Found secrets in localStorage — migrate.
+        await persistSecrets(conn.id, secret);
+        conn.config = nonSecret;
+        moved += 1;
+        changed = true;
+      }
+      if (changed) localStorage.setItem(key, JSON.stringify(conns));
+    }
+  } catch {
+    // Don't crash the app on a failed migration — user sees a warning
+    // toast via the caller, and we'll retry next boot.
+  }
+  return { moved, scanned };
 }
 
 function loadSeenIds(): Set<string> {
@@ -170,12 +293,27 @@ export const useMcpStore = create<McpState>((set, get) => ({
   seenTaskIds: loadSeenIds(),
 
   addConnection: (conn) => {
+    const id = crypto.randomUUID();
+    const newConn: McpConnection = {
+      ...conn,
+      id,
+      status: 'disconnected',
+    };
+    // Persist secrets to the keychain before writing the sanitized config
+    // to localStorage. Fire-and-forget is fine — secretSet is fast and
+    // subsequent syncs re-hydrate from keychain on boot.
+    const { secret } = splitSecrets(newConn.type, newConn.config);
+    if (Object.keys(secret).length > 0) {
+      persistSecrets(id, secret).catch(() => {
+        import('@/stores/toastStore').then(({ useToastStore }) => {
+          useToastStore.getState().addToast(
+            'Failed to save API token to keychain. It may be unlocked on next sync.',
+            'warning',
+          );
+        });
+      });
+    }
     set(s => {
-      const newConn: McpConnection = {
-        ...conn,
-        id: crypto.randomUUID(),
-        status: 'disconnected',
-      };
       const next = [...s.connections, newConn];
       saveConnections(next);
       return { connections: next };
@@ -187,6 +325,7 @@ export const useMcpStore = create<McpState>((set, get) => ({
       const conn = s.connections.find(c => c.id === id);
       const next = s.connections.filter(c => c.id !== id);
       saveConnections(next);
+      if (conn) clearSecrets(id, conn.type).catch(() => {});
       // Drop tasks from the removed connection within the current project only
       const pid = getProjectId();
       const currentTasks = s.tasksByProject[pid] || [];
@@ -213,6 +352,11 @@ export const useMcpStore = create<McpState>((set, get) => ({
   syncConnection: async (id) => {
     const conn = get().connections.find(c => c.id === id);
     if (!conn) return;
+
+    // Hydrate secret fields from the keychain into the in-memory config
+    // before the sync runs. Secrets are never saved to state/localStorage,
+    // so every sync reads them fresh from the keychain.
+    await hydrateSecrets(conn);
 
     // Exponential backoff: if we've recently failed, skip this sync until
     // the backoff window elapses. Without this, a broken API gets hammered

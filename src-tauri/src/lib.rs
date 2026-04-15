@@ -80,6 +80,10 @@ pub fn run() {
             // Docker
             commands::docker::docker_available,
             commands::docker::docker_list_containers,
+            // OS keychain — MCP tokens + future sensitive values
+            commands::secrets::secret_set,
+            commands::secrets::secret_get,
+            commands::secrets::secret_delete,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

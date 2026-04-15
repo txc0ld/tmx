@@ -48,6 +48,16 @@ dirs = "6"
 shellexpand = "3"
 parking_lot = "0.12"
 
+# OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret
+# Service) for MCP tokens. `apple-native` + `windows-native` use the
+# built-in OS APIs; `linux-native-sync-persistent` routes through the
+# system Secret Service (gnome-keyring / kwallet / KeePassXC).
+keyring = { version = "3", features = [
+    "apple-native",
+    "windows-native",
+    "linux-native-sync-persistent",
+] }
+
 # PTY management — desktop only (iOS/Android don't allow subprocess spawning)
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 portable-pty = "0.8"

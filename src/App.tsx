@@ -16,7 +16,7 @@ import { SessionTimeline } from '@/components/timeline/SessionTimeline';
 import type { TileType, Tile } from '@/types';
 import type { TileTemplate } from '@/stores/templateStore';
 import '@/stores/clipboardStore'; // Initialize clipboard listener
-import { initMcpProjectSync } from '@/stores/mcpStore';
+import { initMcpProjectSync, migrateMcpSecretsToKeychain } from '@/stores/mcpStore';
 import { initUsageTracking } from '@/stores/usageStore';
 
 export const TILE_DEFAULTS: Record<TileType, { w: number; h: number }> = {
@@ -99,6 +99,22 @@ export default function App() {
   // or the app re-renders at the root.
   useEffect(() => initMcpProjectSync(), []);
   useEffect(() => initUsageTracking(), []);
+
+  // One-shot migration on app start: move any MCP secrets still living
+  // in localStorage into the OS keychain, strip them from the JSON
+  // config. Idempotent — no-ops after the first run.
+  useEffect(() => {
+    migrateMcpSecretsToKeychain().then(({ moved }) => {
+      if (moved > 0) {
+        import('@/stores/toastStore').then(({ useToastStore }) => {
+          useToastStore.getState().addToast(
+            `Moved ${moved} MCP token${moved === 1 ? '' : 's'} from localStorage to the OS keychain.`,
+            'info',
+          );
+        });
+      }
+    }).catch(() => { /* keychain unavailable — user sees errors on sync */ });
+  }, []);
 
   // Load persisted projects then init canvas + restore workspace
   useEffect(() => {

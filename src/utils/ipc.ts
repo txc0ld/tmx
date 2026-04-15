@@ -117,6 +117,22 @@ export async function getFileSize(path: string): Promise<number> {
   return invoke('get_file_size', { path });
 }
 
+// ─── OS keychain — sensitive value storage ────────────────
+// Never stores the value in localStorage. Use for API tokens, OAuth
+// secrets, anything you'd redact in a log. Account convention:
+// `<scope>:<subject>:<field>` — e.g. `mcp:<connection-id>:token`.
+export async function secretSet(account: string, value: string): Promise<void> {
+  return invoke('secret_set', { account, value });
+}
+
+export async function secretGet(account: string): Promise<string | null> {
+  return invoke('secret_get', { account });
+}
+
+export async function secretDelete(account: string): Promise<void> {
+  return invoke('secret_delete', { account });
+}
+
 export async function watchDirectory(path: string): Promise<void> {
   return invoke('watch_directory', { path });
 }
