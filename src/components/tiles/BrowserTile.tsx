@@ -18,7 +18,19 @@ export function BrowserTile({ tile }: BrowserTileProps) {
     if (normalized && !/^https?:\/\//i.test(normalized)) {
       normalized = 'http://' + normalized;
     }
+    // Validate final URL is http(s) — reject data:, javascript:, file:, etc.
+    try {
+      const parsed = new URL(normalized);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        setLoadError(true);
+        return;
+      }
+    } catch {
+      setLoadError(true);
+      return;
+    }
     setInputUrl(normalized);
+    setLoadError(false);
     useCanvasStore.getState().updateTile(tile.id, { url: normalized } as Partial<BrowserTileType>);
   }, [tile.id]);
 
@@ -135,7 +147,7 @@ export function BrowserTile({ tile }: BrowserTileProps) {
           ref={iframeRef}
           src={tile.url}
           title={`Browser: ${tile.url}`}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          sandbox="allow-scripts allow-forms allow-popups"
           onLoad={() => setLoading(false)}
           onError={() => { setLoading(false); setLoadError(true); }}
           style={{

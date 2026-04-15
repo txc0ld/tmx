@@ -146,8 +146,10 @@ export function AgentTile({ tile }: AgentTileProps) {
       const pid = useCanvasStore.getState().activeProject;
       const memory = useAgentMemoryStore.getState().getMemory(pid);
       if (memory) {
+        // Strip control chars and ANSI escapes to prevent terminal injection
+        const safeMem = memory.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
         setTimeout(() => {
-          ptyWriteCtx(id, `Project context: ${memory}`).catch(() => {});
+          ptyWriteCtx(id, `Project context: ${safeMem}`).catch(() => {});
           setTimeout(() => ptyWriteCtx(id, '\r').catch(() => {}), 300);
         }, 2000);
       }

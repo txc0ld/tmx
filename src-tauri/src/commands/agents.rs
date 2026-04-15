@@ -151,10 +151,12 @@ pub async fn agent_spawn(
     );
 
     // Emit initial status
-    let _ = app.emit("agent-status", AgentStatusChange {
+    if let Err(e) = app.emit("agent-status", AgentStatusChange {
         id: pty_id.clone(),
         status: AgentStatus::Working,
-    });
+    }) {
+        eprintln!("agent-status emit failed: {}", e);
+    }
 
     // Return the PTY ID so frontend can receive output
     Ok(pty_id)
@@ -167,8 +169,10 @@ pub async fn agent_kill(
     id: String,
 ) -> Result<(), String> {
     state.agent_registry.lock().remove(&id);
-    // Also kill the PTY
-    state.pty_manager.lock().kill(&id).ok();
+    // Also kill the PTY — log failures but don't block caller
+    if let Err(e) = state.pty_manager.lock().kill(&id) {
+        eprintln!("agent_kill: failed to kill PTY {}: {}", id, e);
+    }
     Ok(())
 }
 

@@ -57,6 +57,11 @@ fn read_dir_recursive(dir: &PathBuf, depth: u32, max_depth: u32) -> Vec<FileNode
             }
             let path = entry.path();
 
+            // Skip symlinks to prevent infinite recursion via loops
+            if path.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+                continue;
+            }
+
             if path.is_dir() {
                 if IGNORED_DIRS.contains(&name.as_str()) {
                     continue;
@@ -91,7 +96,19 @@ pub async fn watch_directory(
 ) -> Result<(), String> {
     use notify::{recommended_watcher, RecursiveMode, Watcher};
 
+    if path.contains('\0') {
+        return Err("Invalid path".to_string());
+    }
     let expanded = shellexpand::tilde(&path).to_string();
+
+    // Validate the path exists and is a directory before creating a watcher
+    let watch_path = PathBuf::from(&expanded);
+    if !watch_path.exists() {
+        return Err(format!("Path does not exist: {}", expanded));
+    }
+    if !watch_path.is_dir() {
+        return Err(format!("Path is not a directory: {}", expanded));
+    }
 
     // Skip if already watching this path
     if state.watchers.lock().contains_key(&expanded) {
@@ -105,12 +122,13 @@ pub async fn watch_directory(
                 .map(|p| p.to_string_lossy().to_string())
                 .collect();
             let summary = format!("{:?}: {}", event.kind, paths.join(", "));
-            let _ = app_clone.emit("fs-change", summary);
+            if let Err(e) = app_clone.emit("fs-change", summary) {
+                eprintln!("fs-change emit failed: {}", e);
+            }
         }
     })
     .map_err(|e| format!("Watcher error: {}", e))?;
 
-    let watch_path = PathBuf::from(&expanded);
     watcher
         .watch(&watch_path, RecursiveMode::Recursive)
         .map_err(|e| format!("Watch error: {}", e))?;

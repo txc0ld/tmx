@@ -144,6 +144,13 @@ export function RunnerTile({ tile }: RunnerTileProps) {
   const handleRun = async () => {
     if (tile.status === 'running' || !command.trim()) return;
 
+    // Warn if command looks like it contains secrets
+    const SECRET_PATTERNS = /(API[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|BEARER|AUTH)[=:\s]/i;
+    if (SECRET_PATTERNS.test(command)) {
+      const proceed = confirm('Command appears to contain a secret and will be saved to disk. Continue?');
+      if (!proceed) return;
+    }
+
     // Save command to tile
     useCanvasStore.getState().updateTile(tile.id, { command, status: 'running' } as Partial<RunnerTileType>);
 

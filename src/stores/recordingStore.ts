@@ -56,9 +56,19 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
       return;
     }
     const timestamp = Date.now() - s.startTime;
-    set(ss => ({
-      events: [...ss.events, { timestamp, ptyId, data }],
-    }));
+    // Coalesce bursts: if last event was <10ms ago for same PTY, merge
+    set(ss => {
+      const last = ss.events[ss.events.length - 1];
+      if (last && last.ptyId === ptyId && timestamp - last.timestamp < 10 && last.data.length + data.length < 8192) {
+        return {
+          events: [
+            ...ss.events.slice(0, -1),
+            { timestamp: last.timestamp, ptyId, data: last.data + data },
+          ],
+        };
+      }
+      return { events: [...ss.events, { timestamp, ptyId, data }] };
+    });
   },
 
   startReplay: () => set({ isReplaying: true, replayPosition: 0 }),

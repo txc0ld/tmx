@@ -210,7 +210,6 @@ export const useMcpStore = create<McpState>((set, get) => ({
     try {
       const allTasks = await fetchTasksForConnection(conn);
       const seen = get().seenTaskIds;
-      // Only keep tasks we haven't seen before
       const newTasks = allTasks.filter(t => !seen.has(t.id));
       set(s => ({
         tasks: [
@@ -220,7 +219,17 @@ export const useMcpStore = create<McpState>((set, get) => ({
       }));
       get().updateConnectionStatus(id, 'connected');
     } catch (e) {
-      get().updateConnectionStatus(id, 'error', String(e));
+      const errMsg = String(e);
+      get().updateConnectionStatus(id, 'error', errMsg);
+      // Surface error to user once per connection per session
+      const notifiedKey = `_mcp_notified_${id}`;
+      const w = window as unknown as Record<string, boolean>;
+      if (!w[notifiedKey]) {
+        w[notifiedKey] = true;
+        import('@/stores/toastStore').then(({ useToastStore }) => {
+          useToastStore.getState().addToast(`${conn.name}: ${errMsg.slice(0, 100)}`, 'error');
+        });
+      }
     }
   },
 

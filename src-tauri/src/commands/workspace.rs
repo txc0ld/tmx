@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+const MAX_SNAPSHOTS: usize = 10000;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceState {
@@ -23,11 +25,14 @@ fn workspace_dir() -> PathBuf {
     base.join("terminalx").join("workspaces")
 }
 
-async fn ensure_dir() {
+async fn ensure_dir() -> Result<(), String> {
     let dir = workspace_dir();
     if !dir.exists() {
-        let _ = tokio::fs::create_dir_all(&dir).await;
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| format!("Failed to create workspace directory: {}", e))?;
     }
+    Ok(())
 }
 
 /// Reject path components that could escape the config directory
@@ -47,14 +52,27 @@ fn sanitize_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Atomic write — write to temp file then rename.
+/// Prevents corruption if the app crashes mid-write.
+async fn atomic_write(path: &std::path::Path, contents: &str) -> Result<(), String> {
+    let tmp = path.with_extension("tmp");
+    tokio::fs::write(&tmp, contents)
+        .await
+        .map_err(|e| format!("Write error: {}", e))?;
+    tokio::fs::rename(&tmp, path)
+        .await
+        .map_err(|e| format!("Rename error: {}", e))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn save_workspace(state: WorkspaceState) -> Result<(), String> {
     sanitize_name(&state.project_id)?;
-    ensure_dir().await;
+    ensure_dir().await?;
     let path = workspace_dir().join(format!("{}.json", state.project_id));
     let json = serde_json::to_string_pretty(&state)
         .map_err(|e| format!("Serialize error: {}", e))?;
-    tokio::fs::write(path, json).await.map_err(|e| format!("Write error: {}", e))
+    atomic_write(&path, &json).await
 }
 
 #[tauri::command]
@@ -73,15 +91,17 @@ pub async fn load_workspace(project_id: String) -> Result<Option<WorkspaceState>
 pub async fn save_snapshot(project_id: String, name: String, state: WorkspaceState) -> Result<(), String> {
     sanitize_name(&project_id)?;
     sanitize_name(&name)?;
-    ensure_dir().await;
+    ensure_dir().await?;
     let snapshots_dir = workspace_dir().join("snapshots").join(&project_id);
     if !snapshots_dir.exists() {
-        let _ = tokio::fs::create_dir_all(&snapshots_dir).await;
+        tokio::fs::create_dir_all(&snapshots_dir)
+            .await
+            .map_err(|e| format!("Failed to create snapshots directory: {}", e))?;
     }
     let path = snapshots_dir.join(format!("{}.json", name));
     let json = serde_json::to_string_pretty(&state)
         .map_err(|e| format!("Serialize error: {}", e))?;
-    tokio::fs::write(path, json).await.map_err(|e| format!("Write error: {}", e))
+    atomic_write(&path, &json).await
 }
 
 #[tauri::command]
@@ -119,6 +139,9 @@ pub async fn list_snapshots(project_id: String) -> Result<Vec<String>, String> {
     let mut entries = tokio::fs::read_dir(dir).await.map_err(|e| format!("Read dir error: {}", e))?;
     let mut names = Vec::new();
     while let Some(entry) = entries.next_entry().await.map_err(|e| format!("Read dir error: {}", e))? {
+        if names.len() >= MAX_SNAPSHOTS {
+            break;
+        }
         let path = entry.path();
         if path.extension().map_or(false, |ext| ext == "json") {
             if let Some(stem) = path.file_stem() {

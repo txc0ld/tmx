@@ -35,20 +35,31 @@ pub async fn docker_list_containers() -> Result<Vec<DockerContainer>, String> {
         return Err(format!("docker ps failed: {}", stderr.trim()));
     }
 
+    fn truncate(s: &str, max: usize) -> String {
+        if s.len() <= max { return s.to_string(); }
+        // Safe UTF-8 truncation
+        let mut end = max;
+        while end > 0 && !s.is_char_boundary(end) { end -= 1; }
+        s[..end].to_string()
+    }
+
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let containers = stdout
+    let containers: Vec<DockerContainer> = stdout
         .lines()
         .filter(|l| !l.trim().is_empty())
-        .map(|line| {
+        .filter_map(|line| {
             let parts: Vec<&str> = line.split('\t').collect();
-            DockerContainer {
-                id: parts.first().unwrap_or(&"").trim().to_string(),
-                name: parts.get(1).unwrap_or(&"").trim().to_string(),
-                image: parts.get(2).unwrap_or(&"").trim().to_string(),
-                status: parts.get(3).unwrap_or(&"").trim().to_string(),
-            }
+            if parts.len() < 4 { return None; }
+            let id = parts[0].trim();
+            if id.is_empty() { return None; }
+            Some(DockerContainer {
+                id: truncate(id, 64),
+                name: truncate(parts[1].trim(), 128),
+                image: truncate(parts[2].trim(), 256),
+                status: truncate(parts[3].trim(), 128),
+            })
         })
-        .filter(|c| !c.id.is_empty())
+        .take(500) // Cap at 500 containers
         .collect();
 
     Ok(containers)

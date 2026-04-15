@@ -86,21 +86,37 @@ pub async fn pty_spawn(
     let reader_id = id.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
+        let mut consecutive_emit_errors = 0u32;
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = app.emit("pty-output", PtyOutput {
+                    match app.emit("pty-output", PtyOutput {
                         id: reader_id.clone(),
                         data,
-                    });
+                    }) {
+                        Ok(_) => consecutive_emit_errors = 0,
+                        Err(e) => {
+                            consecutive_emit_errors += 1;
+                            if consecutive_emit_errors >= 10 {
+                                // Frontend likely gone — stop streaming
+                                eprintln!("pty-output: {} consecutive emit errors, stopping reader for {}: {}", consecutive_emit_errors, reader_id, e);
+                                break;
+                            }
+                        }
+                    }
                 }
-                Err(_) => break,
+                Err(e) => {
+                    eprintln!("PTY {} read error: {}", reader_id, e);
+                    break;
+                }
             }
         }
         // PTY closed — notify frontend
-        let _ = app.emit("pty-exit", reader_id);
+        if let Err(e) = app.emit("pty-exit", reader_id.clone()) {
+            eprintln!("pty-exit emit failed for {}: {}", reader_id, e);
+        }
     });
 
     Ok(id)

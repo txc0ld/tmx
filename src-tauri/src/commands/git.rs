@@ -77,7 +77,7 @@ pub async fn git_clone(url: String, dest: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn git_status(repo_path: String) -> Result<GitStatus, String> {
-    let expanded = shellexpand::tilde(&repo_path).to_string();
+    let expanded = validate_repo_path(&repo_path)?;
 
     // Get branch name
     let branch_output = Command::new("git")
@@ -113,7 +113,7 @@ pub async fn git_status(repo_path: String) -> Result<GitStatus, String> {
 
 #[tauri::command]
 pub async fn git_log(repo_path: String, limit: Option<u32>) -> Result<Vec<GitLogEntry>, String> {
-    let expanded = shellexpand::tilde(&repo_path).to_string();
+    let expanded = validate_repo_path(&repo_path)?;
     let n = limit.unwrap_or(50).min(200).to_string();
     let output = Command::new("git")
         .args(["log", "--format=%H%n%h%n%an%n%aI%n%s", "-n", &n])
@@ -146,7 +146,7 @@ pub async fn git_log(repo_path: String, limit: Option<u32>) -> Result<Vec<GitLog
 
 #[tauri::command]
 pub async fn git_branches(repo_path: String) -> Result<Vec<String>, String> {
-    let expanded = shellexpand::tilde(&repo_path).to_string();
+    let expanded = validate_repo_path(&repo_path)?;
     let output = Command::new("git")
         .args(["branch", "--format=%(refname:short)"])
         .current_dir(&expanded)
@@ -162,12 +162,43 @@ pub async fn git_branches(repo_path: String) -> Result<Vec<String>, String> {
     Ok(stdout.trim().lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
 }
 
+fn validate_repo_path(repo_path: &str) -> Result<String, String> {
+    if repo_path.contains('\0') {
+        return Err("Invalid path".to_string());
+    }
+    let expanded = shellexpand::tilde(repo_path).to_string();
+    if expanded.is_empty() {
+        return Err("Empty repo path".to_string());
+    }
+    Ok(expanded)
+}
+
+fn validate_branch_name(branch: &str) -> Result<(), String> {
+    if branch.is_empty() {
+        return Err("Branch name cannot be empty".to_string());
+    }
+    if branch.len() > 255 {
+        return Err("Branch name too long".to_string());
+    }
+    if branch.starts_with('-') {
+        return Err("Branch name cannot start with '-'".to_string());
+    }
+    // Git refname rules: no '..', '@{', '\0', spaces, or control chars
+    if branch.contains("..") || branch.contains("@{") || branch.contains('\0') {
+        return Err("Invalid branch name (contains disallowed sequence)".to_string());
+    }
+    for ch in branch.chars() {
+        if ch.is_control() || ch == ' ' || ch == '~' || ch == '^' || ch == ':' || ch == '?' || ch == '*' || ch == '[' {
+            return Err(format!("Invalid character in branch name: '{}'", ch));
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn git_checkout(repo_path: String, branch: String) -> Result<(), String> {
-    if branch.starts_with('-') {
-        return Err("Invalid branch name".to_string());
-    }
-    let expanded = shellexpand::tilde(&repo_path).to_string();
+    validate_branch_name(&branch)?;
+    let expanded = validate_repo_path(&repo_path)?;
     let output = Command::new("git")
         .args(["checkout", &branch])
         .current_dir(&expanded)
@@ -185,7 +216,7 @@ pub async fn git_checkout(repo_path: String, branch: String) -> Result<(), Strin
 
 #[tauri::command]
 pub async fn git_diff_summary(repo_path: String) -> Result<String, String> {
-    let expanded = shellexpand::tilde(&repo_path).to_string();
+    let expanded = validate_repo_path(&repo_path)?;
     let output = Command::new("git")
         .args(["diff", "--stat"])
         .current_dir(&expanded)
@@ -203,7 +234,7 @@ pub async fn git_diff_summary(repo_path: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn git_files_status(repo_path: String) -> Result<Vec<GitFileStatus>, String> {
-    let expanded = shellexpand::tilde(&repo_path).to_string();
+    let expanded = validate_repo_path(&repo_path)?;
     let output = Command::new("git")
         .args(["status", "--porcelain=v1"])
         .current_dir(&expanded)
@@ -241,7 +272,7 @@ pub async fn git_stage(repo_path: String, path: String) -> Result<(), String> {
     if path.starts_with('-') {
         return Err("Invalid path".to_string());
     }
-    let expanded = shellexpand::tilde(&repo_path).to_string();
+    let expanded = validate_repo_path(&repo_path)?;
     let output = Command::new("git")
         .args(["add", &path])
         .current_dir(&expanded)
@@ -258,7 +289,7 @@ pub async fn git_unstage(repo_path: String, path: String) -> Result<(), String> 
     if path.starts_with('-') {
         return Err("Invalid path".to_string());
     }
-    let expanded = shellexpand::tilde(&repo_path).to_string();
+    let expanded = validate_repo_path(&repo_path)?;
     let output = Command::new("git")
         .args(["restore", "--staged", &path])
         .current_dir(&expanded)
@@ -281,7 +312,7 @@ pub async fn git_commit(repo_path: String, message: String) -> Result<String, St
     if message.contains('\0') {
         return Err("Commit message contains null byte".to_string());
     }
-    let expanded = shellexpand::tilde(&repo_path).to_string();
+    let expanded = validate_repo_path(&repo_path)?;
     let output = Command::new("git")
         .args(["commit", "-m", &message])
         .current_dir(&expanded)
