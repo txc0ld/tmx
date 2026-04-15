@@ -48,9 +48,19 @@ Entry: `main.tsx` → `AppErrorBoundary` → `App.tsx`. All inline styles (excep
 
 **Tile system:** 15 types via discriminated union in `types/index.ts` (agent, terminal, editor, diff, note, todo, kanban, filetree, git, browser, runner, ssh, docker, usage, group). Each has a component in `components/tiles/`. `TileShell.tsx` (memo'd) wraps every tile with drag + resize + snap + z-order + title-bar chrome (5 buttons: pin/clone/detach/template/close, shown on hover).
 
+- **DiffTile** — three modes via tabs: **Git changes** (sidebar lists `git status --porcelain` files, click one → diff vs HEAD via `git_show_head_file`), **Compare files** (two native file pickers using `@tauri-apps/plugin-dialog`), **Paste** (two textareas → Monaco DiffEditor). Mode + per-mode state (`gitTarget`, `compareLeft/Right`, `pasteOriginal/Modified`) all live on the tile. Back-compat: `mode` optional, defaults to `'git'`.
+
 **Canvas (`components/canvas/`):** `InfiniteCanvas.tsx` is the workhorse — transform layer, rubber-band (Shift+drag), snap guides, sticky notes, workspace tabs, minimap, tile dock, auto-save (2s disk + 500ms localStorage cache), auto-snapshot (every 5 min for time-travel).
 
-**IPC (`utils/ipc.ts`):** All `invoke()` calls wrapped here. Components never call `invoke()` directly. Includes: PTY, agents, 11 git commands, docker, workspace, filesystem, projects, timeline, and `http_fetch` (HTTP proxy with SSRF guards).
+- **TileDock** (`TileDock.tsx`) — user-customizable via the ⚙ panel (show/hide, drag-to-reorder; up/down arrow fallback). Stored per-device in `localStorage['tx-dock-items']` as a `DockEntry[]` discriminated union: `{kind:'type', type: TileType}` for generic tile buttons OR `{kind:'template', templateId: string}` for pinned templates. Pinning a template from the "+ Add Tile" menu (★ icon) creates a `template` entry — so e.g. a pinned "Codex" button spawns with Codex config, not a generic Agent default. Legacy `string[]` storage auto-migrates. Changes broadcast via `window` event `tx-dock-updated` so the Add Tile menu's ★/☆ state stays in sync.
+
+- **Layout menu** (`TopBar.tsx → LayoutMenuButton`) — dropdown with the built-in Default workspace + 5 user save slots per project. Stored at `localStorage['tx-layouts-${pid}']` as `(LayoutSlot | null)[5]`. The legacy single-slot key `tx-saved-layout-${pid}` auto-migrates into slot 1 and is removed on first open. Empty slot click = save; filled slot click = load; ↻ = overwrite; ✕ = delete (confirm).
+
+- **Clear Canvas** — next to Layout in TopBar. Confirms with tile count before calling `removeTile` for each.
+
+- **Column-major spawn grid** — `spawnTileFromEntry` anchors at screen `(24, 24)` → canvas coords, lays tiles in 3-tall columns (slot pitch 700×500, 8px gap), skipping overlaps. This is deliberate UX — users expect predictable spawn positions, not "somewhere near the viewport center."
+
+**IPC (`utils/ipc.ts`):** All `invoke()` calls wrapped here. Components never call `invoke()` directly. Includes: PTY, agents, 12 git commands (incl. `git_show_head_file`), docker, workspace, `read_file_tree` / `read_file_text` / `write_file_text`, projects, timeline, and `http_fetch` (HTTP proxy with SSRF guards).
 
 ### Backend (`src-tauri/`)
 
@@ -61,7 +71,8 @@ Entry: `main.rs` → `lib.rs` (Tauri builder, plugin registration, PTY cleanup o
 - `agents.rs` — Claude/Codex/Gemini. Windows wraps through `cmd.exe /C` for `.cmd` scripts. Validates custom command args (null bytes + 16KB cap). Routes through `pty_spawn_internal`.
 - `git.rs` — 11 commands. `validate_git_url()` rejects `ext::` / `transport::` remote helpers, loopback hosts, malformed URLs. Clone uses `git -c protocol.ext.allow=never -c protocol.file.allow=never` + `--` to block remote-helper RCE. Branch names validated against refname rules.
 - `http_proxy.rs` — `http_fetch` for MCP API calls. **SSRF-hardened:** blocks RFC 1918 private IPs, CGNAT (100.64/10), link-local, loopback, multicast, IPv6 ULA (fc00::/7), URL credentials. HTTPS-only for non-loopback hosts. 10MB response / 5MB body caps.
-- `filesystem.rs` — `read_file_tree` canonicalizes paths and rejects anything outside `$HOME`, `/tmp`, `/Users`, `/Volumes`, `/workspace`, `/workspaces`, `/srv`, `/home`. Symlink skip prevents infinite recursion. Directory watchers validated (exists + is_dir) and deduplicated.
+- `filesystem.rs` — `read_file_tree`, `read_file_text`, `write_file_text` all share `is_path_allowed` (anything under `$HOME` / common project roots like `/Users`, `/Volumes`, `/workspace`, `/home`, `C:\Users`, etc.). Symlink skip prevents infinite recursion. 10MB read cap. Directory watchers validated (exists + is_dir) and deduplicated.
+- `git.rs` (cont'd) — `git_show_head_file(repo_path, file_path)` runs `git show HEAD:path` for the DiffTile's "original" side; returns empty string (not error) when the file is new / unknown to HEAD.
 - `docker.rs` — `tokio::process::Command` (not PTY). UTF-8-safe truncation + 500-container cap.
 - `workspace.rs` — Atomic writes via temp-file + rename. `sanitize_name` rejects path separators, `..`, null bytes, colons, 255+ chars. Snapshot list capped at 10k.
 - `projects.rs` — Persisted to `~/.config/terminalx/projects.json`.
@@ -116,6 +127,16 @@ Large PTY writes get truncated on Windows. `PtyManager.write()` chunks ALL write
 
 When `isLightBg()` is true, `applyThemeToDOM()` sets dark surface colors so tiles and chrome stay dark with white text while the canvas background is light. xterm terminals also flip via `isLightTheme()` in each terminal component.
 
+### Reading project files: use the Rust IPC, not the fs plugin
+
+**Use `readFileText` / `writeFileText` from `utils/ipc.ts`, never `@tauri-apps/plugin-fs`** for user project files.
+
+The `@tauri-apps/plugin-fs` capability scope in `capabilities/default.json` is intentionally narrow (`$APPDATA/**`, `$HOME/Projects/**`, etc.) — it fails with `"forbidden path ... not allowed on the scope for allow-read-text-file"` on common project locations like `$HOME/.claude/projects/...`, `$HOME/code/...`, etc. `read_file_text` / `write_file_text` in `filesystem.rs` use the same broad `is_path_allowed` validator as the file tree (anything under `$HOME` or common project roots), so they "just work" for any file the user can reach through the tree. EditorTile, DiffTile, CommandPalette import/export all route through these.
+
+### Canvas overlays and the wheel handler
+
+Any overlay UI with its own scrollable content (TileDock customize panel, LayoutMenu, future popovers) must have `data-canvas-overlay` somewhere in its ancestor chain. The wheel handler in `useCanvas.ts` bails when `target.closest('[data-canvas-overlay]')` matches, so scrolling inside the overlay doesn't hijack canvas zoom. Same attribute is checked by `InfiniteCanvas` rubber-band and `useCanvas` pan handlers to avoid stealing pointer events.
+
 ### HTTP proxy for MCP
 
 MCP API calls (Slack/GitHub/Linear/Jira/Notion) MUST go through `httpFetch` (Rust proxy) — direct `fetch()` is blocked by WebView CSP + CORS. The proxy also enforces SSRF guards.
@@ -128,7 +149,7 @@ MCP API calls (Slack/GitHub/Linear/Jira/Notion) MUST go through `httpFetch` (Rus
 
 **PTY:** TerminalTile → `usePty` → `ipc.ts (ptySpawn)` → `terminal.rs` → `portable-pty` → reader thread → `emit("pty-output")` → frontend `listen` → `xterm.write()` + `canvasStore.wireData` + `recordingStore`.
 
-**Wiring:** `useWiringEngine` subscribes to canvasStore. 5 wire types — `context-pipe`, `agent-chain`, `refresh-trigger`, `task-assign`, `diff-feed`. Agent chains pipe last 50 lines on completion. Auto-recovery: Runner `status === 'fail'` + wire to Agent → error auto-dispatched to agent PTY.
+**Wiring:** `useWiringEngine` subscribes to canvasStore. 6 wire types — `context-pipe`, `agent-chain`, `refresh-trigger`, `task-assign`, `diff-feed`, `file-open`. Agent chains pipe last 50 lines on completion (triggered by DONE sentinel or 8s idle, not process exit). `file-open` (FileTree → Editor/Diff) is a click-routed wire, not data-driven — the click handler in `FileTreeTile` checks for outgoing `file-open` wires and updates the target's `filePath` / `gitTarget` / `compareLeft|Right` in place instead of spawning a new editor. Auto-recovery: Runner `status === 'fail'` + wire to Agent → error auto-dispatched to agent PTY.
 
 **MCP tasks:** `syncConnection` → `httpFetch` IPC → JSON parse → filter by `seenTaskIds` → TodoTile "FROM INTEGRATIONS" panel. Auto-dispatch: if "Auto" toggle on, new tasks are chunk-written to agent PTY with `\r` after.
 

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+pnpm test
+pnpm build
+
+if command -v cargo >/dev/null 2>&1 && [ -d src-tauri ]; then
+  (cd src-tauri && cargo check)
+fi

@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "hooks:install": "powershell -ExecutionPolicy Bypass -File scripts/install-git-hooks.ps1"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

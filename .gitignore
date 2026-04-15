@@ -1,7 +1,14 @@
 node_modules/
 dist/
+website/dist/
 src-tauri/target/
 .vite/
+coverage/
+*.tsbuildinfo
 *.log
+.env
+.env.*
+!.env.example
+.claude/
 .DS_Store
 Thumbs.db
