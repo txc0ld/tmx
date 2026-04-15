@@ -6,7 +6,6 @@ import '@xterm/xterm/css/xterm.css';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { usePty } from '@/hooks/usePty';
-import { useCanvasZoom } from '@/hooks/useCanvasZoom';
 import { ptySpawn } from '@/utils/ipc';
 import { colors, fonts, typography, radius, motion, alpha } from '@/design/tokens';
 import { TerminalPane } from './TerminalPane';
@@ -17,7 +16,6 @@ import type { TerminalTile as TerminalTileType, TerminalSplit } from '@/types';
 const EMPTY_HISTORY: string[] = [];
 
 const MAX_PANES = 4;
-const BASE_FONT_SIZE = 13;
 
 function isLightTheme(t: { bg: string }): boolean {
   const hex = t.bg.replace('#', '');
@@ -65,14 +63,13 @@ export function TerminalTile({ tile }: TerminalTileProps) {
   const fitRef = useRef<FitAddon | null>(null);
   const spawnedRef = useRef(false);
   const resizeTimerRef = useRef<number | null>(null);
-  const zoomFitTimerRef = useRef<number | null>(null);
-  // Current outer canvas zoom. We inflate the xterm container CSS by this
-  // factor + counter-scale it via `transform`, so xterm's canvas backing
-  // store gets big enough to render crisp at the target visual size (the
-  // visual is outer-zoom × 1/counter-scale = outer-zoom, same as zoomed
-  // DOM content). Without this, xterm renders at 1x CSS and the browser
-  // stretches the raster to the zoomed visual → blurry.
-  const canvasZoom = useCanvasZoom();
+  // Note: we previously tried an inflate + counter-scale + fontSize-bump
+  // dance to keep xterm crisp under outer CSS zoom. In practice it
+  // scrambled xterm's buffer on zoom changes (fit recalcs + PTY resize
+  // racing the fontSize update). xterm is now allowed to be bitmap-
+  // stretched by the outer zoom — slightly blurry at non-1x zoom but
+  // functional. DOM-heavy tiles (Monaco, notes, chrome) still re-raster
+  // crisp because of the outer zoom.
 
   // Track splits locally — derive from tile.splits persisted in store
   const [splits, setSplits] = useState<TerminalSplit[]>(tile.splits || []);
@@ -184,7 +181,7 @@ export function TerminalTile({ tile }: TerminalTileProps) {
     const terminal = new Terminal({
       theme: getXtermTheme(),
       fontFamily: fonts.mono,
-      fontSize: BASE_FONT_SIZE * canvasZoom,
+      fontSize: 13,
       lineHeight: 1.3,
       cursorBlink: true,
       cursorStyle: 'bar',
@@ -276,62 +273,19 @@ export function TerminalTile({ tile }: TerminalTileProps) {
     };
   }, [resize]);
 
-  // React to canvas zoom changes: bump fontSize so cells stay the same
-  // visual size (more glyph pixels per cell), then debounce a fit + PTY
-  // resize. Debounce keeps mid-gesture wheel zoom from flooding the PTY
-  // with SIGWINCH every frame — mid-gesture it stretches (like before),
-  // once the user stops zooming it snaps to crisp.
-  useEffect(() => {
-    const term = termRef.current;
-    const fit = fitRef.current;
-    if (!term || !fit) return;
-    const targetFont = BASE_FONT_SIZE * canvasZoom;
-    if (term.options.fontSize !== targetFont) {
-      term.options.fontSize = targetFont;
-    }
-    if (zoomFitTimerRef.current) clearTimeout(zoomFitTimerRef.current);
-    zoomFitTimerRef.current = window.setTimeout(() => {
-      try {
-        fit.fit();
-        resize(term.cols, term.rows);
-      } catch {
-        // Terminal may have been disposed mid-debounce.
-      }
-    }, 150);
-    return () => {
-      if (zoomFitTimerRef.current) {
-        clearTimeout(zoomFitTimerRef.current);
-        zoomFitTimerRef.current = null;
-      }
-    };
-  }, [canvasZoom, resize]);
-
   // No splits — render single pane (original behavior)
   if (splits.length === 0) {
     return (
-      <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: colors.bg }}>
-        {/* Inflate wrapper: CSS dimensions are canvasZoom × natural, then
-            transform: scale(1/canvasZoom) shrinks visually back to 1x of
-            the zoomed parent. Net visual = parent's zoomed visual, but
-            the xterm canvas backing gets canvasZoom × more pixels = crisp. */}
-        <div style={{
-          position: 'absolute',
-          top: 0, left: 0,
-          width: `${100 * canvasZoom}%`,
-          height: `${100 * canvasZoom}%`,
-          transform: `scale(${1 / canvasZoom})`,
-          transformOrigin: '0 0',
-        }}>
-          <div
-            ref={containerRef}
-            style={{
-              width: '100%',
-              height: '100%',
-              padding: '4px 0 0 4px',
-              cursor: 'text',
-            }}
-          />
-        </div>
+      <div style={{ width: '100%', height: '100%', position: 'relative', background: colors.bg }}>
+        <div
+          ref={containerRef}
+          style={{
+            width: '100%',
+            height: '100%',
+            padding: '4px 0 0 4px',
+            cursor: 'text',
+          }}
+        />
 
         {/* Command history button */}
         {historyEntries.length > 0 && (
@@ -408,38 +362,19 @@ export function TerminalTile({ tile }: TerminalTileProps) {
       flexDirection: isVerticalStack ? 'column' : 'row',
       background: colors.bg,
     }}>
-      {/* Main pane — same inflate wrapper as the single-pane branch,
-          under a flex parent so multi-pane layouts still work. */}
+      {/* Main pane */}
       <div
+        ref={containerRef}
         onClick={() => setActivePaneIdx(0)}
         style={{
           flex: 1,
           minWidth: 0,
           minHeight: 0,
-          position: 'relative',
-          overflow: 'hidden',
+          padding: '4px 0 0 4px',
           outline: activePaneIdx === 0 ? `1px solid ${colors.primary}` : 'none',
           outlineOffset: -1,
         }}
-      >
-        <div style={{
-          position: 'absolute',
-          top: 0, left: 0,
-          width: `${100 * canvasZoom}%`,
-          height: `${100 * canvasZoom}%`,
-          transform: `scale(${1 / canvasZoom})`,
-          transformOrigin: '0 0',
-        }}>
-          <div
-            ref={containerRef}
-            style={{
-              width: '100%',
-              height: '100%',
-              padding: '4px 0 0 4px',
-            }}
-          />
-        </div>
-      </div>
+      />
 
       {/* Split panes */}
       {splits.map(split => (

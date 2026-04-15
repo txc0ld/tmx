@@ -5,14 +5,11 @@ import '@xterm/xterm/css/xterm.css';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { usePty } from '@/hooks/usePty';
-import { useCanvasZoom } from '@/hooks/useCanvasZoom';
 import { ptySpawn, ptyWrite } from '@/utils/ipc';
 import { isWindows } from '@/utils/platform';
 import { colors, fonts, spacing, typography, radius } from '@/design/tokens';
 import { attachKeyboardCapture } from './xtermInput';
 import type { RunnerTile as RunnerTileType } from '@/types';
-
-const BASE_FONT_SIZE = 12;
 
 function isLightTheme(t: { bg: string }): boolean {
   const hex = t.bg.replace('#', '');
@@ -73,8 +70,6 @@ export function RunnerTile({ tile }: RunnerTileProps) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const resizeTimerRef = useRef<number | null>(null);
-  const zoomFitTimerRef = useRef<number | null>(null);
-  const canvasZoom = useCanvasZoom();
   const [command, setCommand] = useState(tile.command);
 
   const onData = useCallback((data: string) => {
@@ -108,7 +103,7 @@ export function RunnerTile({ tile }: RunnerTileProps) {
     const terminal = new Terminal({
       theme: getXtermTheme(),
       fontFamily: fonts.mono,
-      fontSize: BASE_FONT_SIZE * canvasZoom,
+      fontSize: 12,
       lineHeight: 1.3,
       cursorBlink: false,
       cursorStyle: 'bar',
@@ -166,26 +161,6 @@ export function RunnerTile({ tile }: RunnerTileProps) {
     };
   }, [resize]);
 
-  // Canvas zoom → fontSize bump + debounced fit + PTY resize.
-  useEffect(() => {
-    const term = termRef.current;
-    const fit = fitRef.current;
-    if (!term || !fit) return;
-    const targetFont = BASE_FONT_SIZE * canvasZoom;
-    if (term.options.fontSize !== targetFont) {
-      term.options.fontSize = targetFont;
-    }
-    if (zoomFitTimerRef.current) clearTimeout(zoomFitTimerRef.current);
-    zoomFitTimerRef.current = window.setTimeout(() => {
-      try { fit.fit(); resize(term.cols, term.rows); } catch { /* disposed */ }
-    }, 150);
-    return () => {
-      if (zoomFitTimerRef.current) {
-        clearTimeout(zoomFitTimerRef.current);
-        zoomFitTimerRef.current = null;
-      }
-    };
-  }, [canvasZoom, resize]);
 
   const handleRun = async () => {
     if (tile.status === 'running' || !command.trim()) return;
@@ -295,23 +270,11 @@ export function RunnerTile({ tile }: RunnerTileProps) {
         </button>
       </div>
 
-      {/* Terminal output — same inflate pattern as TerminalTile for
-          crisp xterm at any outer zoom. */}
-      <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: colors.bg }}>
-        <div style={{
-          position: 'absolute',
-          top: 0, left: 0,
-          width: `${100 * canvasZoom}%`,
-          height: `${100 * canvasZoom}%`,
-          transform: `scale(${1 / canvasZoom})`,
-          transformOrigin: '0 0',
-        }}>
-          <div
-            ref={containerRef}
-            style={{ width: '100%', height: '100%', padding: '4px 0 0 4px' }}
-          />
-        </div>
-      </div>
+      {/* Terminal output */}
+      <div
+        ref={containerRef}
+        style={{ flex: 1, background: colors.bg, padding: '4px 0 0 4px' }}
+      />
     </div>
   );
 }

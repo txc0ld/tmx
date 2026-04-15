@@ -5,12 +5,9 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { useThemeStore } from '@/stores/themeStore';
 import { usePty } from '@/hooks/usePty';
-import { useCanvasZoom } from '@/hooks/useCanvasZoom';
 import { ptySpawn } from '@/utils/ipc';
 import { colors, fonts } from '@/design/tokens';
 import { attachKeyboardCapture } from './xtermInput';
-
-const BASE_FONT_SIZE = 13;
 
 function isLightTheme(t: { bg: string }): boolean {
   const hex = t.bg.replace('#', '');
@@ -62,8 +59,6 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
   const fitRef = useRef<FitAddon | null>(null);
   const spawnedRef = useRef(false);
   const resizeTimerRef = useRef<number | null>(null);
-  const zoomFitTimerRef = useRef<number | null>(null);
-  const canvasZoom = useCanvasZoom();
 
   const onData = useCallback((data: string) => {
     termRef.current?.write(data);
@@ -86,7 +81,7 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
     const terminal = new Terminal({
       theme: getXtermTheme(),
       fontFamily: fonts.mono,
-      fontSize: BASE_FONT_SIZE * canvasZoom,
+      fontSize: 13,
       lineHeight: 1.3,
       cursorBlink: true,
       cursorStyle: 'bar',
@@ -176,48 +171,16 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
     };
   }, [resize]);
 
-  // Zoom change → fontSize bump + debounced fit + PTY resize. Mirrors the
-  // logic in TerminalTile so split panes stay crisp too.
-  useEffect(() => {
-    const term = termRef.current;
-    const fit = fitRef.current;
-    if (!term || !fit) return;
-    const targetFont = BASE_FONT_SIZE * canvasZoom;
-    if (term.options.fontSize !== targetFont) {
-      term.options.fontSize = targetFont;
-    }
-    if (zoomFitTimerRef.current) clearTimeout(zoomFitTimerRef.current);
-    zoomFitTimerRef.current = window.setTimeout(() => {
-      try { fit.fit(); resize(term.cols, term.rows); } catch { /* disposed */ }
-    }, 150);
-    return () => {
-      if (zoomFitTimerRef.current) {
-        clearTimeout(zoomFitTimerRef.current);
-        zoomFitTimerRef.current = null;
-      }
-    };
-  }, [canvasZoom, resize]);
-
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', background: colors.bg }}>
-      <div style={{
-        position: 'absolute',
-        top: 0, left: 0,
-        width: `${100 * canvasZoom}%`,
-        height: `${100 * canvasZoom}%`,
-        transform: `scale(${1 / canvasZoom})`,
-        transformOrigin: '0 0',
-      }}>
-        <div
-          ref={containerRef}
-          style={{
-            width: '100%',
-            height: '100%',
-            padding: '4px 0 0 4px',
-            cursor: 'text',
-          }}
-        />
-      </div>
-    </div>
+    <div
+      ref={containerRef}
+      style={{
+        width: '100%',
+        height: '100%',
+        background: colors.bg,
+        padding: '4px 0 0 4px',
+        cursor: 'text',
+      }}
+    />
   );
 }
