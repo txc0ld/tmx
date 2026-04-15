@@ -12,6 +12,7 @@ import { saveSnapshot, listSnapshots, loadSnapshot } from '@/utils/ipc';
 import { save as dialogSave, open as dialogOpen } from '@tauri-apps/plugin-dialog';
 import { readFileText, writeFileText } from '@/utils/ipc';
 import { validateWorkspaceImport, WorkspaceImportError } from '@/utils/workspaceImport';
+import { screenToCanvas } from '@/utils/layout';
 import type { TileType } from '@/types';
 
 interface CommandPaletteProps {
@@ -458,6 +459,127 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
         if (context !== null) {
           useAgentMemoryStore.getState().setMemory(pid, context);
         }
+      },
+    });
+
+    // ─── Prompt Library: Apply prompt to Agent ─────────
+    // One palette entry per prompt. When selected, dispatches the
+    // prompt to the currently-focused Agent tile. If no agent is
+    // focused, shows a toast.
+    import('@/stores/promptLibraryStore').then(({ usePromptLibraryStore, dispatchPrompt }) => {
+      // This import is inside a .then so we don't force-load the store on
+      // every palette render — it hydrates localStorage which is cheap,
+      // but cleaner to keep lazy alongside plugin/template loads.
+      const prompts = usePromptLibraryStore.getState().prompts;
+      for (const p of prompts) {
+        result.push({
+          id: `prompt-${p.id}`,
+          label: `${p.icon ? p.icon + ' ' : ''}${p.name}`,
+          category: 'command',
+          action: async () => {
+            const store = useCanvasStore.getState();
+            const pid = store.activeProject;
+            const tiles = store.tiles[pid] || [];
+            const focusedId = store.focusedTile;
+            const focused = focusedId ? tiles.find(t => t.id === focusedId) : null;
+            // Prefer focused agent; fall back to the last-spawned agent tile.
+            const target = (focused && focused.type === 'agent' && 'ptyId' in focused && focused.ptyId)
+              ? focused
+              : [...tiles].reverse().find(t => t.type === 'agent' && 'ptyId' in t && (t as { ptyId?: string }).ptyId);
+            if (!target || !('ptyId' in target) || !(target as { ptyId?: string }).ptyId) {
+              const { useToastStore } = await import('@/stores/toastStore');
+              useToastStore.getState().addToast(
+                'No running agent tile to send this prompt to. Focus an agent first.',
+                'warning',
+              );
+              return;
+            }
+            const { ptyWrite } = await import('@/utils/ipc');
+            await dispatchPrompt((target as { ptyId: string }).ptyId, p, ptyWrite);
+            const { useToastStore } = await import('@/stores/toastStore');
+            useToastStore.getState().addToast(`Sent "${p.name}" to ${target.title || target.type}`, 'info');
+          },
+        });
+      }
+    });
+
+    // ─── Prompt Library: Save current selection as prompt ─
+    result.push({
+      id: 'cmd-save-prompt',
+      label: 'Save Prompt to Library…',
+      category: 'command',
+      action: async () => {
+        const body = prompt('Prompt body (what will be sent to the agent):');
+        if (!body) return;
+        const name = prompt('Name (short label):') || 'Untitled';
+        const description = prompt('Description (what this prompt does):') || '';
+        const { usePromptLibraryStore } = await import('@/stores/promptLibraryStore');
+        usePromptLibraryStore.getState().savePrompt({ name, description, body, tags: [] });
+        const { useToastStore } = await import('@/stores/toastStore');
+        useToastStore.getState().addToast(`Prompt "${name}" saved. Find it under ⌘K.`, 'info');
+      },
+    });
+
+    // ─── Starter Layout: Detect + apply ────────────────
+    // Scans the active project's cwd, guesses the language/framework,
+    // and spawns a matching starter tile set. Idempotent — if the
+    // suggested tiles already exist, skips them.
+    result.push({
+      id: 'cmd-starter-layout',
+      label: 'Suggest Starter Layout for This Project',
+      category: 'workspace',
+      action: async () => {
+        const store = useCanvasStore.getState();
+        const pStore = useProjectStore.getState();
+        const project = pStore.projects.find(p => p.id === store.activeProject);
+        if (!project) {
+          const { useToastStore } = await import('@/stores/toastStore');
+          useToastStore.getState().addToast('No active project. Add one first.', 'warning');
+          return;
+        }
+        const { detectProjectKind } = await import('@/utils/projectTypeDetect');
+        const detected = await detectProjectKind(project.cwd);
+        if (!detected) {
+          const { useToastStore } = await import('@/stores/toastStore');
+          useToastStore.getState().addToast(
+            "Couldn't detect a known project type from the cwd. Try spawning tiles manually.",
+            'info',
+          );
+          return;
+        }
+        const ok = confirm(
+          `Detected: ${detected.label}\n\nSpawn ${detected.starterTiles.length} tiles for this project?`,
+        );
+        if (!ok) return;
+
+        // Column-major spawn grid, same pitch as the dock spawn.
+        const { TILE_DEFAULTS } = await import('@/App');
+        const anchor = screenToCanvas(24, 24, store.transforms[store.activeProject] ?? { x: 0, y: 0, scale: 1 });
+        const SLOT_W = 700, SLOT_H = 500, GAP = 8, ROWS = 3;
+        let idx = 0;
+        for (const entry of detected.starterTiles) {
+          const col = Math.floor(idx / ROWS);
+          const row = idx % ROWS;
+          const x = Math.round(anchor.x + col * (SLOT_W + GAP));
+          const y = Math.round(anchor.y + row * (SLOT_H + GAP));
+          const defaults = TILE_DEFAULTS[entry.type];
+          store.addTile({
+            id: crypto.randomUUID(),
+            type: entry.type,
+            x, y,
+            w: defaults.w,
+            h: defaults.h,
+            title: entry.type.charAt(0).toUpperCase() + entry.type.slice(1),
+            cwd: project.cwd,
+            ...(entry.config || {}),
+          } as Parameters<typeof store.addTile>[0]);
+          idx += 1;
+        }
+        const { useToastStore } = await import('@/stores/toastStore');
+        useToastStore.getState().addToast(
+          `Starter layout applied for ${detected.label}.`,
+          'info',
+        );
       },
     });
 
