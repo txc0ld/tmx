@@ -65,6 +65,18 @@ export function ToastContainer() {
           }}
         >
           {toast.message}
+          {toast.count > 1 && (
+            <span style={{
+              marginLeft: 8,
+              padding: '1px 6px',
+              borderRadius: radius.sm,
+              background: alpha(toastColor(toast.type), 20),
+              ...typography.labelSm,
+              fontVariantNumeric: 'tabular-nums',
+            }}>
+              ×{toast.count}
+            </span>
+          )}
         </div>
       ))}
       <style>{`
