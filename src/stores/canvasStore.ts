@@ -5,6 +5,10 @@ import type { SnapGuide } from '@/utils/layout';
 // ─── Wire data throttle buffers ────────────────────────
 const wireDataBuffer = new Map<string, string>();
 let wireFlushTimer: number | null = null;
+// One-shot truncation warning per tile per session. A single toast per tile
+// is enough to tell the user "your buffer's hitting the cap" without spamming
+// once the buffer settles at the limit.
+const wireTruncatedTiles = new Set<string>();
 
 interface CanvasBookmark {
   name: string;
@@ -600,13 +604,27 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const MAX_WIREDATA_BYTES = 500 * 1024; // 500KB per tile
     const existing = wireDataBuffer.get(tileId) || get().wireData[tileId] || '';
     let combined = existing + data;
+    let truncated = false;
     // Byte-size bound — prevents unbounded growth from long single lines
     if (combined.length > MAX_WIREDATA_BYTES) {
       combined = combined.slice(-MAX_WIREDATA_BYTES);
+      truncated = true;
     }
     const lines = combined.split('\n');
     const trimmed = lines.length > 50 ? lines.slice(-50).join('\n') : combined;
     wireDataBuffer.set(tileId, trimmed);
+
+    // First time this tile hits the cap, tell the user. Without this,
+    // agent-chain wires silently fire on truncated context.
+    if (truncated && !wireTruncatedTiles.has(tileId)) {
+      wireTruncatedTiles.add(tileId);
+      import('@/stores/toastStore').then(({ useToastStore }) => {
+        useToastStore.getState().addToast(
+          'Wire buffer hit 500 KB cap — older output is being dropped. Piped context keeps the latest 50 lines.',
+          'warning',
+        );
+      });
+    }
 
     if (!wireFlushTimer) {
       wireFlushTimer = window.setTimeout(() => {

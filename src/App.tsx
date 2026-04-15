@@ -17,6 +17,7 @@ import type { TileType, Tile } from '@/types';
 import type { TileTemplate } from '@/stores/templateStore';
 import '@/stores/clipboardStore'; // Initialize clipboard listener
 import '@/stores/usageStore'; // Initialize agent usage auto-tracking
+import { initMcpProjectSync } from '@/stores/mcpStore';
 
 export const TILE_DEFAULTS: Record<TileType, { w: number; h: number }> = {
   terminal: { w: 600, h: 400 },
@@ -92,6 +93,11 @@ export default function App() {
   const setActiveProject = useProjectStore(s => s.setActive);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // Install MCP project-switch subscription at app mount (not module import).
+  // This avoids leaking a duplicate subscription if the module is re-loaded
+  // under HMR.
+  useEffect(() => initMcpProjectSync(), []);
 
   // Load persisted projects then init canvas + restore workspace
   useEffect(() => {

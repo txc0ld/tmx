@@ -27,6 +27,8 @@ interface RecordingState {
 }
 
 const MAX_EVENTS = 50000;
+const WARN_EVENTS = 40000;
+let warnedThisSession = false;
 
 export const useRecordingStore = create<RecordingState>((set, get) => ({
   isRecording: false,
@@ -36,11 +38,10 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
   replayPosition: 0,
   replaySpeed: 1,
 
-  startRecording: () => set({
-    isRecording: true,
-    startTime: Date.now(),
-    events: [],
-  }),
+  startRecording: () => {
+    warnedThisSession = false;
+    set({ isRecording: true, startTime: Date.now(), events: [] });
+  },
 
   stopRecording: () => {
     const events = get().events;
@@ -51,8 +52,26 @@ export const useRecordingStore = create<RecordingState>((set, get) => ({
   recordEvent: (ptyId, data) => {
     const s = get();
     if (!s.isRecording) return;
-    if (s.events.length >= MAX_EVENTS) {
+    const count = s.events.length;
+    // 80% threshold warning — lets the user wrap up a recording before
+    // we stop it forcibly.
+    if (count >= WARN_EVENTS && !warnedThisSession) {
+      warnedThisSession = true;
+      import('@/stores/toastStore').then(({ useToastStore }) => {
+        useToastStore.getState().addToast(
+          `Recording near limit (${count}/${MAX_EVENTS} events). Recording will stop at ${MAX_EVENTS}. Export or stop soon to preserve.`,
+          'warning',
+        );
+      });
+    }
+    if (count >= MAX_EVENTS) {
       set({ isRecording: false });
+      import('@/stores/toastStore').then(({ useToastStore }) => {
+        useToastStore.getState().addToast(
+          `Recording stopped at event cap (${MAX_EVENTS}). Export to preserve.`,
+          'error',
+        );
+      });
       return;
     }
     const timestamp = Date.now() - s.startTime;

@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { httpFetch } from '@/utils/ipc';
 
+// Per-connection backoff state. Keyed off connection id so replacing a
+// connection resets its state and swapping projects doesn't cross-pollinate.
+const backoffByConn = new Map<string, { failures: number; nextAllowedAt: number }>();
+
 // ─── MCP Connection Types ──────────────────────────────
 
 export interface McpConnection {
@@ -210,6 +214,15 @@ export const useMcpStore = create<McpState>((set, get) => ({
     const conn = get().connections.find(c => c.id === id);
     if (!conn) return;
 
+    // Exponential backoff: if we've recently failed, skip this sync until
+    // the backoff window elapses. Without this, a broken API gets hammered
+    // every 30 s indefinitely — turning one bad connection into a sustained
+    // outbound request storm.
+    const backoff = backoffByConn.get(id);
+    if (backoff && Date.now() < backoff.nextAllowedAt) {
+      return;
+    }
+
     const pidAtStart = getProjectId();
 
     get().updateConnectionStatus(id, 'connecting');
@@ -235,9 +248,17 @@ export const useMcpStore = create<McpState>((set, get) => ({
         };
       });
       get().updateConnectionStatus(id, 'connected');
+      backoffByConn.delete(id);
     } catch (e) {
       const errMsg = String(e);
       get().updateConnectionStatus(id, 'error', errMsg);
+      // Exponential backoff: 30s → 60s → 2min → 5min → 10min (capped).
+      // Full jitter ±25 % so multiple connections don't re-sync in lockstep.
+      const failures = (backoffByConn.get(id)?.failures ?? 0) + 1;
+      const base = Math.min(30 * 2 ** (failures - 1), 10 * 60) * 1000;
+      const jitter = base * (0.75 + Math.random() * 0.5);
+      backoffByConn.set(id, { failures, nextAllowedAt: Date.now() + jitter });
+
       // Surface error to user once per connection per session
       const notifiedKey = `_mcp_notified_${id}`;
       const w = window as unknown as Record<string, boolean>;
@@ -252,13 +273,23 @@ export const useMcpStore = create<McpState>((set, get) => ({
 
   syncAll: async () => {
     const conns = get().connections;
-    // Sequential with small jitter to avoid hammering all APIs simultaneously
-    for (const c of conns) {
-      try {
-        await get().syncConnection(c.id);
-      } catch { /* already captured in status */ }
-      await new Promise(r => setTimeout(r, 250));
-    }
+    // Parallel sync with a concurrency cap of 3. Previous code ran one at a
+    // time with 250 ms jitter — 5 slow connections took 75 s+. With cap=3
+    // + per-connection backoff, even flaky APIs don't block healthy ones.
+    const CONCURRENCY = 3;
+    let i = 0;
+    const workers = Array.from({ length: Math.min(CONCURRENCY, conns.length) }, async () => {
+      while (true) {
+        const idx = i++;
+        if (idx >= conns.length) return;
+        try {
+          await get().syncConnection(conns[idx].id);
+        } catch {
+          /* already captured in status */
+        }
+      }
+    });
+    await Promise.all(workers);
   },
 
   dismissTask: (taskId) => {
@@ -294,17 +325,31 @@ export const useMcpStore = create<McpState>((set, get) => ({
   },
 }));
 
-// Reload MCP state when active project changes — subscribe to projectStore
+// Reload MCP state when active project changes — subscribe to projectStore.
+// Exposed as `initMcpProjectSync()` so the app root can call it once (instead
+// of registering at module-import time, which would leak on HMR re-imports).
 import { useProjectStore } from './projectStore';
 
-let lastPid = getProjectId();
-useProjectStore.subscribe((state) => {
-  const pid = state.active;
-  if (pid && pid !== lastPid) {
-    lastPid = pid;
-    useMcpStore.getState().reloadForProject();
-  }
-});
+let mcpProjectSyncInstalled = false;
+export function initMcpProjectSync(): () => void {
+  if (mcpProjectSyncInstalled) return () => {};
+  mcpProjectSyncInstalled = true;
+  let lastPid = getProjectId();
+  const unsub = useProjectStore.subscribe((state) => {
+    const pid = state.active;
+    if (pid && pid !== lastPid) {
+      lastPid = pid;
+      // Reset backoff on project switch — the new project's MCP connections
+      // haven't earned their failures yet.
+      backoffByConn.clear();
+      useMcpStore.getState().reloadForProject();
+    }
+  });
+  return () => {
+    mcpProjectSyncInstalled = false;
+    unsub();
+  };
+}
 
 // ─── Task fetchers per MCP type ────────────────────────
 
