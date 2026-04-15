@@ -12,7 +12,7 @@ Run Claude, Codex, and Gemini side-by-side. Wire them together. Ship 10× faster
 [![Rust](https://img.shields.io/badge/Rust-1.90+-000000?logo=rust)](https://rust-lang.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript)](https://typescriptlang.org)
 
-[Website](https://txc0ld.github.io/tmx) · [Features](#features) · [Install](#installation) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Contributing](#contributing)
+[Website](https://txc0ld.github.io/tmx) · [Features](#features) · [Wiring Tutorial](./WIRING.md) · [Install](#installation) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Contributing](#contributing)
 
 </div>
 
@@ -36,7 +36,7 @@ TerminalX is a native desktop app that turns your terminal workflow into a spati
 **Core**
 - 🎨 **Infinite canvas** — pan, zoom, snap-to-edge alignment, rubber-band selection, workspace tabs
 - 🤖 **15 tile types** — Terminal, Agent, Editor, Diff, Git, Docker, SSH, Note, Todo, Kanban, Browser, Runner, File Tree, Usage, Group
-- 🔗 **Wiring system** — 5 wire types for automated data flow between tiles
+- 🔗 **[Wiring system](./WIRING.md)** — drag-to-connect tiles for automated data flow (5 wire types, DONE-sentinel detection, auto-idle)
 - 🎯 **6 themes** — Electric, Phantom, Ember, Ice, Snow, Slate (light mode)
 
 **Integrations**
@@ -56,7 +56,7 @@ TerminalX is a native desktop app that turns your terminal workflow into a spati
 - 💾 **Crash Recovery** — 3-layer persistence (localStorage + disk + beforeunload)
 - 🪟 **Multi-Monitor** — detach any tile into its own OS window
 
-See [**FEATURES.md**](./FEATURES.md) for the complete feature guide.
+See [**FEATURES.md**](./FEATURES.md) for the complete feature guide and [**WIRING.md**](./WIRING.md) for the drag-to-connect tutorial.
 
 ---
 
