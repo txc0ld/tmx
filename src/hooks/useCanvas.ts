@@ -21,6 +21,11 @@ export function useCanvas() {
       if (target.closest?.('[data-tile-content]') && !e.altKey) {
         return;
       }
+      // Overlay UI (TileDock, customize panels, workspace tabs, minimap)
+      // owns its own scrolling — don't hijack the wheel for canvas zoom.
+      if (target.closest?.('[data-canvas-overlay]')) {
+        return;
+      }
 
       e.preventDefault();
       const state = useCanvasStore.getState();

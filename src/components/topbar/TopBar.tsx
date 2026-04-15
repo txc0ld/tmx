@@ -5,6 +5,7 @@ import { useProjectStore } from '@/stores/projectStore';
 import { useTemplateStore, type TileTemplate } from '@/stores/templateStore';
 import { colors, spacing, typography, glass, radius, motion, tileColors, fonts, alpha } from '@/design/tokens';
 import { isMac, modShortcut } from '@/utils/platform';
+import { isTemplatePinned, toggleTemplatePin } from '@/components/canvas/TileDock';
 import type { Project, TileType, Tile } from '@/types';
 
 interface TopBarProps {
@@ -124,55 +125,11 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette }: TopBarProp
                   {sec.label}
                 </div>
                 {sec.items.map(t => (
-                  <button
+                  <TemplateRow
                     key={t.id}
-                    onClick={() => { onAddFromTemplate(t); setDropdownOpen(false); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      width: '100%',
-                      padding: '7px 10px',
-                      background: 'none',
-                      border: 'none',
-                      borderRadius: radius.sm,
-                      color: colors.onSurfaceVariant,
-                      cursor: 'pointer',
-                      transition: `background ${motion.hover}`,
-                      textAlign: 'left',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = alpha(colors.onSurfaceVariant, 6); }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
-                  >
-                    <div style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: radius.full,
-                      background: tileColors[t.category] || colors.primary,
-                      flexShrink: 0,
-                    }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        ...typography.labelMd,
-                        fontSize: '0.8125rem',
-                        color: colors.onSurface,
-                        lineHeight: 1.3,
-                      }}>
-                        {t.name}
-                      </div>
-                      {t.description && (
-                        <div style={{
-                          ...typography.labelSm,
-                          fontSize: '0.625rem',
-                          color: colors.secondary,
-                          lineHeight: 1.3,
-                          marginTop: 1,
-                        }}>
-                          {t.description}
-                        </div>
-                      )}
-                    </div>
-                  </button>
+                    template={t}
+                    onAdd={() => { onAddFromTemplate(t); setDropdownOpen(false); }}
+                  />
                 ))}
               </div>
             ))}
@@ -181,8 +138,8 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette }: TopBarProp
       </div>
 
       {/* Layout buttons */}
-      <SaveLayoutButton />
-      <DefaultLayoutButton />
+      <LayoutMenuButton />
+      <ClearCanvasButton />
 
       {/* Palette shortcut */}
       <button
@@ -216,6 +173,97 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette }: TopBarProp
   );
 }
 
+function TemplateRow({ template, onAdd }: { template: TileTemplate; onAdd: () => void }) {
+  const [pinned, setPinned] = useState(() => isTemplatePinned(template.id));
+
+  // Keep in sync if the dock is changed elsewhere
+  useEffect(() => {
+    const handler = () => setPinned(isTemplatePinned(template.id));
+    window.addEventListener('tx-dock-updated', handler);
+    return () => window.removeEventListener('tx-dock-updated', handler);
+  }, [template.id]);
+
+  const togglePin = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nowPinned = toggleTemplatePin(template.id);
+    setPinned(nowPinned);
+  };
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onAdd}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onAdd(); } }}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        width: '100%',
+        padding: '7px 10px',
+        borderRadius: radius.sm,
+        color: colors.onSurfaceVariant,
+        cursor: 'pointer',
+        transition: `background ${motion.hover}`,
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = alpha(colors.onSurfaceVariant, 6); }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+    >
+      <div style={{
+        width: 7, height: 7,
+        borderRadius: radius.full,
+        background: tileColors[template.category as keyof typeof tileColors] || colors.primary,
+        flexShrink: 0,
+      }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          ...typography.labelMd,
+          fontSize: '0.8125rem',
+          color: colors.onSurface,
+          lineHeight: 1.3,
+        }}>
+          {template.name}
+        </div>
+        {template.description && (
+          <div style={{
+            ...typography.labelSm,
+            fontSize: '0.625rem',
+            color: colors.secondary,
+            lineHeight: 1.3,
+            marginTop: 1,
+          }}>
+            {template.description}
+          </div>
+        )}
+      </div>
+      <button
+        onClick={togglePin}
+        title={pinned ? 'Unpin from quick-launch dock' : 'Pin to quick-launch dock'}
+        style={{
+          width: 22, height: 22,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'none', border: 'none', borderRadius: radius.sm,
+          cursor: 'pointer',
+          color: pinned ? colors.primary : colors.secondary,
+          fontSize: 12, lineHeight: 1,
+          transition: `color ${motion.hover}, background ${motion.hover}`,
+          flexShrink: 0,
+          padding: 0,
+          opacity: pinned ? 1 : 0.7,
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.background = alpha(colors.onSurfaceVariant, 10);
+          e.currentTarget.style.opacity = '1';
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = 'none';
+          e.currentTarget.style.opacity = pinned ? '1' : '0.7';
+        }}
+      >
+        {pinned ? '★' : '☆'}
+      </button>
+    </div>
+  );
+}
+
 function LocalClock() {
   const [time, setTime] = useState('');
   useEffect(() => {
@@ -235,105 +283,357 @@ function LocalClock() {
   );
 }
 
-function SaveLayoutButton() {
-  const handleSave = useCallback(() => {
+// ─── Layout slots ───────────────────────────────────────────────────
+// Users can save up to 5 named layout presets per project. Slot 0 is
+// the built-in "Default" workspace; slots 1-5 are user slots that can
+// be saved, loaded, renamed, and cleared from the dropdown.
+
+const LAYOUT_SLOTS = 5;
+
+type LayoutSlot = { name: string; tiles: Record<string, unknown>[]; transform: { x: number; y: number; scale: number } };
+
+function loadSlots(pid: string): (LayoutSlot | null)[] {
+  try {
+    const raw = localStorage.getItem(`tx-layouts-${pid}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const arr = parsed.slice(0, LAYOUT_SLOTS);
+        while (arr.length < LAYOUT_SLOTS) arr.push(null);
+        return arr;
+      }
+    }
+  } catch { /* fall through */ }
+  // One-time migration from the legacy single-slot key into slot 1
+  try {
+    const legacy = localStorage.getItem(`tx-saved-layout-${pid}`);
+    if (legacy) {
+      const parsed = JSON.parse(legacy);
+      if (parsed?.tiles?.length) {
+        const migrated: (LayoutSlot | null)[] = [
+          { name: 'My Layout', tiles: parsed.tiles, transform: parsed.transform || { x: 0, y: 0, scale: 1 } },
+          null, null, null, null,
+        ];
+        localStorage.setItem(`tx-layouts-${pid}`, JSON.stringify(migrated));
+        localStorage.removeItem(`tx-saved-layout-${pid}`);
+        return migrated;
+      }
+    }
+  } catch { /* ignore */ }
+  return Array(LAYOUT_SLOTS).fill(null);
+}
+
+function saveSlots(pid: string, slots: (LayoutSlot | null)[]) {
+  localStorage.setItem(`tx-layouts-${pid}`, JSON.stringify(slots));
+}
+
+function applyDefaultLayout() {
+  const store = useCanvasStore.getState();
+  const pid = store.activeProject;
+  const project = useProjectStore.getState().projects.find(p => p.id === pid);
+  const cwd = project?.cwd || '~';
+
+  const existing = store.tiles[pid] || [];
+  for (const t of existing) store.removeTile(t.id);
+
+  const GAP = 16;
+  const fileW = 260, termW = 560, sideW = 300;
+  const topH = 340, botH = 340;
+  const totalW = fileW + GAP + termW + GAP + sideW;
+  const totalH = topH + GAP + botH;
+
+  const viewW = window.innerWidth - 56;
+  const viewH = window.innerHeight - 44 - 28;
+  const padX = Math.max(GAP, Math.round((viewW - totalW) / 2));
+  const padY = Math.max(GAP, Math.round((viewH - totalH) / 2));
+
+  const tiles: Tile[] = [
+    { id: crypto.randomUUID(), type: 'filetree', title: 'Files', x: padX, y: padY, w: fileW, h: topH + GAP + botH, rootPath: cwd, expandedPaths: [] } as Tile,
+    { id: crypto.randomUUID(), type: 'terminal', title: 'Terminal', x: padX + fileW + GAP, y: padY, w: termW, h: topH, cwd, branch: '', node: '', splits: [] } as Tile,
+    { id: crypto.randomUUID(), type: 'agent', title: 'Agent', x: padX + fileW + GAP, y: padY + topH + GAP, w: termW, h: botH, agent: 'claude', model: 'opus-4', effort: 'high', mode: 'code', version: '', cwd, branch: '', status: 'idle', elapsed: 0 } as Tile,
+    { id: crypto.randomUUID(), type: 'todo', title: 'Tasks', x: padX + fileW + GAP + termW + GAP, y: padY, w: sideW, h: topH, items: [] } as Tile,
+    { id: crypto.randomUUID(), type: 'git', title: 'Git', x: padX + fileW + GAP + termW + GAP, y: padY + topH + GAP, w: sideW, h: botH, repoPath: cwd } as Tile,
+  ];
+
+  store.setTransform({ x: 0, y: 0, scale: 1 });
+  for (const t of tiles) store.addTile(t);
+}
+
+function LayoutMenuButton() {
+  const [open, setOpen] = useState(false);
+  const [slots, setSlots] = useState<(LayoutSlot | null)[]>(() => {
+    const pid = useCanvasStore.getState().activeProject;
+    return pid ? loadSlots(pid) : Array(LAYOUT_SLOTS).fill(null);
+  });
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Re-load slots whenever the menu opens (project may have changed)
+  useEffect(() => {
+    if (!open) return;
+    const pid = useCanvasStore.getState().activeProject;
+    if (pid) setSlots(loadSlots(pid));
+  }, [open]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const toast = (msg: string, kind: 'success' | 'info' | 'error' = 'success') => {
+    import('@/stores/toastStore').then(({ useToastStore }) => {
+      useToastStore.getState().addToast(msg, kind);
+    });
+  };
+
+  const saveToSlot = useCallback((idx: number) => {
     const store = useCanvasStore.getState();
     const pid = store.activeProject;
     if (!pid) return;
-    const layout = {
+    const existing = loadSlots(pid);
+    const currentName = existing[idx]?.name || '';
+    const defaultName = currentName || `Layout ${idx + 1}`;
+    const name = prompt(`Name this layout slot:`, defaultName);
+    if (name === null) return; // cancelled
+    const finalName = name.trim() || defaultName;
+    const snapshot: LayoutSlot = {
+      name: finalName,
       tiles: (store.tiles[pid] || []).map(t => {
-        // Strip runtime state (ptyId, status, etc.) — keep position + config
-        const { ...rest } = t as unknown as Record<string, unknown>;
+        const rest = { ...t } as unknown as Record<string, unknown>;
         delete rest.ptyId;
         return rest;
       }),
       transform: store.transforms[pid] || { x: 0, y: 0, scale: 1 },
     };
-    localStorage.setItem(`tx-saved-layout-${pid}`, JSON.stringify(layout));
+    existing[idx] = snapshot;
+    saveSlots(pid, existing);
+    setSlots(existing);
+    toast(`Saved "${finalName}" to slot ${idx + 1}`);
+  }, []);
+
+  const loadFromSlot = useCallback((idx: number) => {
+    const store = useCanvasStore.getState();
+    const pid = store.activeProject;
+    if (!pid) return;
+    const existing = loadSlots(pid);
+    const slot = existing[idx];
+    if (!slot) return;
+    // Clear current canvas
+    const current = store.tiles[pid] || [];
+    for (const t of current) store.removeTile(t.id);
+    store.setTransform(slot.transform || { x: 0, y: 0, scale: 1 });
+    for (const t of slot.tiles) {
+      store.addTile({ ...t, id: crypto.randomUUID(), ptyId: undefined } as Tile);
+    }
+    toast(`Loaded "${slot.name}"`);
+    setOpen(false);
+  }, []);
+
+  const deleteSlot = useCallback((idx: number) => {
+    const pid = useCanvasStore.getState().activeProject;
+    if (!pid) return;
+    const existing = loadSlots(pid);
+    const name = existing[idx]?.name;
+    if (!name) return;
+    if (!confirm(`Delete layout "${name}"?`)) return;
+    existing[idx] = null;
+    saveSlots(pid, existing);
+    setSlots(existing);
+    toast(`Deleted "${name}"`, 'info');
+  }, []);
+
+  return (
+    <div ref={menuRef} style={{ position: 'relative', // @ts-expect-error webkit
+      WebkitAppRegion: 'no-drag' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title="Layout presets"
+        style={{
+          height: 28, padding: `0 ${spacing.sm}`,
+          display: 'flex', alignItems: 'center', gap: 5,
+          background: 'var(--tx-outline-ghost)',
+          border: `1px solid ${colors.outlineGhost}`,
+          borderRadius: radius.md, color: colors.onSurfaceVariant,
+          ...typography.labelSm, cursor: 'pointer', transition: `all ${motion.hover}`,
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--tx-outline-variant)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'var(--tx-outline-ghost)'; }}
+      >
+        <span style={{ fontSize: 11, lineHeight: 1 }}>&#9638;</span> Layout
+        <span style={{ fontSize: 9, opacity: 0.7 }}>▾</span>
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0, marginTop: 6,
+          ...glass, padding: 6, minWidth: 280, zIndex: 100,
+        }}>
+          <button
+            onClick={() => { applyDefaultLayout(); setOpen(false); }}
+            style={menuRowStyle}
+            onMouseEnter={e => { e.currentTarget.style.background = alpha(colors.onSurfaceVariant, 6); }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+          >
+            <div style={{ width: 7, height: 7, borderRadius: radius.full, background: colors.primary, flexShrink: 0 }} />
+            <div style={{ flex: 1, textAlign: 'left', ...typography.labelMd, fontSize: '0.8125rem', color: colors.onSurface }}>
+              Default Layout
+            </div>
+            <span style={{ ...typography.labelSm, fontSize: '0.625rem', color: colors.secondary }}>Files · Term · Agent · Tasks · Git</span>
+          </button>
+
+          <div style={{ height: 1, background: colors.outlineGhost, margin: '6px 8px' }} />
+
+          <div style={{
+            ...typography.labelSm,
+            color: colors.secondary,
+            padding: '4px 10px',
+            textTransform: 'uppercase',
+            fontSize: '0.5625rem',
+            letterSpacing: '0.1em',
+            fontWeight: 600,
+          }}>
+            Saved Slots
+          </div>
+
+          {slots.map((slot, idx) => (
+            <SlotRow
+              key={idx}
+              idx={idx}
+              slot={slot}
+              onLoad={() => loadFromSlot(idx)}
+              onSave={() => saveToSlot(idx)}
+              onDelete={() => deleteSlot(idx)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const menuRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  width: '100%',
+  padding: '7px 10px',
+  background: 'none',
+  border: 'none',
+  borderRadius: radius.sm,
+  color: colors.onSurfaceVariant,
+  cursor: 'pointer',
+  transition: `background ${motion.hover}`,
+  textAlign: 'left',
+};
+
+function SlotRow({
+  idx, slot, onLoad, onSave, onDelete,
+}: {
+  idx: number;
+  slot: LayoutSlot | null;
+  onLoad: () => void;
+  onSave: () => void;
+  onDelete: () => void;
+}) {
+  const filled = slot !== null;
+  return (
+    <div
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '4px 6px',
+        borderRadius: radius.sm,
+        transition: `background ${motion.hover}`,
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = alpha(colors.onSurfaceVariant, 4); }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+    >
+      <button
+        onClick={filled ? onLoad : onSave}
+        title={filled ? `Load "${slot!.name}"` : `Save current canvas to slot ${idx + 1}`}
+        style={{
+          flex: 1,
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '4px 6px',
+          background: 'none', border: 'none', borderRadius: radius.sm,
+          cursor: 'pointer', textAlign: 'left',
+          color: filled ? colors.onSurface : colors.secondary,
+        }}
+      >
+        <div style={{
+          width: 7, height: 7, borderRadius: radius.full,
+          background: filled ? colors.green : colors.outlineVariant,
+          flexShrink: 0,
+        }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ ...typography.labelMd, fontSize: '0.8125rem', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {filled ? slot!.name : `Slot ${idx + 1}`}
+          </div>
+          <div style={{ ...typography.labelSm, fontSize: '0.625rem', color: colors.secondary, lineHeight: 1.3 }}>
+            {filled ? `${slot!.tiles.length} tile${slot!.tiles.length === 1 ? '' : 's'} · click to load` : 'empty · click to save current'}
+          </div>
+        </div>
+      </button>
+
+      {filled && (
+        <>
+          <button
+            onClick={onSave}
+            title="Overwrite this slot with current canvas"
+            style={slotIconBtnStyle}
+            onMouseEnter={e => { e.currentTarget.style.color = colors.onSurface; }}
+            onMouseLeave={e => { e.currentTarget.style.color = colors.secondary; }}
+          >
+            ↻
+          </button>
+          <button
+            onClick={onDelete}
+            title="Delete this slot"
+            style={slotIconBtnStyle}
+            onMouseEnter={e => { e.currentTarget.style.color = colors.red; }}
+            onMouseLeave={e => { e.currentTarget.style.color = colors.secondary; }}
+          >
+            ✕
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+const slotIconBtnStyle: React.CSSProperties = {
+  width: 22, height: 22,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: 'none', border: 'none', borderRadius: radius.sm,
+  cursor: 'pointer',
+  color: colors.secondary,
+  fontSize: 12, lineHeight: 1,
+  transition: `color ${motion.hover}`,
+  flexShrink: 0,
+  padding: 0,
+};
+
+function ClearCanvasButton() {
+  const handleClick = useCallback(() => {
+    const store = useCanvasStore.getState();
+    const pid = store.activeProject;
+    if (!pid) return;
+    const existing = store.tiles[pid] || [];
+    if (existing.length === 0) return;
+    if (!confirm(`Clear all ${existing.length} tile${existing.length === 1 ? '' : 's'} from this canvas?`)) return;
+    for (const t of existing) store.removeTile(t.id);
     import('@/stores/toastStore').then(({ useToastStore }) => {
-      useToastStore.getState().addToast('Layout saved', 'success');
+      useToastStore.getState().addToast('Canvas cleared', 'success');
     });
   }, []);
 
   return (
     <button
-      onClick={handleSave}
-      title="Save current layout"
-      style={{
-        // @ts-expect-error webkit property
-        WebkitAppRegion: 'no-drag',
-        height: 28, padding: `0 ${spacing.sm}`,
-        display: 'flex', alignItems: 'center', gap: 5,
-        background: 'var(--tx-outline-ghost)',
-        border: `1px solid ${colors.outlineGhost}`,
-        borderRadius: radius.md, color: colors.onSurfaceVariant,
-        ...typography.labelSm, cursor: 'pointer', transition: `all ${motion.hover}`,
-      }}
-      onMouseEnter={e => { e.currentTarget.style.background = 'var(--tx-outline-variant)'; }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'var(--tx-outline-ghost)'; }}
-    >
-      Save
-    </button>
-  );
-}
-
-function DefaultLayoutButton() {
-  const handleClick = useCallback(() => {
-    const store = useCanvasStore.getState();
-    const pid = store.activeProject;
-    const project = useProjectStore.getState().projects.find(p => p.id === pid);
-    const cwd = project?.cwd || '~';
-
-    // Clear existing tiles
-    const existing = store.tiles[pid] || [];
-    for (const t of existing) store.removeTile(t.id);
-
-    // Try restoring a saved layout first
-    try {
-      const raw = localStorage.getItem(`tx-saved-layout-${pid}`);
-      if (raw) {
-        const saved = JSON.parse(raw);
-        if (saved.tiles && saved.tiles.length > 0) {
-          store.setTransform(saved.transform || { x: 0, y: 0, scale: 1 });
-          for (const t of saved.tiles) {
-            store.addTile({ ...t, id: crypto.randomUUID(), ptyId: undefined } as Tile);
-          }
-          return;
-        }
-      }
-    } catch { /* fall through to default */ }
-
-    // Layout dimensions
-    const GAP = 16;
-    const fileW = 260, termW = 560, sideW = 300;
-    const topH = 340, botH = 340;
-    const totalW = fileW + GAP + termW + GAP + sideW;
-    const totalH = topH + GAP + botH;
-
-    // Center layout in the user's viewport
-    // Account for sidebar (56px) and topbar (44px) + statusbar (28px)
-    const viewW = window.innerWidth - 56;
-    const viewH = window.innerHeight - 44 - 28;
-    const padX = Math.max(GAP, Math.round((viewW - totalW) / 2));
-    const padY = Math.max(GAP, Math.round((viewH - totalH) / 2));
-
-    const tiles: Tile[] = [
-      { id: crypto.randomUUID(), type: 'filetree', title: 'Files', x: padX, y: padY, w: fileW, h: topH + GAP + botH, rootPath: cwd, expandedPaths: [] } as Tile,
-      { id: crypto.randomUUID(), type: 'terminal', title: 'Terminal', x: padX + fileW + GAP, y: padY, w: termW, h: topH, cwd, branch: '', node: '', splits: [] } as Tile,
-      { id: crypto.randomUUID(), type: 'agent', title: 'Agent', x: padX + fileW + GAP, y: padY + topH + GAP, w: termW, h: botH, agent: 'claude', model: 'opus-4', effort: 'high', mode: 'code', version: '', cwd, branch: '', status: 'idle', elapsed: 0 } as Tile,
-      { id: crypto.randomUUID(), type: 'todo', title: 'Tasks', x: padX + fileW + GAP + termW + GAP, y: padY, w: sideW, h: topH, items: [] } as Tile,
-      { id: crypto.randomUUID(), type: 'git', title: 'Git', x: padX + fileW + GAP + termW + GAP, y: padY + topH + GAP, w: sideW, h: botH, repoPath: cwd } as Tile,
-    ];
-
-    // Reset transform first so tile positions map 1:1 to screen
-    store.setTransform({ x: 0, y: 0, scale: 1 });
-    for (const t of tiles) store.addTile(t);
-  }, []);
-
-  return (
-    <button
       onClick={handleClick}
-      title="Apply default workspace layout"
+      title="Remove all tiles from the canvas"
       style={{
         // @ts-expect-error webkit property
         WebkitAppRegion: 'no-drag',
@@ -347,7 +647,7 @@ function DefaultLayoutButton() {
       onMouseEnter={e => { e.currentTarget.style.background = 'var(--tx-outline-variant)'; }}
       onMouseLeave={e => { e.currentTarget.style.background = 'var(--tx-outline-ghost)'; }}
     >
-      <span style={{ fontSize: 11, lineHeight: 1 }}>&#9638;</span> Layout
+      <span style={{ fontSize: 11, lineHeight: 1, transform: 'translateY(1px)' }}>✕</span> Clear
     </button>
   );
 }
