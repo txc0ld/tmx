@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { readFileTree } from '@/utils/ipc';
 import { colors, fonts, spacing, typography, radius, alpha } from '@/design/tokens';
-import type { FileTreeTile as FileTreeTileType, FileTreeNode, EditorTile, Tile } from '@/types';
+import type { FileTreeTile as FileTreeTileType, FileTreeNode, EditorTile, DiffTile, Tile } from '@/types';
 
 interface FileTreeTileProps {
   tile: FileTreeTileType;
@@ -42,9 +42,55 @@ export function FileTreeTile({ tile }: FileTreeTileProps) {
     const store = useCanvasStore.getState();
     store.updateTile(tile.id, { selectedFile: path } as Partial<FileTreeTileType>);
 
-    // Open file in an EditorTile — reuse existing or spawn new
     const pid = store.activeProject;
     const allTiles = store.tiles[pid] || [];
+    const wires = store.wires[pid] || [];
+
+    // If this filetree has any file-open wires, route the click through them
+    // instead of spawning a new editor every time. Multiple targets are OK —
+    // each one receives the path.
+    const fileOpenWires = wires.filter(w => w.fromTile === tile.id && w.wireType === 'file-open');
+
+    if (fileOpenWires.length > 0) {
+      let routed = false;
+      for (const wire of fileOpenWires) {
+        const target = allTiles.find(t => t.id === wire.toTile);
+        if (!target) continue;
+        if (target.type === 'editor') {
+          const fileName = path.split(/[\\/]/).pop() || 'file';
+          store.updateTile(target.id, {
+            filePath: path,
+            title: fileName,
+          } as Partial<EditorTile>);
+          store.bringToFront(target.id);
+          routed = true;
+        } else if (target.type === 'diff') {
+          // Drop the path into the most useful slot for the diff's current
+          // mode: git mode → set gitTarget if path lives under repoPath;
+          // compare mode → fill the empty side; paste mode → switch to
+          // compare mode and seed the modified side.
+          const diff = target as DiffTile;
+          const mode = diff.mode ?? 'git';
+          if (mode === 'git' && diff.repoPath && path.startsWith(diff.repoPath)) {
+            const rel = path.slice(diff.repoPath.length).replace(/^[\\/]/, '');
+            store.updateTile(target.id, { gitTarget: rel } as Partial<DiffTile>);
+          } else if (mode === 'compare') {
+            const slot = diff.compareLeft ? 'compareRight' : 'compareLeft';
+            store.updateTile(target.id, { [slot]: path } as Partial<DiffTile>);
+          } else {
+            store.updateTile(target.id, { mode: 'compare', compareRight: path } as Partial<DiffTile>);
+          }
+          store.bringToFront(target.id);
+          routed = true;
+        }
+        // Pulse the wire briefly for visual feedback
+        store.setWireActive(wire.id, true);
+        setTimeout(() => useCanvasStore.getState().setWireActive(wire.id, false), 1500);
+      }
+      if (routed) return;
+    }
+
+    // Fallback: open file in an EditorTile — reuse existing match or spawn new
     const existing = allTiles.find(
       (t): t is EditorTile => t.type === 'editor' && (t as EditorTile).filePath === path,
     );

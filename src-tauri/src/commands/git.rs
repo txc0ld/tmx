@@ -265,6 +265,36 @@ pub async fn git_diff_summary(repo_path: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Return the blob content of `file_path` at HEAD (the last committed version).
+/// Used by the DiffTile to render working-tree vs HEAD without the user having
+/// to type any paths. file_path is relative to repo_path.
+#[tauri::command]
+pub async fn git_show_head_file(repo_path: String, file_path: String) -> Result<String, String> {
+    let expanded = validate_repo_path(&repo_path)?;
+    if file_path.is_empty() { return Err("file_path empty".to_string()); }
+    if file_path.contains('\0') { return Err("file_path contains null byte".to_string()); }
+    if file_path.starts_with('-') { return Err("file_path cannot start with '-'".to_string()); }
+    if file_path.contains("..") { return Err("file_path cannot contain '..'".to_string()); }
+    // Normalize Windows back-slashes since git wants forward-slashes for refs
+    let normalized = file_path.replace('\\', "/");
+    let spec = format!("HEAD:{}", normalized);
+    let output = Command::new("git")
+        .args(["show", &spec])
+        .current_dir(&expanded)
+        .output()
+        .await
+        .map_err(|e| format!("git error: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        // exit code 128 with "exists on disk, but not in 'HEAD'" → newly added file, return empty
+        if stderr.contains("exists on disk, but not in") || stderr.contains("does not exist") {
+            return Ok(String::new());
+        }
+        return Err(format!("git show failed: {}", stderr.trim()));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 #[tauri::command]
 pub async fn git_files_status(repo_path: String) -> Result<Vec<GitFileStatus>, String> {
     let expanded = validate_repo_path(&repo_path)?;

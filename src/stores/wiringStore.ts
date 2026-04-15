@@ -21,6 +21,8 @@ function inferWireType(from: Tile, to: Tile): WireType {
   if (from.type === 'agent' && to.type === 'browser') return 'refresh-trigger';
   if (from.type === 'agent' && to.type === 'todo') return 'task-assign';
   if (from.type === 'agent' && to.type === 'diff') return 'diff-feed';
+  // FileTree → Editor / Diff: clicked file in the source loads into the target
+  if (from.type === 'filetree' && (to.type === 'editor' || to.type === 'diff')) return 'file-open';
   return 'context-pipe'; // default: terminal → agent, etc.
 }
 

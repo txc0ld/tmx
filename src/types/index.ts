@@ -87,6 +87,14 @@ export interface DiffTile extends TileBase {
   filePath: string;
   hunks: DiffHunk[];
   comments: DiffComment[];
+  // User-friendly diff modes (added v1.1, all optional for back-compat)
+  mode?: 'git' | 'compare' | 'paste';
+  repoPath?: string;        // git mode — defaults to active project cwd
+  gitTarget?: string;       // git mode — file path within the repo (relative)
+  compareLeft?: string;     // compare mode — original file absolute path
+  compareRight?: string;    // compare mode — modified file absolute path
+  pasteOriginal?: string;   // paste mode
+  pasteModified?: string;   // paste mode
 }
 
 export interface DiffHunk {
@@ -216,7 +224,7 @@ export interface Project {
 
 // ─── Wiring ───────────────────────────────────────────────────────────
 
-export type WireType = 'context-pipe' | 'refresh-trigger' | 'task-assign' | 'diff-feed' | 'agent-chain';
+export type WireType = 'context-pipe' | 'refresh-trigger' | 'task-assign' | 'diff-feed' | 'agent-chain' | 'file-open';
 
 export interface Wire {
   id: string;
