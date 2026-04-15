@@ -1,171 +1,119 @@
 # AGENTS.md — TerminalX
 
-## Identity
+Brief orientation for AI coding agents working on this repo. For depth, read [**CLAUDE.md**](./CLAUDE.md) (architecture + critical patterns) and the per-feature pages under [**docs/features/**](./docs/features/README.md).
 
-**TerminalX** is an infinite canvas terminal workspace for developers who orchestrate multiple CLI agents (Claude Code, Codex, Gemini CLI) in parallel. It is a native desktop application built on Tauri 2 with a React + TypeScript frontend and a Rust backend. The product philosophy follows Jack Dorsey's protocol primitive model: **one verb (orchestrate), removes the intermediary (context switching), creates network effects (tile wiring).**
+## What this app is
 
-## Architecture
+Native desktop (Tauri 2) app — an infinite canvas workspace for orchestrating multiple CLI agents (Claude Code, Codex, Gemini CLI) in parallel. 15 tile types (terminal, agent, editor, diff, git, runner, ssh, docker, browser, file tree, note, todo, kanban, group, usage) connected by 6 wire types. MCP integrations for Slack / GitHub / Linear / Jira / Notion / Google Calendar / Gmail.
+
+**Stack:** Tauri 2 · React 19 · TypeScript 5 · Vite 6 · Zustand 5 · xterm.js 5 · Monaco Editor · portable-pty 0.8 · reqwest 0.12.
+
+## Directory layout
 
 ```
-terminalx/
-├── src-tauri/           # Rust backend — process mgmt, PTY, filesystem
-│   ├── src/
-│   │   ├── main.rs              # Tauri app entry, IPC registration
-│   │   ├── commands/            # Tauri #[command] handlers
-│   │   │   ├── terminal.rs      # PTY spawn/write/resize/kill
-│   │   │   ├── agents.rs        # Agent process lifecycle
-│   │   │   ├── filesystem.rs    # File tree + watcher (notify crate)
-│   │   │   ├── workspace.rs     # Canvas state persistence
-│   │   │   ├── timeline.rs      # Session event recording
-│   │   │   └── wiring.rs        # Tile connection data flow
-│   │   ├── state/               # Managed Tauri state
-│   │   │   ├── app_state.rs     # Global app state
-│   │   │   └── pty_manager.rs   # PTY session registry
-│   │   └── plugins/             # Future plugin system trait
-│   ├── Cargo.toml
-│   ├── tauri.conf.json
-│   └── capabilities/
-│       └── default.json         # Tauri 2 capability permissions
-│
-├── src/                 # React + TypeScript frontend
-│   ├── App.tsx                  # Root — sidebar + canvas routing
-│   ├── main.tsx                 # Entry point
-│   ├── design/
-│   │   └── tokens.ts            # Kinetic Topology design system
-│   ├── stores/
-│   │   ├── projectStore.ts      # Zustand — project state
-│   │   ├── canvasStore.ts       # Zustand — per-project tile state
-│   │   ├── paletteStore.ts      # Command palette state
-│   │   └── timelineStore.ts     # Session timeline events
-│   ├── hooks/
-│   │   ├── useCanvas.ts         # Pan/zoom/transform
-│   │   ├── usePty.ts            # PTY IPC bridge
-│   │   ├── useWiring.ts         # Tile connection logic
-│   │   └── useFocusMode.ts      # Focus mode state
-│   ├── components/
-│   │   ├── tiles/
-│   │   │   ├── AgentTile.tsx    # Claude/Codex/Gemini agent
-│   │   │   ├── TerminalTile.tsx # Shell w/ PTY + split panes
-│   │   │   ├── BrowserTile.tsx  # Webview localhost preview
-│   │   │   ├── TodoTile.tsx     # Task list + drag-to-assign
-│   │   │   ├── DiffTile.tsx     # PR-style review
-│   │   │   ├── EditorTile.tsx   # Monaco/CodeMirror
-│   │   │   ├── NoteTile.tsx     # Canvas annotation
-│   │   │   └── TileShell.tsx    # Glass wrapper, drag, resize
-│   │   ├── canvas/
-│   │   │   ├── InfiniteCanvas.tsx
-│   │   │   ├── CanvasGrid.tsx   # Dot grid
-│   │   │   ├── Minimap.tsx
-│   │   │   └── FocusMode.tsx    # Dim/blur overlay
-│   │   ├── wiring/
-│   │   │   ├── WiringLayer.tsx  # SVG connection lines
-│   │   │   └── WiringPort.tsx   # Input/output ports on tiles
-│   │   ├── palette/
-│   │   │   └── CommandPalette.tsx # ⌘K fuzzy search
-│   │   ├── status/
-│   │   │   └── StatusRail.tsx   # Bottom status bar
-│   │   ├── timeline/
-│   │   │   └── SessionTimeline.tsx # Horizontal event scrubber
-│   │   ├── sidebar/
-│   │   │   └── ProjectSidebar.tsx  # Discord-style project icons
-│   │   └── topbar/
-│   │       └── TopBar.tsx
-│   ├── types/
-│   │   ├── tile.ts              # Tile type definitions
-│   │   ├── project.ts           # Project type
-│   │   ├── wire.ts              # Wiring connection type
-│   │   └── timeline.ts          # Timeline event type
-│   └── utils/
-│       ├── ipc.ts               # Tauri invoke wrappers
-│       └── layout.ts            # Snap/align helpers
-│
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-├── index.html
-├── AGENTS.md            # This file
-├── PRD.md               # Product requirements
-├── DESIGN.md            # Kinetic Topology design system
-└── README.md
+src/                      React frontend
+├── App.tsx               Root — sidebar + canvas + palette routing
+├── main.tsx              Entry; global error logging; initMcpProjectSync
+├── components/
+│   ├── canvas/           InfiniteCanvas, Minimap, TileDock, WorkspaceTabs, SearchOverlay
+│   ├── tiles/            15 tile components + TileShell (memoized wrapper)
+│   ├── topbar/           TopBar with Layout menu + Clear Canvas + theme picker
+│   ├── palette/          CommandPalette (Ctrl/⌘+K)
+│   ├── wiring/           WiringLayer (SVG paths), drag-to-connect ports
+│   ├── sidebar/          ProjectSidebar (bottom-left)
+│   ├── status/           StatusRail, ToastContainer, ThemePicker
+│   └── timeline/         SessionTimeline
+├── stores/               14 Zustand stores (canvasStore is the big one)
+├── hooks/                usePty, useCanvas, useWiringEngine
+├── utils/                ipc (Tauri invoke wrappers), layout, workspaceImport, detachTile
+├── design/               tokens.ts (Kinetic Topology design system; see DESIGN.md)
+└── types/                index.ts — discriminated unions for all Tile + Wire + Project types
+
+src-tauri/                Rust backend
+├── src/
+│   ├── main.rs           Entry; calls run() in lib.rs
+│   ├── lib.rs            Tauri builder + IPC handler registration
+│   ├── commands/         30+ #[tauri::command] handlers
+│   │   ├── terminal.rs   PTY spawn/write/resize/kill (bounded-channel backpressure)
+│   │   ├── agents.rs     Agent CLI spawn (Windows cmd.exe wrap)
+│   │   ├── filesystem.rs read_file_tree, read_file_text, write_file_text, get_file_size, watchers
+│   │   ├── workspace.rs  Canvas state persistence (atomic writes)
+│   │   ├── timeline.rs   Session event recording (10k cap, ring buffer)
+│   │   ├── projects.rs   Project CRUD
+│   │   ├── git.rs        11 git commands (validate_git_url, refname rules)
+│   │   ├── http_proxy.rs SSRF-hardened outbound HTTP, DNS pinning, pooled clients
+│   │   └── docker.rs     List containers + attach exec
+│   └── state/
+│       ├── app_state.rs  AppState container (PtyManager + AgentRegistry + Timeline + Watchers)
+│       └── pty_manager.rs  PtyManager (64 PTY cap, retry-on-WouldBlock writes)
+├── Cargo.toml
+├── tauri.conf.json       CSP + window config
+└── capabilities/default.json  Tauri 2 capabilities
+
+docs/features/            ~55 per-feature docs (this repo's knowledge base)
+.github/workflows/        CI (pnpm test + cargo check + cargo test on Ubuntu/Win/Mac)
 ```
 
-## Tech Stack
-
-| Layer | Technology | Version | Purpose |
-|-------|-----------|---------|---------|
-| Runtime | Tauri | 2.x (latest stable) | Native shell, IPC, webview |
-| Backend | Rust | stable | PTY, process mgmt, fs, state |
-| Frontend | React | 19.x | UI framework |
-| Language | TypeScript | 5.x | Type safety |
-| Bundler | Vite | 6.x | Dev server + build |
-| State | Zustand | 5.x | Client state management |
-| Terminal | xterm.js | 5.x | Terminal rendering |
-| Editor | Monaco Editor | latest | Code editor tile |
-| PTY | portable-pty | latest | Cross-platform PTY |
-| FS Watch | notify | 7.x | File system events |
-| Styling | Tailwind CSS | 4.x | Utility classes + design tokens |
-| Fonts | Public Sans, Plus Jakarta Sans, JetBrains Mono | — | Kinetic Topology |
-
-## Design System
-
-Kinetic Topology — see DESIGN.md. Key rules:
-- `#FFFFFF` reserved for entity names / primary anchors ONLY
-- `#c4c4c4` for body text, `#b5d25e` for metadata
-- `#ccff00` is energy — use sparingly (active states, selection, data flow)
-- Glassmorphism: `rgba(26,26,26,0.4)` + `backdrop-filter: blur(20px)` + ghost border `rgba(255,255,255,0.06)`
-- Luminescent shadows: `rgba(204,255,0,0.04)`, never black
-- No traditional borders. Tonal shifts, spacing, ghost borders only
-- No dividers. Whitespace separates
-
-## Build Commands
+## Build commands
 
 ```bash
-# Development
-pnpm tauri dev
-
-# Build (Windows .msi + macOS .dmg)
-pnpm tauri build
-
-# Frontend only (for UI iteration)
-pnpm dev
+pnpm tauri dev             # Full stack (Rust + Vite HMR)
+pnpm dev                   # Frontend only (no Tauri)
+pnpm tauri build           # Production binary
+pnpm test                  # Vitest
+npx tsc --noEmit           # TypeScript type-check
+cd src-tauri && cargo check
+cd src-tauri && cargo test --lib
 ```
 
-## Coding Conventions
+## Critical patterns (read these before editing)
 
-- All Tauri commands in `src-tauri/src/commands/` with `#[tauri::command]`
-- All IPC calls wrapped in `src/utils/ipc.ts` — never call `invoke()` directly from components
-- Zustand stores in `src/stores/` — one store per domain
-- Tile components receive data via props, never read global state directly
-- All colors/spacing/typography via design tokens — never hardcode
-- Rust: `thiserror` for error types, `serde` for serialization
-- TypeScript: strict mode, no `any`, discriminated unions for tile types
-- File names: kebab-case for files, PascalCase for components
+**#1 crash cause — Zustand selectors that create new objects.**
+```ts
+// ❌ infinite render loop — new array every call
+useCanvasStore(s => s.tiles[s.activeProject] || [])
 
-## Critical Paths
+// ✅ stable reference via module-level constant
+const EMPTY: Tile[] = [];
+useCanvasStore(s => s.tiles[s.activeProject] ?? EMPTY)
+```
 
-### PTY Flow
-1. User clicks terminal tile → `usePty` hook calls `invoke("pty_spawn", { shell, cwd })`
-2. Rust spawns PTY via `portable-pty`, stores in `PtyManager`
-3. Rust streams output via Tauri event channel → frontend `xterm.js`
-4. User types → `invoke("pty_write", { id, data })` → Rust writes to PTY
-5. Resize → `invoke("pty_resize", { id, cols, rows })`
+**Don't use `@tauri-apps/plugin-fs` for user project files.** Scope is too narrow — fails on `~/.claude/projects/...`. Use `readFileText` / `writeFileText` from `utils/ipc.ts` which go through `read_file_text` / `write_file_text` in Rust with the broader `is_path_allowed` validator.
 
-### Agent Flow
-1. Agent tile spawns → `invoke("agent_spawn", { agent_type, cwd, task })`
-2. Rust spawns agent CLI process (e.g., `claude --cwd ./project`)
-3. Output streams via event channel to tile
-4. Status updates (idle/working/done) emitted as events
-5. Completion triggers toast + timeline entry
+**PTY writes chunk at 256 bytes.** Already handled at the Rust level in `PtyManager::write`. Frontend-side auto-dispatch (TodoTile) additionally chunks at 128 bytes with a 50 ms delay before `\r`.
 
-### Wiring Flow
-1. User drags from output port on Tile A to input port on Tile B
-2. `useWiring` creates connection: `{ from: tileA.id, to: tileB.id, type }`
-3. When Tile A emits data (terminal output, agent completion, etc.)
-4. WiringLayer animates the `#ccff00` dashed flow line
-5. Tile B receives piped data (as context, as command, as refresh trigger)
+**Agent spawn goes through `pty_spawn_internal`**, not `pty_spawn`. Agents aren't shells, so they bypass the renderer-facing `SHELL_ALLOWLIST`. On Windows, agents are `.cmd` scripts and the spawn wraps them through `cmd.exe /C`.
 
-### Workspace Persistence
-1. Canvas state (tiles, positions, wires, zoom) stored per-project
-2. On change → debounced write to `~/.terminalx/workspaces/{project}.json`
-3. On project switch → load workspace state, restore canvas
-4. Snapshots saved as named presets in same directory
+**MCP traffic must go through `httpFetch`**, never direct `fetch()`. CSP + CORS + SSRF + DNS pinning all happen in `http_proxy.rs`.
+
+**All frontend IPC goes through `utils/ipc.ts`.** Never call `invoke()` directly from components.
+
+**All colors/spacing/typography via design tokens** (`src/design/tokens.ts`). Never hardcode. Alpha helper: `alpha(color, percent)` (uses `color-mix`, works with CSS custom properties).
+
+## Where to dig for specifics
+
+| Topic | File |
+|---|---|
+| Architecture deep dive + data flows | [CLAUDE.md](./CLAUDE.md) |
+| Per-feature docs (~55 pages) | [docs/features/](./docs/features/README.md) |
+| Design-system tokens + rules | [DESIGN.md](./DESIGN.md) |
+| Wiring tutorial | [WIRING.md](./WIRING.md) |
+| Security posture | [CONTRIBUTING.md → Security](./CONTRIBUTING.md#security-posture) |
+| Test patterns | `src/test/*.test.ts` + `src-tauri/src/commands/**/tests` |
+
+## Coding conventions
+
+- All Tauri commands in `src-tauri/src/commands/` with `#[tauri::command]`.
+- All IPC calls wrapped in `src/utils/ipc.ts` — never `invoke()` directly from components.
+- Zustand stores in `src/stores/` — one store per domain.
+- All colors/spacing/typography via design tokens — never hardcode.
+- Rust: `thiserror` / `anyhow` where useful, `serde` for serialization, `parking_lot::Mutex` for shared state.
+- TypeScript: strict mode, discriminated unions for tile/wire types. No `any` without a comment explaining why.
+- File names: PascalCase for components, camelCase for utils/hooks/stores.
+- Commits: conventional (`feat:`, `fix:`, `refactor:`, `perf:`, `docs:`).
+
+## Tests + CI
+
+- **Frontend:** 92 Vitest tests in `src/test/` — wire inference, engine dispatch, workspace import validators, MCP URL builders, agent auto-complete.
+- **Rust:** 38 `#[cfg(test)]` unit tests — filesystem validator, SSRF IP classification, header blocklist, project/workspace/git validators.
+- **CI:** [.github/workflows/ci.yml](.github/workflows/ci.yml) runs both across Ubuntu + Windows + macOS on every push/PR to `main`.

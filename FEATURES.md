@@ -1,509 +1,218 @@
-# TerminalX — Feature Guide
+# Feature Tour
 
-> Infinite canvas workspace for orchestrating CLI agents in parallel.
-> Built with Tauri 2 + React 19 + Rust.
+> Infinite canvas workspace for orchestrating CLI agents, terminals, and tools in parallel. Built with Tauri 2 + React 19 + Rust.
 
----
-
-## What is TerminalX?
-
-TerminalX is a desktop app that lets you run multiple AI coding agents, terminals, and dev tools side-by-side on an infinite canvas. Think Figma meets terminal meets AI. Drag tiles around, wire them together, and let your agents work in parallel while you watch.
+This is the product-level tour. For deep per-feature docs, see [**docs/features/**](./docs/features/README.md). For the wiring tutorial, see [**WIRING.md**](./WIRING.md).
 
 ---
 
-## X Posts / Social Copy
+## The pitch
 
-### The Hook
+Run Claude, Codex, and Gemini side-by-side on an infinite canvas. Wire them together. Pull tasks from Slack, GitHub, Linear, Jira. Watch agents, terminals, editors, and git panels coexist without tab-switching.
 
-> TerminalX — run Claude, Codex, and Gemini side by side on an infinite canvas. Wire them together. Let them work in parallel. Ship 10x faster.
-
-### Multi-Agent
-
-> What if you could have 3 AI agents working on your codebase at the same time?
->
-> TerminalX lets you run Claude, Codex, and Gemini in parallel on an infinite canvas. One refactors your backend, one writes tests, one builds the frontend. All at once.
-
-### Automation
-
-> I connected Slack to TerminalX.
->
-> Now when someone drops a task in our #dev channel, it automatically gets sent to a Claude agent who starts coding it. No human in the loop. Tasks come in, code goes out.
-
-### Multi-Terminal
-
-> TerminalX gives you an infinite canvas of terminals.
->
-> Split panes. Drag them around. Run your dev server in one, watch logs in another, SSH into prod in a third. All visible at once. No more tab switching.
-
-### The Dev Workflow
-
-> My TerminalX setup:
-> - File tree on the left
-> - Terminal + Agent in the center
-> - Tasks pulling from GitHub issues on the right
-> - Git panel showing live status
->
-> Everything wired together. One canvas. Zero context switching.
-
-### Wiring
-
-> The killer feature of TerminalX is wiring.
->
-> Connect an agent's output to another agent's input. Chain them. When Agent A finishes, Agent B picks up where it left off. Autonomous multi-step workflows with zero config.
-
-### MCP Integrations
-
-> TerminalX connects to Slack, GitHub, Linear, Jira, and Notion.
->
-> Tasks flow in from your existing tools. Hit "Auto" and they get dispatched to an AI agent automatically. Your backlog clears itself.
-
-### For Teams
-
-> Every project in TerminalX gets its own canvas.
->
-> Save layouts. Export workspaces as JSON. Share them with your team. Everyone gets the same setup in one click.
-
-### The Canvas
-
-> Why are we still using tabbed terminals in 2025?
->
-> TerminalX gives you an infinite canvas. Zoom out to see everything. Zoom in to focus. Drag tiles anywhere. Snap them together. Group them. Bookmark positions. It's spatial computing for developers.
-
-### Docker + SSH
-
-> TerminalX isn't just for AI agents.
->
-> Docker container management. SSH terminals. File browsers. Git panels. Code editors. All on the same canvas. All wired together. One app to replace your entire dev toolbar.
-
-### Speed
-
-> Built with Tauri 2 + Rust.
->
-> TerminalX uses 50MB of RAM. Native performance. PTY writes chunked at the Rust level. WebGL-rendered terminals. Lazy-loaded Monaco editors. It's fast because it has to be — you're running 10 things at once.
+TerminalX is Figma meets terminal meets AI — for developers who'd rather see everything at once than cycle through windows.
 
 ---
 
-## Tile Types (15)
+## Core capabilities
 
-| Tile | Description |
-|------|-------------|
-| **Terminal** | Interactive shell with split panes (Ctrl+Shift+D), command history dropdown |
-| **Agent** | AI agent runner — Claude Code, Codex, Gemini CLI — with real-time xterm output |
-| **Editor** | Monaco code editor with syntax highlighting, auto-save, 20+ language support |
-| **Diff** | Side-by-side diff viewer powered by Monaco DiffEditor |
-| **Note** | Markdown note editor with debounced persistence |
-| **Todo / Tasks** | Task list with MCP integrations, auto-dispatch to agents, clear-done |
-| **Kanban** | Kanban board with columns, cards, add/remove |
-| **File Tree** | Directory browser — click a file to open it in an Editor tile |
-| **Git** | Git panel with Status, Log, and Branches tabs — stage, unstage, commit, checkout |
-| **Browser** | Embedded web preview for localhost URLs |
-| **Runner** | One-shot command executor (npm test, cargo build, etc.) |
-| **SSH** | Remote SSH terminal connection |
-| **Docker** | Container manager — list, attach, detach |
-| **Usage** | LLM usage monitor — internal session tracking + OpenUsage API integration |
-| **Group** | Container tile that collapses/expands child tiles |
+### 🎨 Infinite canvas
 
----
+Pan, zoom, snap-to-grid, rubber-band select. 15 tile types. Multi-project, multi-workspace, 5 layout slots per project, bookmarks, minimap, customizable dock, sticky notes.
 
-## Canvas
+→ [Canvas docs](./docs/features/README.md#canvas--workspace)
 
-| Feature | How |
-|---------|-----|
-| **Pan** | Drag empty canvas, middle-click, or Alt+drag |
-| **Zoom** | Scroll wheel (zoom toward cursor, 0.1x – 3.0x) |
-| **Rubber-band select** | Shift+drag on empty canvas to select multiple tiles |
-| **Tile snapping** | Alignment guide lines appear when edges align with other tiles |
-| **Minimap** | Bottom-right overview — click to navigate |
-| **Grid** | SVG dot-pattern background for visual alignment |
-| **Focus Mode** | Ctrl+Enter to maximize focused tile, dim others |
-| **Multi-select** | Shift+click tiles, then move/delete/group together |
-| **Bookmarks** | Save up to 9 canvas positions (Ctrl+Shift+B), jump with Ctrl+1–9 |
+### 🤖 Agent orchestration
 
----
+Spawn Claude Code / Codex / Gemini as tiles. Auto-complete via DONE sentinel or idle detection — chain completes without waiting for process exit. Per-project agent memory injects architecture context into every new spawn.
 
-## Keyboard Shortcuts
+→ [Agent docs](./docs/features/README.md#agent-orchestration)
 
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+K` | Command Palette |
-| `Ctrl+F` | Search across all tiles |
-| `Ctrl+Enter` | Toggle Focus Mode |
-| `Ctrl+Tab` | Cycle to next tile |
-| `Ctrl+Shift+Tab` | Cycle to previous tile |
-| `Ctrl+W` | Close focused/selected tiles |
-| `Ctrl+G` | Group selected tiles |
-| `Ctrl+Shift+B` | Save canvas bookmark |
-| `Ctrl+1` – `Ctrl+9` | Jump to bookmark |
-| `Ctrl+J` | Toggle session timeline |
-| `Ctrl+Shift+D` | Split terminal pane horizontally |
-| `Ctrl+Arrow` | Navigate between split panes |
-| `Escape` | Close overlays, exit focus mode, clear selection |
+### 🔗 Wiring system
 
----
+Drag from any tile's right port to another's left port. 6 wire types, auto-inferred:
 
-## Wiring System
+- **context-pipe** — Terminal → Agent: pipe tail of output as agent context
+- **agent-chain** — Agent → Agent: output chains hands-free
+- **task-assign** — Todo → Agent: new tasks dispatch automatically
+- **file-open** — File Tree → Editor/Diff: click-route files to the right place
+- **refresh-trigger** — Agent → Browser: cue reload on complete
+- **diff-feed** — Agent → Diff: populate diff on complete
 
-Connect tiles with data-flow wires. Hover a tile → drag from the accent-colored port on the right edge → drop on another tile's left port. Wire type is inferred automatically from the source/target tile types. Right-click any wire to delete it.
+→ [Wiring docs](./docs/features/README.md#wiring-system)
 
-See [**WIRING.md**](./WIRING.md) for the full per-OS drag-to-connect tutorial, Auto-Pipe playbooks, and troubleshooting.
+### 💬 MCP integrations
 
-| Wire Type | From → To | Behavior |
-|-----------|-----------|----------|
-| **context-pipe** | Terminal/Agent → Agent | Manual Pipe button (glows with byte count when fresh) or Auto toggle for hands-free firing |
-| **agent-chain** | Agent → Agent | Fires when upstream agent idles or prints a `DONE` sentinel — downstream gets the output as its next prompt |
-| **refresh-trigger** | Agent → Browser | Browser tile auto-refreshes on agent completion |
-| **task-assign** | Agent → Todo | Agent's last output line becomes a new task |
-| **diff-feed** | Agent → Diff | Diff tile refreshes on agent completion |
+Out-of-the-box connectors for external services. Tasks land in the Todo tile's inbox, optionally auto-dispatched to a wired agent.
 
-### Context-pipe controls (Agent tile)
+| Service | What lands |
+|---|---|
+| Slack | Channel messages |
+| GitHub | Assigned issues + PRs |
+| Linear | Assigned issues (bi-directional) |
+| Jira | JQL-filtered tickets |
+| Notion | Database rows |
+| Google Calendar | Upcoming events |
+| Gmail | Unread messages |
+| OpenUsage | LLM cost + usage |
 
-| Control | Behavior |
-|---------|----------|
-| **Pipe button** | Click to send the last 50 lines of upstream output as a prompt. Button glows with byte count when fresh data is available. |
-| **Right-click Pipe** | Pipe the full upstream history with a custom prompt (prompted inline). |
-| **Auto toggle** | When ON, fires the pipe automatically ~2s after you press Enter in the source terminal. Fully hands-free Terminal → Agent loop. |
+→ [Integration docs](./docs/features/README.md#external-integrations-mcp)
 
-### Agent auto-complete triggers
+### ⚙️ Native performance
 
-Agent-chain wires don't need the agent process to exit. The engine fires a handoff when:
+- 47 MB idle, 64 concurrent PTYs hard-capped.
+- xterm.js WebGL renderer with bounded-channel backpressure.
+- Per-tile lazy chunks (Monaco, xterm, framer-motion, fuse split out).
+- Main bundle 413 KB / 120 KB gzipped.
+- Connection-pooled HTTP proxy (60 s TTL, DNS-pinned).
 
-- The agent prints an explicit `DONE` sentinel — matches `✅ DONE`, `✓ DONE`, `[DONE]`, `## DONE`, `DONE!`, `DONE.` on its own line.
-- OR the agent goes idle for 8s after at least 50 bytes of output (configurable via `autoIdleMs`).
+→ [Platform docs](./docs/features/README.md#platform--engine)
+
+### 🛡️ Hardened
+
+- Shell allowlist on public PTY spawn, internal bypass for agents.
+- Path validator (`is_path_allowed`) spans home + drives + mount roots, rejects `/proc`/`/sys`/`/dev`.
+- HTTP proxy: SSRF guards, DNS pinning, redirect disable, URL-credentials reject.
+- Workspace import: discriminated-union schema validation with per-tile schema.
+- CSP without `unsafe-inline` script-src. No `dangerouslySetInnerHTML` / `eval` in app source.
+
+→ [Security posture](./docs/features/platform/security.md) · [CONTRIBUTING.md → Security](./CONTRIBUTING.md#security-posture)
+
+### 💾 Never loses work
+
+- 3-layer auto-save: localStorage cache (500 ms) + disk file (2 s) + `beforeunload` flush.
+- Auto-snapshots every 5 minutes for time-travel.
+- Import / export workspaces as portable JSON.
+- Session recording for full PTY-byte replay.
+
+→ [Persistence docs](./docs/features/README.md#persistence--recovery)
 
 ---
 
-## X Posts — By Wire Type
+## Power features
 
-Ready-to-ship copy for each wire type. Each has a hook post + a concrete use case.
+**🧠 Agent memory** — [docs](./docs/features/agents/agent-memory.md)
+Paste your architecture notes once per project. Every new agent gets them automatically — codebase context from turn one.
 
-### context-pipe (Terminal → Agent)
+**⚔️ Multi-agent debate**
+Spawn Claude + Codex + Gemini with the same prompt, compare their answers. Drag three Agent tiles, one template each. Or chain them: Claude plans, Codex builds, Gemini reviews.
 
-**Hook:**
-> Every dev's nightmare: running a command, copying the output, pasting it into Claude, asking for help.
->
-> In TerminalX I wire my terminal → Claude. The agent sees every command I run automatically. No more copy-paste tax.
+**🔄 Auto-recovery** — [task-assign](./docs/features/wiring/task-assign.md), [Runner tile](./docs/features/tiles/runner.md)
+Wire a Runner to an Agent. On test failure, the last 30 lines of output auto-dispatch to the agent with "Fix this error:" as a prefix.
 
-**Use case — debugging from logs:**
-> Wired my server logs tail → Claude agent.
->
-> Error appears in logs → Claude already has the stack trace → asks me one clarifying question → patches the bug. I just watch.
+**⏰ Time travel** — [docs](./docs/features/persistence/time-travel.md)
+Auto-snapshots every 5 min give ~1 hour of history. Restore any of them in two clicks.
 
----
+**🎬 Session recording** — [docs](./docs/features/persistence/session-recording.md)
+Start recording. Every PTY byte is captured with timestamps. Replay at variable speed, export to JSON, share with a teammate.
 
-### agent-chain (Agent → Agent)
+**📌 Output pinning** — [Terminal tile](./docs/features/tiles/terminal.md)
+Pin a terminal's current output as a Note tile. Useful for before/after compares or leaving an error message visible while you fix it.
 
-**Hook:**
-> Multi-agent coding pipelines in TerminalX:
->
-> Claude (Opus) → designs the architecture
-> Codex → writes the code
-> Claude (Sonnet) → writes the tests
->
-> I give one prompt. Three agents work sequentially. I go get coffee.
+**🖼️ Image paste**
+Paste a screenshot into a terminal (or agent) — TerminalX writes it to disk and pastes the path.
 
-**Use case — spec → build → test:**
-> The Claude → Codex → Gemini chain I run:
->
-> 1. Claude writes the spec
-> 2. Codex implements it
-> 3. Gemini reviews and suggests fixes
->
-> All wired on the same canvas. Each agent auto-inherits the previous one's output. Fully hands-off.
+**🪟 Multi-monitor** — [docs](./docs/features/ux/detach-clone.md)
+Detach any tile to its own OS window. Drag to a second display.
 
-**Use case — research → implement:**
-> Wired a "research" Claude to a "build" Codex.
->
-> First agent: deep-dive the library docs, find best practices, output a spec.
-> Second agent: picks up that spec, writes the code.
->
-> Think senior → mid coder, except both are AI and neither complains.
+**🎯 Templates** — [docs](./docs/features/ux/templates.md)
+Save a tile's exact config (model, effort, command, etc.) as a template. Pin to the dock — the dock button spawns that template, not a default-config tile.
+
+**🔍 Search across everything** — `Ctrl/⌘+F`
+Full-text search tile names, note content, command history, file paths. One input, zero tabs.
+
+**🖱️ Command palette** — `Ctrl/⌘+K`
+Fuzzy-search 25+ commands: add tile, switch project, save snapshot, run git, load template, set theme.
 
 ---
 
-### refresh-trigger (Agent → Browser)
+## Workflow examples
 
-**Hook:**
-> Most underrated feature in TerminalX:
->
-> Wire your Claude agent → your browser tile pointing at localhost:3000.
->
-> Claude finishes editing your React code → browser refreshes → you see the change without touching anything.
+### Auto-fix test failures
 
-**Use case — frontend loop:**
-> My frontend dev loop in TerminalX:
->
-> 1. Browser tile on localhost:3000 (live app)
-> 2. Claude agent with the UI task
-> 3. Wire agent → browser
->
-> Claude edits the component → HMR picks it up → browser refreshes automatically → I see the result in seconds.
-
----
-
-### task-assign (Agent → Todo)
-
-**Hook:**
-> My TerminalX setup knows what to do before I do.
->
-> Claude finishes refactoring the auth module. Its last line: "Next step: migrate the user session store."
->
-> Wire agent → todo tile → that line becomes my next task automatically.
-
-**Use case — self-scoping work:**
-> Give Claude a vague goal: "clean up the payment flow."
->
-> Wire agent → todo tile.
->
-> Claude does the first pass, then outputs "TODO: deprecate legacy Stripe keys."
-> That goes straight into my task list. I approve or reject. Rinse and repeat.
-
----
-
-### diff-feed (Agent → Diff)
-
-**Hook:**
-> Code review for AI work, automated:
->
-> Wire Claude → diff tile. When Claude finishes editing a file, the diff tile refreshes to show exactly what changed. I approve the diff or rollback. No git noise.
-
-**Use case — safe agentic editing:**
-> I never let an agent modify my code without a diff check.
->
-> Wire Claude → diff tile pinned to the file I care about.
->
-> Agent edits → diff updates → I see the before/after → commit if good, revert if not. Visual safety net.
-
----
-
-### Bonus: Runner → Agent (auto-recovery)
-
-This uses context-pipe but triggers on **failure** instead of completion.
-
-**Hook:**
-> Self-healing CI, built in 30 seconds:
->
-> Runner tile running `npm test` → wire to Claude agent.
->
-> Tests fail → error output auto-dispatched to Claude → Claude fixes the code → tests re-run. I watch. I never fix a test again.
-
-**Use case — flaky tests:**
-> Wired a "retry on fail" Claude to my test runner.
->
-> Test breaks at 2am → agent reads the stack trace → patches the obvious fix → commits on a branch → I wake up to a fixed test and a PR waiting.
-
-**Use case — build errors:**
-> Running `cargo build` in a loop?
->
-> Wire it to an agent. The second it fails, the agent gets the full compile error as a prompt and starts fixing. You're 10x faster on dependency refactors.
-
----
-
-### Multi-wire workflows
-
-**Hook:**
-> The TerminalX power move: chain 4 tiles together.
->
-> Slack task → Claude agent → Codex agent → Diff tile → Browser.
->
-> One Slack message produces working code, a diff review, and a live preview. Zero manual steps in between.
-
-**Use case — the full loop:**
-> Someone drops "add dark mode toggle" in our Slack.
->
-> TerminalX:
-> 1. MCP pulls task from Slack → TodoTile
-> 2. Auto-dispatch → Claude agent (design)
-> 3. Wired → Codex (implement)
-> 4. Wired → Diff tile (review)
-> 5. Wired → Browser tile (live preview)
->
-> I come back 10 minutes later to a finished feature. This is 2026 development.
-
----
-
-## MCP Integrations
-
-Connect external services to pull tasks into the Tasks tile.
-
-| Service | What It Pulls |
-|---------|---------------|
-| **Slack** | Channel messages (Bot Token + Channel ID) |
-| **GitHub** | Open issues from a repo (Personal Access Token) |
-| **Linear** | Assigned issues (API Key) |
-| **Jira** | Assigned tickets (Host + Email + API Token) |
-| **Notion** | Database entries (Integration Token + Database ID) |
-| **Google Calendar** | Upcoming events (API Key) |
-
-- Connections are **per-project** — each project has its own integrations
-- Tasks sync every **5 minutes** + manual refresh
-- **Seen tracking** — dismissed/imported tasks never reappear
-- **Auto-dispatch** — toggle "Auto" to send new tasks directly to a connected agent
-
----
-
-## Git Integration
-
-The Git tile provides a full git workflow without leaving TerminalX.
-
-**Status tab:** Staged/unstaged files with +/- buttons, commit box
-**Log tab:** Commit history with hash, author, date, message
-**Branches tab:** List all branches, click to checkout
-
-All data auto-refreshes every 30 seconds.
-
----
-
-## Workspace Management
-
-| Feature | Description |
-|---------|-------------|
-| **Workspace Tabs** | Multiple named workspaces per project — click "+" to create |
-| **Save Layout** | Save button in top bar persists current tile arrangement |
-| **Default Layout** | Layout button restores saved layout or creates a default 5-tile workspace |
-| **Snapshots** | Save/load named canvas states via Command Palette |
-| **Export/Import** | Export workspace as JSON, import from file (Command Palette) |
-| **Auto-save** | Disk save every 2s + localStorage cache every 500ms |
-| **Crash recovery** | Restores last state from localStorage on startup |
-| **Active project** | Remembers which project was open across restarts |
-
----
-
-## Themes
-
-6 built-in themes, switchable from the status bar.
-
-| Theme | Accent | Background |
-|-------|--------|------------|
-| **Electric** | `#CCFF00` lime | Black |
-| **Phantom** | `#6600FF` purple | Black |
-| **Ember** | `#F53F3F` red | Black |
-| **Ice** | `#22D3EE` cyan | Black |
-| **Snow** | `#FFFFFF` white | Black |
-| **Slate** | `#2C3525` olive | `#CCD2BA` sage |
-
-Light and dark themes are both supported — surface colors, text opacity, and glow intensity adapt automatically.
-
----
-
-## Templates
-
-16 built-in templates accessible from the Add Tile dropdown and Command Palette.
-
-**Agents:** Claude Opus 4, Claude Sonnet, Codex, Gemini
-**Terminals:** Shell at home, Shell at project root
-**Content:** Quick Note, Todo List, Browser :3000, Browser :5173
-**Runners:** npm test, npm build, cargo test, cargo build
-**Infra:** File Tree, SSH Terminal, Docker
-
-Save any tile as a custom template via the star button on hover.
-
----
-
-## Session Recording
-
-Record all terminal I/O with timestamps for later replay.
-
-- **Rec button** in the status bar — click to start/stop
-- Captures output from all PTY sessions
-- Auto-stops at 50,000 events
-- Last recording saved to localStorage
-
----
-
-## Usage Monitoring
-
-The Usage tile tracks LLM agent activity.
-
-**Internal tracking:**
-- Total sessions, duration, active count
-- Per-agent breakdown (Claude, Codex, Gemini)
-- Auto-tracks when agent tiles start/finish
-
-**OpenUsage integration:**
-- Polls `127.0.0.1:6736/v1/usage` every 30s
-- Shows provider plans, usage progress bars, reset dates
-- Color-coded: green (<70%), yellow (70-90%), red (>90%)
-
----
-
-## Plugin System
-
-Extend TerminalX with custom tile types.
-
-- Register plugins via Command Palette (JSON manifest or URL)
-- Plugins render in sandboxed iframes
-- Enable/disable per plugin
-- Persisted to localStorage
-
-**Manifest format:**
-```json
-{
-  "id": "my-plugin",
-  "name": "My Plugin",
-  "version": "1.0.0",
-  "tileType": "my-custom-tile",
-  "entryUrl": "https://example.com/plugin.html"
-}
+```
+┌─────────────┐         ┌─────────────┐
+│  Runner     │ ──wire─▶│  Claude     │  (context-pipe)
+│  npm test   │         │  auto-pipe  │
+└─────────────┘         └─────────────┘
 ```
 
----
+Failing test → Claude receives error → suggests fix → you accept or iterate.
 
-## Multi-Monitor
+### Inbox-to-agent
 
-Detach any tile into its own OS window.
+```
+┌─────────────┐    ┌──────────┐     ┌─────────────┐
+│  GitHub     │───▶│  Todo    │───▶│  Codex      │
+│  MCP sync   │    │  Auto on │     │  auto-dispatch
+└─────────────┘    └──────────┘     └─────────────┘
+```
 
-- Hover a tile → click the ↗ arrow button
-- Tile opens in a new native window
-- Closing the window restores the tile to the canvas
-- Window is resizable with native decorations
+Assigned PR arrives in GitHub → task appears in Todo → dispatches to Codex → code drafted by the time you notice.
 
----
+### Agent chain
 
-## Project Management
+```
+Claude (plan) → Codex (implement) → Gemini (review) → Diff tile
+```
 
-Projects live in the bottom-left sidebar.
+Each agent's DONE sentinel fires the next. Open a Diff tile at the end to review the final changes.
 
-- **Add project** — name + folder picker
-- **Clone from GitHub** — URL input, auto-extracts repo name, native folder picker
-- **Delete** — right-click a project icon
-- **Favicons** — auto-resolves `favicon.ico`, `logo.png`, etc. from repo as project avatar
-- **Working directory** — shown in the status bar
+### File-tree-driven review
 
----
+```
+┌───────────┐    ┌──────────┐
+│ File Tree │───▶│ Editor   │
+│ (wired)   │ │  └──────────┘
+└───────────┘ │  ┌──────────┐
+              └─▶│ Diff     │
+                 │ git mode │
+                 └──────────┘
+```
 
-## Command Palette (Ctrl+K)
-
-Fuzzy-searchable command launcher with categories:
-
-- **Templates** — spawn tiles from presets
-- **Projects** — switch active project
-- **Workspace** — save/load snapshots, export/import
-- **Commands** — focus mode, reset zoom, group tiles
-- **Navigate** — jump to bookmarks
-- **Clipboard** — paste from history to focused tile's PTY
-- **Plugins** — register new plugins
+Click a file → loads in Editor + shows git diff in Diff tile. No new tiles spawned per file.
 
 ---
 
-## Search (Ctrl+F)
+## Share this
 
-Global search across all tile content on the canvas.
+<details>
+<summary><b>Social copy</b></summary>
 
-**Searches:** tile titles, note content, todo items, editor file paths, terminal output
-**Features:** keyboard navigation, Enter to center viewport on match, 50 result limit
+**The hook:**
+> TerminalX — run Claude, Codex, and Gemini side by side on an infinite canvas. Wire them together. Let them work in parallel. Ship 10× faster.
+
+**Multi-agent:**
+> What if 3 AI agents could work on your codebase at the same time?
+> Claude refactors the backend. Codex writes tests. Gemini builds the frontend. All at once, visible at once.
+
+**Automation:**
+> I connected Slack to TerminalX. Now when someone drops a task in #dev, it auto-routes to a Claude agent. No human in the loop. Tasks in → code out.
+
+**Multi-terminal:**
+> Infinite canvas of terminals. Split panes. Dev server in one, logs in another, SSH to prod in a third. All visible, no tab-switching.
+
+**Dev workflow:**
+> My setup: Claude (plan) → Codex (implement) → Gemini (review) wired head-to-tail. Test failures auto-dispatch to a fixer agent. Slack tasks auto-prompt Claude. I do architecture; agents do the rest.
+
+</details>
 
 ---
 
-## Architecture
+## Docs map
 
-| Layer | Technology |
-|-------|-----------|
-| **Desktop shell** | Tauri 2 (Rust + WebView2) |
-| **Frontend** | React 19 + TypeScript 5 + Vite 6 |
-| **State** | Zustand 5 (10 stores) |
-| **Terminal** | xterm.js 5.5 + WebGL renderer |
-| **Editor** | Monaco Editor (lazy-loaded) |
-| **PTY** | portable-pty 0.8 (Rust) |
-| **HTTP** | reqwest 0.12 (Rust, for MCP proxy) |
-| **Styling** | CSS custom properties + inline styles (no CSS files) |
-| **Persistence** | Tauri filesystem + localStorage crash cache |
+- [**README**](./README.md) — install + quick start
+- [**docs/features/**](./docs/features/README.md) — per-feature deep docs (~55 pages)
+- [**WIRING.md**](./WIRING.md) — drag-to-connect tutorial with screenshots
+- [**CLAUDE.md**](./CLAUDE.md) — architecture + critical patterns (for AI agents + devs)
+- [**DESIGN.md**](./DESIGN.md) — design-system source of truth
+- [**CONTRIBUTING.md**](./CONTRIBUTING.md) — PR workflow + security posture
+- [**CHANGELOG.md**](./CHANGELOG.md) — release notes
+
+---
+
+<div align="center">
+
+Built by [Tay](https://github.com/txc0ld) at Fantom Labs · [GitHub](https://github.com/txc0ld/tmx)
+
+</div>

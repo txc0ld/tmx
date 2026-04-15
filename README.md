@@ -2,9 +2,7 @@
 
 # TerminalX
 
-**Infinite canvas workspace for orchestrating CLI agents in parallel.**
-
-Run Claude, Codex, and Gemini side-by-side. Wire them together. Ship 10× faster.
+### **The canvas-native terminal.** Run Claude, Codex, and Gemini side-by-side, wire them together, and ship 10× faster.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2.0-24C8DB?logo=tauri)](https://tauri.app)
@@ -12,7 +10,7 @@ Run Claude, Codex, and Gemini side-by-side. Wire them together. Ship 10× faster
 [![Rust](https://img.shields.io/badge/Rust-1.90+-000000?logo=rust)](https://rust-lang.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript)](https://typescriptlang.org)
 
-[Website](https://txc0ld.github.io/tmx) · [Features](#features) · [Wiring Tutorial](./WIRING.md) · [Install](#installation) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Contributing](#contributing)
+[**Feature docs**](./docs/features/README.md) · [**Wiring tutorial**](./WIRING.md) · [**Features**](./FEATURES.md) · [**Design**](./DESIGN.md) · [**Install**](#install) · [**Quick start**](#quick-start)
 
 </div>
 
@@ -20,106 +18,95 @@ Run Claude, Codex, and Gemini side-by-side. Wire them together. Ship 10× faster
 
 <img width="2560" height="1392" alt="termX" src="https://github.com/user-attachments/assets/ec45aee4-c69d-481a-a96f-9e4da97d804f" />
 
+---
 
-## What is TerminalX?
+## Why it's different
 
-TerminalX is a native desktop app that turns your terminal workflow into a spatial canvas. Instead of juggling tabs, windows, and AI tools, you arrange everything on an infinite canvas — terminals, agents, editors, git panels, browsers — and wire them together for automated workflows.
+Most dev tools give you one thing at a time: one terminal, one editor, one browser tab. **TerminalX gives you a canvas.** Tiles — terminals, agents, editors, git panels, browsers, tests, task lists — arrange spatially, connect with wires, and automate the copy-paste out of your day.
 
-**Built for developers who:**
-- Run multiple AI agents in parallel (Claude Code, Codex, Gemini CLI)
-- Want zero context-switching between terminals, editors, and browsers
-- Need persistent, spatially-organized workspaces per project
-- Pull tasks from Slack, GitHub, Linear, Jira, or Notion directly into their dev environment
-- Care about performance (50MB RAM, native PTY, WebGL-rendered terminals)
+- 🧠 **Orchestrate AI CLIs.** Spawn Claude Code, Codex, and Gemini as first-class tiles. Auto-complete detection (no more waiting for process exit). Chain one into the next.
+- 🔗 **Wire anything to anything.** 6 wire types, drag-to-connect. `Terminal → Agent`, `Agent → Agent`, `FileTree → Editor`, `Runner → Agent` for auto-fix loops, `Todo → Agent` for hands-free task dispatch.
+- 💬 **Inbox, meet IDE.** MCP connectors for Slack, GitHub, Linear, Jira, Notion, Google Calendar, Gmail. Tasks sync into a Todo tile — optionally auto-dispatched to an agent.
+- ⚡ **Native performance.** Tauri 2 + Rust. 47 MB idle, native PTY with backpressure, WebGL-rendered terminals, connection-pooled HTTP proxy, per-tile lazy chunks.
+- 🛡️ **Hardened.** SSRF-guarded HTTP with pinned DNS, shell allowlist, 64-PTY cap, path validation, atomic writes, workspace schema validation, CSP without `unsafe-inline` script-src.
+- 💾 **Never loses work.** 3-layer auto-save (localStorage / disk / beforeunload). Auto-snapshots every 5 min for time-travel. Export workspaces as JSON.
 
 ---
 
-## Features
+## Who it's for
 
-**Core**
-- 🎨 **Infinite canvas** — pan, zoom, snap-to-edge alignment, rubber-band selection, workspace tabs
-- 🤖 **15 tile types** — Terminal, Agent, Editor, Diff, Git, Docker, SSH, Note, Todo, Kanban, Browser, Runner, File Tree, Usage, Group
-- 🔗 **[Wiring system](./WIRING.md)** — drag-to-connect tiles for automated data flow. 5 wire types, glowing Pipe button with byte count, inline Auto toggle for hands-free Terminal→Agent loops, command-gated firing, DONE-sentinel + idle auto-complete for agent chains
-- 🎯 **6 themes** — Electric, Phantom, Ember, Ice, Snow, Slate (light mode)
+Developers who would rather **see everything at once** than alt-tab through tabs and windows. Multi-agent practitioners who need a spatial model of who's doing what. Teams who live in Slack + Linear and want that context inside the dev loop, not on a different monitor.
 
-**Integrations**
-- 💬 **MCP connectors** — Slack, GitHub, Linear, Jira, Notion, Google Calendar
-- 📊 **OpenUsage** — LLM cost tracking across providers
-- 🐙 **Git panel** — Status, log, branches, stage, commit — no CLI needed
-- 🐳 **Docker** — Container list + attach
-
-**Power Features**
-- 🧠 **Agent Memory** — persistent project context auto-injected into every new agent
-- ⚔️ **Multi-Agent Debate** — spawn Claude + Codex + Gemini with the same prompt, compare
-- 🔄 **Auto-Recovery** — wire a Runner → Agent; failures auto-dispatch to the agent for fixing
-- ⏰ **Time Travel** — rollback to auto-snapshots (every 5 min, 1 hour of history)
-- 🎬 **Session Recording** — replay all terminal I/O with timestamps
-- 📌 **Output Pinning** — freeze terminal output as a note tile
-- 🖼️ **Image Paste** — paste screenshots into terminals (saves file, pastes path)
-- 💾 **Crash Recovery** — 3-layer persistence (localStorage + disk + beforeunload)
-- 🪟 **Multi-Monitor** — detach any tile into its own OS window
-
-See [**FEATURES.md**](./FEATURES.md) for the complete feature guide and [**WIRING.md**](./WIRING.md) for the drag-to-connect tutorial.
+If you prefer IDE-driven single-file editing, you'll find this foreign. If you've ever wished your terminal sprawled into something bigger — you're home.
 
 ---
 
-## Platform Support
+## Feature documentation
+
+Every feature has its own page in [**docs/features/**](./docs/features/README.md). Quick links:
+
+| Category | Highlights |
+|---|---|
+| **[Tiles](./docs/features/README.md#tile-types-15)** | [Terminal](./docs/features/tiles/terminal.md) · [Agent](./docs/features/tiles/agent.md) · [Editor](./docs/features/tiles/editor.md) · [Diff](./docs/features/tiles/diff.md) · [Git](./docs/features/tiles/git.md) · [Runner](./docs/features/tiles/runner.md) · [SSH](./docs/features/tiles/ssh.md) · [Docker](./docs/features/tiles/docker.md) · [+7 more](./docs/features/README.md#tile-types-15) |
+| **[Wiring](./docs/features/README.md#wiring-system)** | [Overview](./docs/features/wiring/overview.md) · [context-pipe](./docs/features/wiring/context-pipe.md) · [agent-chain](./docs/features/wiring/agent-chain.md) · [task-assign](./docs/features/wiring/task-assign.md) · [file-open](./docs/features/wiring/file-open.md) · [+2 more](./docs/features/README.md#wiring-system) |
+| **[Canvas](./docs/features/README.md#canvas--workspace)** | [Infinite canvas](./docs/features/canvas/infinite-canvas.md) · [Workspace tabs](./docs/features/canvas/workspace-tabs.md) · [Bookmarks](./docs/features/canvas/bookmarks.md) · [Minimap](./docs/features/canvas/minimap.md) · [Tile dock](./docs/features/canvas/tile-dock.md) · [Layouts](./docs/features/canvas/layouts.md) |
+| **[Agents](./docs/features/README.md#agent-orchestration)** | [Spawn](./docs/features/agents/agent-spawn.md) · [Memory](./docs/features/agents/agent-memory.md) · [Auto-complete](./docs/features/agents/auto-complete.md) · [Auto-pipe](./docs/features/agents/auto-pipe.md) · [Pipe button](./docs/features/agents/pipe-button.md) |
+| **[Integrations](./docs/features/README.md#external-integrations-mcp)** | [Slack](./docs/features/integrations/slack.md) · [GitHub](./docs/features/integrations/github.md) · [Linear](./docs/features/integrations/linear.md) · [Jira](./docs/features/integrations/jira.md) · [Notion](./docs/features/integrations/notion.md) · [Calendar](./docs/features/integrations/google-calendar.md) · [Gmail](./docs/features/integrations/gmail.md) · [HTTP proxy](./docs/features/integrations/http-proxy.md) · [OpenUsage](./docs/features/integrations/openusage.md) |
+| **[Persistence](./docs/features/README.md#persistence--recovery)** | [Workspace](./docs/features/persistence/workspace.md) · [Snapshots](./docs/features/persistence/snapshots.md) · [Recording](./docs/features/persistence/session-recording.md) · [Time travel](./docs/features/persistence/time-travel.md) · [Import/export](./docs/features/persistence/import-export.md) |
+| **[UX](./docs/features/README.md#ux--productivity)** | [Palette](./docs/features/ux/command-palette.md) · [Templates](./docs/features/ux/templates.md) · [History](./docs/features/ux/command-history.md) · [Timeline](./docs/features/ux/session-timeline.md) · [Themes](./docs/features/ux/theme-system.md) · [Detach + clone](./docs/features/ux/detach-clone.md) |
+| **[Platform](./docs/features/README.md#platform--engine)** | [PTY management](./docs/features/platform/pty-management.md) · [FS access](./docs/features/platform/filesystem-access.md) · [Bundle](./docs/features/platform/bundle-chunking.md) · [Window chrome](./docs/features/platform/window-chrome.md) · [Security](./docs/features/platform/security.md) |
+
+Each page has a **Power moves** section with non-obvious workflows.
+
+---
+
+## Platform support
 
 | Platform | Status | Notes |
-|----------|--------|-------|
-| **Windows** | ✅ Fully supported | Primary development target. Requires VS Build Tools for dev. |
-| **macOS** | ✅ Fully supported | Native traffic lights on title bar, `⌘` modifier shown in UI. |
-| **Linux** | ✅ Fully supported | Uses native shell (`$SHELL`), standard PATH. |
-| **iOS / Android** | ❌ Not feasible | Terminal architecture requires PTY/subprocess spawning which mobile OS sandboxes forbid. See [#mobile-roadmap](#mobile-roadmap) below. |
+|---|---|---|
+| **Windows 10 / 11** | ✅ Fully supported | Primary target. Needs VS Build Tools for dev. |
+| **macOS (Intel / Apple Silicon)** | ✅ Fully supported | Native traffic lights, `⌘` modifier in UI. |
+| **Linux (Ubuntu / Fedora / Arch)** | ✅ Fully supported | Uses `$SHELL`. Needs webkit2gtk. |
+| **iOS / Android** | ❌ Not feasible | Mobile sandboxes forbid PTY spawning. |
 
-### Mobile Roadmap
+---
 
-The PTY model is incompatible with iOS/Android app sandboxes. A future "TerminalX Mobile" could ship as an **SSH-only** client — pair your mobile device with a desktop or remote server, and control agents there. Not planned for v1.
+## Install
 
-## Installation
-
-Pick your OS and follow the steps top-to-bottom. First build takes 2–3 min (Rust compiles ~500 crates); every run after is instant.
+Pick your OS. First build compiles ~500 Rust crates (2–3 min); subsequent builds are incremental.
 
 ### macOS
 
 <details open>
 <summary><b>Step-by-step (Intel or Apple Silicon)</b></summary>
 
-**1. Install Xcode Command Line Tools** (provides the Rust linker)
 ```bash
+# 1. Xcode CLT (provides the Rust linker)
 xcode-select --install
-```
 
-**2. Install Rust via rustup**
-```bash
+# 2. Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
-```
 
-**3. Install Node.js and pnpm**
-```bash
-brew install node        # skip if you already have Node 22+
+# 3. Node 22+ and pnpm
+brew install node  # or from nodejs.org
 npm install -g pnpm
-```
-> No Homebrew? Get it at [brew.sh](https://brew.sh), or install Node from [nodejs.org](https://nodejs.org).
 
-**4. Clone and run**
-```bash
+# 4. Clone and run
 git clone https://github.com/txc0ld/tmx.git
 cd tmx
 pnpm install
 pnpm tauri dev
-```
 
-**5. (Optional) Build a distributable**
-```bash
+# 5. (Optional) Distributable
 pnpm tauri build
+# → src-tauri/target/release/bundle/
 ```
-Output: `src-tauri/target/release/bundle/` — drag `TerminalX.app` to `/Applications`, or share the `.dmg`.
 
-**Troubleshooting (macOS)**
-- `cargo: command not found` → `source "$HOME/.cargo/env"` or open a new terminal
-- `"Cannot verify developer"` on the `.dmg` → right-click app → Open → Open (needs Apple Developer ID for clean distribution)
+**Troubleshooting**
+- `cargo: command not found` → `source "$HOME/.cargo/env"` or open a new terminal.
+- `"Cannot verify developer"` on a bundled `.dmg` → right-click app → Open → Open.
+
 </details>
 
 ### Windows 10 / 11
@@ -127,346 +114,241 @@ Output: `src-tauri/target/release/bundle/` — drag `TerminalX.app` to `/Applica
 <details>
 <summary><b>Step-by-step (PowerShell)</b></summary>
 
-**1. Install Visual Studio Build Tools 2022**
-
-Download from [visualstudio.microsoft.com/downloads](https://visualstudio.microsoft.com/downloads/) → scroll to "Tools for Visual Studio" → **Build Tools for Visual Studio 2022**. In the installer, check:
-- **Desktop development with C++**
-- Windows 10/11 SDK (included in the workload)
-
-**2. Install Rust via rustup**
-
-Download and run [rustup-init.exe](https://rustup.rs). Accept defaults (MSVC toolchain).
-
-**3. Install Node.js and pnpm**
-
-Install Node 22+ from [nodejs.org](https://nodejs.org) (LTS). Then in PowerShell:
 ```powershell
+# 1. Install Visual Studio Build Tools 2022 from
+#    https://visualstudio.microsoft.com/downloads/
+#    Workload: "Desktop development with C++" + Windows SDK
+
+# 2. Rust — run rustup-init.exe from https://rustup.rs
+
+# 3. Node 22+ from https://nodejs.org, then:
 npm install -g pnpm
-```
 
-**4. Install WebView2**
+# 4. WebView2 — preinstalled on Win10 (May 2022+) and Win11.
+#    Otherwise: https://developer.microsoft.com/microsoft-edge/webview2/
 
-Pre-installed on Windows 10 (May 2022+) and Windows 11. Otherwise grab the [Evergreen Bootstrapper](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
-
-**5. Clone and run** (PowerShell — **not** git-bash, see troubleshooting)
-```powershell
+# 5. Clone and run (PowerShell — NOT git-bash)
 git clone https://github.com/txc0ld/tmx.git
 cd tmx
 pnpm install
 pnpm tauri dev
-```
 
-**6. (Optional) Build an MSI installer**
-```powershell
+# 6. (Optional) MSI installer
 pnpm tauri build
+# → src-tauri\target\release\bundle\msi\TerminalX_0.1.0_x64_en-US.msi
 ```
-Output: `src-tauri\target\release\bundle\msi\TerminalX_0.1.0_x64_en-US.msi`
 
-**Troubleshooting (Windows)**
-- `link.exe not found` → you're in git-bash; use PowerShell or `cmd.exe`
-- `MSB8066: custom build exited with code 1` → reopen shell after installing Build Tools so env vars refresh
-- Agent tile says "not a valid Win32 application" → TerminalX auto-wraps `.cmd` agent CLIs; rebuild: `cd src-tauri && cargo build`
+**Troubleshooting**
+- `link.exe not found` → you're in git-bash. Use PowerShell or `cmd.exe`.
+- `MSB8066: custom build exited with code 1` → reopen shell after installing Build Tools.
+- "Agent Spawn Failed: not a valid Win32 application" → rebuild: `cd src-tauri && cargo build`.
+
 </details>
 
-### Linux (Debian / Ubuntu)
+### Linux
 
 <details>
-<summary><b>Step-by-step</b></summary>
+<summary><b>Ubuntu / Debian</b></summary>
 
-**1. Install system dependencies**
 ```bash
+# 1. Build deps
 sudo apt update
-sudo apt install -y \
-  libwebkit2gtk-4.1-dev \
-  build-essential \
-  curl wget file \
-  libssl-dev \
-  libayatana-appindicator3-dev \
-  librsvg2-dev
-```
+sudo apt install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
-**2. Install Rust via rustup**
-```bash
+# 2. Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
-```
 
-**3. Install Node.js 22+ and pnpm**
-```bash
+# 3. Node 22+ and pnpm
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 npm install -g pnpm
-```
 
-**4. Clone and run**
-```bash
+# 4. Clone and run
 git clone https://github.com/txc0ld/tmx.git
-cd tmx
-pnpm install
-pnpm tauri dev
-```
+cd tmx && pnpm install && pnpm tauri dev
 
-**5. (Optional) Build an AppImage / .deb**
-```bash
+# 5. (Optional) AppImage / .deb
 pnpm tauri build
 ```
-Output: `src-tauri/target/release/bundle/{appimage,deb}/`
 
-**Troubleshooting (Linux)**
-- `no package 'webkit2gtk-4.1' found` → on older distros try `libwebkit2gtk-4.0-dev`
-- Blank window on NVIDIA + Wayland → run with `WEBKIT_DISABLE_COMPOSITING_MODE=1 pnpm tauri dev`
+**Troubleshooting**
+- `no package 'webkit2gtk-4.1' found` → try `libwebkit2gtk-4.0-dev`.
+- Blank window on NVIDIA + Wayland → `WEBKIT_DISABLE_COMPOSITING_MODE=1 pnpm tauri dev`.
+
 </details>
 
-### Fedora / Arch / other distros
-
 <details>
-<summary><b>Package equivalents</b></summary>
+<summary><b>Fedora / Arch</b></summary>
 
-**Fedora**
 ```bash
-sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file libappindicator-gtk3-devel librsvg2-devel gcc gcc-c++ make
+# Fedora
+sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file \
+  libappindicator-gtk3-devel librsvg2-devel gcc gcc-c++ make
+
+# Arch
+sudo pacman -S --needed webkit2gtk-4.1 base-devel curl wget file openssl \
+  appmenu-gtk-module libappindicator-gtk3 librsvg
 ```
 
-**Arch**
-```bash
-sudo pacman -S --needed webkit2gtk-4.1 base-devel curl wget file openssl appmenu-gtk-module libappindicator-gtk3 librsvg
-```
+Then continue from **Step 2** (Rust) in the Ubuntu guide.
 
-Then continue from **Step 2** (Rust) in the Linux guide above.
 </details>
 
-### Let an AI agent install it for you
+### Let an AI agent install it
 
-Paste one of these prompts into Claude Code, Codex CLI, or Gemini CLI — it will detect your OS, check prerequisites, and walk you through the install step-by-step.
+Paste any of these into Claude Code, Codex CLI, or Gemini CLI — it'll handle OS detection, prereq checks, and the walkthrough.
 
 <details>
-<summary><b>Prompt for Claude Code</b> (<code>claude</code>)</summary>
+<summary><b>Prompt for Claude / Codex / Gemini</b></summary>
 
 ```
 I want to install TerminalX from https://github.com/txc0ld/tmx on this machine.
 
 Please:
 1. Detect my OS, shell, and architecture.
-2. Check which prerequisites I already have installed: git, rustc/cargo, node (v22+), pnpm, and OS-specific build tools (Xcode CLT on macOS, MSVC Build Tools on Windows, webkit2gtk + build-essential on Linux).
-3. For anything missing, tell me the exact command to install it — do NOT run sudo or system-level installs without confirming with me first.
-4. Once prerequisites are in place, clone the repo to ~/tmx (or C:\src\tmx on Windows), run `pnpm install`, then `pnpm tauri dev` in the background.
-5. Report back when the app window opens, or surface the exact error if the build fails.
-
-Use the README at https://github.com/txc0ld/tmx/blob/main/README.md as the source of truth for install steps. If something in the README doesn't match my environment, ask me before deviating.
+2. Check which prerequisites I have: git, rustc/cargo, node (v22+), pnpm,
+   and OS build tools (Xcode CLT on macOS, MSVC Build Tools on Windows,
+   webkit2gtk + build-essential on Linux).
+3. For anything missing, tell me the exact install command — don't run
+   sudo or system-level installs without confirming with me first.
+4. Clone to ~/tmx (or C:\src\tmx on Windows), run `pnpm install`, then
+   `pnpm tauri dev` in the background.
+5. Report back when the app window opens, or surface the error if the
+   build fails. Use the README as source of truth; ask before deviating.
 ```
-</details>
 
-<details>
-<summary><b>Prompt for Codex CLI</b> (<code>codex</code>)</summary>
-
-```
-Install TerminalX from https://github.com/txc0ld/tmx following the README's Installation section for my OS.
-
-Constraints:
-- Before any destructive or sudo command, print it and wait for me to confirm.
-- Prefer existing package managers (brew on macOS, winget/choco on Windows, apt/dnf/pacman on Linux).
-- If Rust, Node 22+, or pnpm are already installed, skip those steps.
-- Clone the repo, run `pnpm install`, then start `pnpm tauri dev` and tail the output until either the app window opens or the build errors.
-- If the build fails, read the error, check the "Troubleshooting" section of the README, and propose a fix — don't retry blindly.
-
-Start by running a quick environment check (OS, shell, versions) and show me the plan before executing.
-```
-</details>
-
-<details>
-<summary><b>Prompt for Gemini CLI</b> (<code>gemini</code>)</summary>
-
-```
-Goal: install and launch TerminalX (https://github.com/txc0ld/tmx) on this machine.
-
-Follow the README's per-OS Installation section at https://github.com/txc0ld/tmx/blob/main/README.md — I'll tell you my OS if you can't detect it.
-
-Work in this order:
-1. Environment audit: OS, arch, shell, and versions of git / rustc / cargo / node / pnpm. Show me the results.
-2. Gap list: what needs installing, with the exact command per tool. Ask before running anything that requires sudo or admin.
-3. Install missing prerequisites one at a time, verifying each before moving on.
-4. `git clone https://github.com/txc0ld/tmx.git`, `cd tmx`, `pnpm install`.
-5. Run `pnpm tauri dev` and wait for the window to open (first run ~2-3 min while Rust compiles).
-6. If anything fails, cross-reference the README Troubleshooting section before proposing a fix.
-
-Keep responses concise — prefer commands and results over prose.
-```
 </details>
 
 ---
 
-## Quick Start
-
-1. **Launch** — `pnpm tauri dev` opens the app
-2. **Add a project** — click the `+` button in the bottom-left sidebar, pick your repo folder
-3. **Apply default layout** — click the **Layout** button in the top bar to spawn Terminal + Agent + File Tree + Tasks + Git tiles
-4. **Open the palette** — `Ctrl/Cmd+K` to fuzzy-search 25+ commands
-5. **Connect Slack** — drop a Tasks tile, go to the MCP tab, add your Slack bot token. Tasks from your channel sync every 5 min.
-6. **Enable Auto-dispatch** — click the "Auto" button; new tasks get sent to a Claude agent automatically
-
----
-
-## Commands
-
-### Development
+## Quick start
 
 ```bash
-pnpm tauri dev          # Full stack: Rust backend + Vite HMR (default)
-pnpm dev                # Frontend-only (Vite on :5173, no Tauri)
-pnpm tauri build        # Production binary (MSI on Windows, DMG on macOS, AppImage on Linux)
+pnpm tauri dev
 ```
 
-### Quality
-
-```bash
-npx tsc --noEmit        # Type-check TypeScript (no emit)
-npx vite build          # Frontend production bundle
-cargo check             # Rust type-check (run from src-tauri/)
-cargo test              # Run Rust tests (run from src-tauri/)
-```
+1. **Add a project** — `+` in the sidebar, pick your repo folder.
+2. **Apply default layout** — top-bar **Layout** button spawns Terminal + Agent + File Tree + Tasks + Git.
+3. **Open the palette** — `Ctrl/⌘+K`, fuzzy-search 25+ commands.
+4. **Connect an integration** — palette → "Add MCP Connection" → Slack / GitHub / Linear etc. See [MCP overview](./docs/features/integrations/overview.md).
+5. **Wire something up** — drag a Terminal's right port to an Agent's left port. See [wiring tutorial](./WIRING.md).
 
 ---
 
-## Keyboard Shortcuts
+## Keyboard shortcuts
 
 | Shortcut | Action |
-|----------|--------|
-| `Ctrl+K` | Command Palette (fuzzy search everything) |
-| `Ctrl+F` | Search across all tile content |
-| `Ctrl+Enter` | Toggle Focus Mode |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Cycle through tiles |
-| `Ctrl+W` | Close focused/selected tiles |
-| `Ctrl+G` | Group selected tiles |
-| `Ctrl+Shift+B` | Save canvas bookmark |
-| `Ctrl+1`–`Ctrl+9` | Jump to bookmark |
-| `Ctrl+Shift+D` | Split terminal pane |
+|---|---|
+| `Ctrl/⌘+K` | Command palette |
+| `Ctrl/⌘+F` | Search across all tile content |
+| `Ctrl/⌘+Enter` | Toggle focus mode |
+| `Ctrl/⌘+Tab` / `+Shift+Tab` | Cycle through tiles |
+| `Ctrl/⌘+W` | Close focused/selected tiles |
+| `Ctrl/⌘+G` | Group selected tiles |
+| `Ctrl/⌘+Shift+B` | Save canvas bookmark |
+| `Ctrl/⌘+1`–`9` | Jump to bookmark |
+| `Ctrl/⌘+Shift+D` | Split terminal pane |
 | `Ctrl+Arrow` | Navigate split panes |
-| `Shift+Drag` | Rubber-band select on canvas |
+| `Shift+Drag` | Rubber-band select |
 | `Alt+Drag` / middle-click | Pan canvas |
 | `Scroll` | Zoom canvas |
 | `Escape` | Close overlays / exit focus mode |
 
 ---
 
-## Architecture
+## Dev commands
 
-```
-┌─────────────────────────────────────────────────────┐
-│  React 19 Frontend (src/)                           │
-│  ┌─────────────────────────────────────────────┐   │
-│  │  InfiniteCanvas — transform + tile layer    │   │
-│  │  TileShell — drag/resize/snap/z-order       │   │
-│  │  15 tile components                          │   │
-│  └─────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────┐   │
-│  │  13 Zustand stores (canvas, theme, mcp,     │   │
-│  │  usage, recording, templates, plugins, ...) │   │
-│  └─────────────────────────────────────────────┘   │
-└────────────────┬────────────────────────────────────┘
-                 │ Tauri invoke() / events
-┌────────────────▼────────────────────────────────────┐
-│  Rust Backend (src-tauri/)                          │
-│  ┌─────────────────────────────────────────────┐   │
-│  │  29 IPC commands:                            │   │
-│  │  • PTY (portable-pty, chunked writes)       │   │
-│  │  • Agents (cmd.exe wrap on Windows)         │   │
-│  │  • Git (11 commands)                         │   │
-│  │  • Docker, Filesystem, Workspace, Timeline  │   │
-│  │  • HTTP Proxy (reqwest, CSP/CORS bypass)    │   │
-│  └─────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────┘
+```bash
+pnpm tauri dev          # Full stack (Rust + Vite HMR)
+pnpm dev                # Frontend-only (no Tauri)
+pnpm tauri build        # Production binary for your OS
+pnpm test               # Frontend unit tests (Vitest)
+npx tsc --noEmit        # TypeScript type-check
+cd src-tauri && cargo check   # Rust type-check
+cd src-tauri && cargo test    # Rust tests
 ```
 
-**Stack:** Tauri 2 · React 19 · TypeScript 5.6 · Vite 6 · Zustand 5 · xterm.js 5.5 · Monaco Editor · portable-pty 0.8 · reqwest 0.12
-
-See [**CLAUDE.md**](./CLAUDE.md) for deep architecture notes, critical patterns, and data flows.
+CI runs on every push/PR across Ubuntu, Windows, and macOS — see [.github/workflows/ci.yml](./.github/workflows/ci.yml).
 
 ---
 
-## Project Structure
+## Architecture
 
 ```
-.
-├── src/                           # React frontend
-│   ├── components/
-│   │   ├── canvas/                # InfiniteCanvas, Minimap, TileDock, WorkspaceTabs, SearchOverlay
-│   │   ├── tiles/                 # 15 tile components + TileShell
-│   │   ├── topbar/                # TopBar with Layout/Save buttons
-│   │   ├── sidebar/               # ProjectSidebar (bottom-left projects)
-│   │   ├── status/                # StatusRail, ToastContainer, ThemePicker
-│   │   ├── palette/               # Command Palette
-│   │   ├── wiring/                # Wire rendering + drag-connect
-│   │   └── timeline/              # Session timeline
-│   ├── stores/                    # 13 Zustand stores
-│   ├── hooks/                     # useCanvas, usePty, useWiringEngine
-│   ├── utils/                     # ipc, layout, detachTile, projectIcon
-│   ├── design/                    # tokens.ts (colors, spacing, typography)
-│   └── types/                     # Discriminated unions for all tile types
-│
-├── src-tauri/                     # Rust backend
-│   ├── src/
-│   │   ├── commands/              # Terminal, agents, git, docker, http_proxy, etc.
-│   │   └── state/                 # AppState, PtyManager
-│   ├── capabilities/              # Tauri permission manifests
-│   └── icons/                     # App icons (Windows, macOS, Linux)
-│
-├── CLAUDE.md                      # Architecture guide for AI coding agents
-├── FEATURES.md                    # Full feature list + X post copy
-└── README.md                      # This file
+React 19 frontend (src/)                Rust backend (src-tauri/)
+┌────────────────────────────┐          ┌──────────────────────────┐
+│ InfiniteCanvas              │          │ 30+ IPC commands         │
+│ TileShell (memo'd)          │  IPC /   │  • PTY (portable-pty,    │
+│ 15 tile components          │ ←────→   │    bounded channel,      │
+│ WiringLayer + engine        │  events  │    64 cap)               │
+│                             │          │  • Agents (.cmd wrap)    │
+│ 14 Zustand stores           │          │  • 11 git commands       │
+│ Hooks (usePty, useCanvas,   │          │  • Docker, filesystem,   │
+│   useWiringEngine)          │          │    workspace, timeline   │
+│                             │          │  • HTTP proxy (SSRF +    │
+│ Lazy chunks per tile        │          │    DNS pinned + pooled)  │
+└────────────────────────────┘          └──────────────────────────┘
+```
+
+**Stack:** Tauri 2 · React 19 · TypeScript 5.6 · Vite 6 · Zustand 5 · xterm.js 5 · Monaco · portable-pty 0.8 · reqwest 0.12
+
+Deep architecture: [**CLAUDE.md**](./CLAUDE.md) · Design system: [**DESIGN.md**](./DESIGN.md) · Security posture: [**CONTRIBUTING.md**](./CONTRIBUTING.md#security-posture).
+
+---
+
+## Project structure
+
+```
+src/                    React frontend
+├── components/
+│   ├── canvas/         InfiniteCanvas, Minimap, TileDock, WorkspaceTabs
+│   ├── tiles/          15 tile components + TileShell
+│   ├── topbar/         Layout menu, Clear Canvas, theme picker
+│   ├── palette/        Command palette
+│   ├── wiring/         Wire rendering + drag-to-connect
+│   └── timeline/       Session timeline
+├── stores/             14 Zustand stores
+├── hooks/              usePty, useCanvas, useWiringEngine
+├── utils/              ipc, layout, workspaceImport, detachTile
+├── design/             Token-based design system (tokens.ts)
+└── types/              Discriminated unions for all tile types
+
+src-tauri/              Rust backend
+├── src/
+│   ├── commands/       30+ IPC handlers
+│   └── state/          AppState, PtyManager
+├── capabilities/       Tauri permission manifests
+└── icons/              App icons
+
+docs/features/          Per-feature documentation (~55 files)
+CLAUDE.md               Architecture + critical patterns for AI agents
+DESIGN.md               Design-system source of truth
+FEATURES.md             Product feature tour
+WIRING.md               Drag-to-connect wiring tutorial
+CONTRIBUTING.md         PR workflow + security posture
 ```
 
 ---
 
 ## Contributing
 
-Contributions welcome. Quick guidelines:
+Contributions welcome. See [**CONTRIBUTING.md**](./CONTRIBUTING.md) for the full workflow, security posture, and PR checklist.
 
-1. **Fork** and create a feature branch (`git checkout -b feat/your-feature`)
-2. **Type-check** before committing (`npx tsc --noEmit`)
-3. **Follow patterns** in [CLAUDE.md](./CLAUDE.md) — especially the Zustand selector pattern (#1 crash cause)
-4. **Test** on your platform before opening a PR
-5. **Commit style** — conventional commits preferred (`feat:`, `fix:`, `refactor:`)
+**Quick guidelines:**
+1. Fork and branch (`feat/your-feature`).
+2. Type-check (`npx tsc --noEmit`) before committing.
+3. Follow patterns in [CLAUDE.md](./CLAUDE.md) — especially Zustand selectors (the #1 crash cause) and the memoization rules.
+4. Cross-platform: if you touched Rust or IPC, test on your OS + confirm CI passes on all three.
+5. Conventional commits (`feat:`, `fix:`, `refactor:`, `perf:`, `docs:`).
 
 ### Known patterns to avoid
 
-- ❌ Inline `|| []` or `?? []` inside `useXxxStore(s => ...)` selectors — causes infinite render loops
-- ❌ Calling `invoke()` directly from components — always wrap in `utils/ipc.ts`
-- ❌ Hardcoded colors — use `colors.*` from `design/tokens.ts`
-- ❌ Large PTY writes without chunking — already handled at the Rust level
-
----
-
-## Troubleshooting
-
-<details>
-<summary><b>Rust build fails on Windows: "link.exe not found"</b></summary>
-
-Git-bash's `link` command shadows MSVC's `link.exe`. Build from PowerShell or `cmd.exe`, not git-bash. If `cargo` itself isn't in PATH, add `%USERPROFILE%\.cargo\bin`.
-</details>
-
-<details>
-<summary><b>"Agent Spawn Failed: not a valid Win32 application"</b></summary>
-
-The agent CLI (claude/codex/gemini) is an npm `.cmd` script, not a `.exe`. TerminalX wraps these through `cmd.exe /C` automatically on Windows — if you see this, rebuild Rust: `cd src-tauri && cargo build`.
-</details>
-
-<details>
-<summary><b>Infinite render loop / "Maximum update depth exceeded"</b></summary>
-
-A Zustand selector is returning a new object/array each render. Find the selector with `|| []` or `?? []` and replace with a module-level constant. See [CLAUDE.md](./CLAUDE.md) → "Zustand selector infinite loop".
-</details>
-
-<details>
-<summary><b>MCP integration fails with "Failed to fetch"</b></summary>
-
-MCP API calls must route through the Rust HTTP proxy (to bypass WebView CSP/CORS). The proxy is registered in `src-tauri/src/commands/http_proxy.rs` and uses `reqwest`. Rebuild Rust if you see CORS errors.
-</details>
-
-<details>
-<summary><b>Tile content disappears / blank tiles</b></summary>
-
-Likely a lazy-loaded component (EditorTile, DiffTile) failed to load. Check the browser console (F12 in dev mode) for module import errors. The AppErrorBoundary should catch render crashes and show the error.
-</details>
+- ❌ `useXxxStore(s => s.thing || [])` — creates new arrays every render, infinite loop. Use a module-level constant with `??`.
+- ❌ `invoke()` directly from components — always wrap in `utils/ipc.ts`.
+- ❌ Hardcoded colors — use `colors.*` from `design/tokens.ts`.
+- ❌ `@tauri-apps/plugin-fs` for user project files — scope is too narrow. Use `readFileText` / `writeFileText` from `utils/ipc.ts`.
 
 ---
 
@@ -480,6 +362,6 @@ MIT © [Fantom Labs](https://github.com/txc0ld)
 
 **Built by [Tay](https://github.com/txc0ld) at Fantom Labs**
 
-[Website](https://fantomlabs.com) · [GitHub](https://github.com/txc0ld/tmx) · [Report an issue](https://github.com/txc0ld/tmx/issues)
+[Website](https://fantomlabs.com) · [GitHub](https://github.com/txc0ld/tmx) · [Issues](https://github.com/txc0ld/tmx/issues) · [Feature docs](./docs/features/README.md)
 
 </div>
