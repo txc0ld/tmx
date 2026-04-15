@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useMemo } from 'react';
 import { useUsageStore, type OpenUsageProvider, type AgentSession } from '@/stores/usageStore';
+import { POLL_INTERVAL_MS } from '@/utils/constants';
 import { colors, fonts, radius, spacing, typography, motion, alpha } from '@/design/tokens';
 
 const EMPTY_PROVIDERS: OpenUsageProvider[] = [];
@@ -47,7 +48,7 @@ export function UsageTile() {
   // Poll OpenUsage API every 30s
   useEffect(() => {
     fetchOpenUsage();
-    const interval = setInterval(fetchOpenUsage, 30000);
+    const interval = setInterval(fetchOpenUsage, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [fetchOpenUsage]);
 

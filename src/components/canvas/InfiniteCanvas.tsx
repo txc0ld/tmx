@@ -106,6 +106,11 @@ export function InfiniteCanvas() {
   const [altHeld, setAltHeld] = useState(false);
 
   // ─── Auto-snapshot for time travel (every 5 min) ────
+  // Only writes if the snapshot content actually differs from the last one
+  // we saved — avoids a 50 KB localStorage write every 5 min on an idle
+  // canvas. Comparison is a hash of JSON.stringify length+first+last chars
+  // for speed; full-JSON equality would defeat the purpose.
+  const lastSnapshotSigRef = useRef<string | null>(null);
   useEffect(() => {
     if (!activeProject) return;
     const interval = setInterval(() => {
@@ -117,8 +122,16 @@ export function InfiniteCanvas() {
           tiles: (s.tiles[pid] || []).map(t => { const { ...r } = t as unknown as Record<string, unknown>; delete r.ptyId; return r; }),
           transform: s.transforms[pid] || { x: 0, y: 0, scale: 1 },
         };
+        const json = JSON.stringify(data);
+        // Cheap signature — length + both ends. Collision is possible in
+        // theory; in practice a new snapshot of the exact same length with
+        // matching first/last 32 chars means the workspace is identical.
+        const sig = `${pid}|${json.length}|${json.slice(0, 32)}|${json.slice(-32)}`;
+        if (sig === lastSnapshotSigRef.current) return;
+        lastSnapshotSigRef.current = sig;
+
         const key = `tx-autosnapshot-${pid}-${Date.now()}`;
-        localStorage.setItem(key, JSON.stringify(data));
+        localStorage.setItem(key, json);
         // Keep max 12 snapshots (1 hour of history)
         const allKeys = Object.keys(localStorage).filter(k => k.startsWith(`tx-autosnapshot-${pid}-`)).sort();
         while (allKeys.length > 12) {

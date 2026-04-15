@@ -72,6 +72,7 @@ export function BrowserTile({ tile }: BrowserTileProps) {
         <button
           onClick={handleRefresh}
           title="Refresh"
+          aria-label="Refresh page"
           style={{
             display: 'flex',
             alignItems: 'center',

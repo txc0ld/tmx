@@ -74,6 +74,7 @@ export const typography = {
   bodyMd:    { fontFamily: fonts.body, fontWeight: 400, fontSize: '0.9375rem', letterSpacing: '0' },
   labelMd:   { fontFamily: fonts.body, fontWeight: 500, fontSize: '0.8125rem', letterSpacing: '0.01em' },
   labelSm:   { fontFamily: fonts.body, fontWeight: 500, fontSize: '0.6875rem', letterSpacing: '0.02em' },
+  labelXs:   { fontFamily: fonts.body, fontWeight: 500, fontSize: '0.5625rem', letterSpacing: '0.03em' },
 } as const;
 
 // Glass Recipes

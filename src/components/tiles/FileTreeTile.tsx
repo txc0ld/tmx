@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { readFileTree } from '@/utils/ipc';
+import { friendlyFsError } from '@/utils/constants';
 import { colors, fonts, spacing, typography, radius, alpha } from '@/design/tokens';
 import type { FileTreeTile as FileTreeTileType, FileTreeNode, EditorTile, DiffTile, Tile } from '@/types';
 
@@ -25,7 +26,7 @@ export function FileTreeTile({ tile }: FileTreeTileProps) {
         setLoading(false);
       })
       .catch((err) => {
-        setError(String(err));
+        setError(friendlyFsError(err));
         setLoading(false);
       });
   }, [tile.rootPath]);

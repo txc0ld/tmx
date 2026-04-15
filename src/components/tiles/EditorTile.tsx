@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import { readFileText, writeFileText, getFileSize } from '@/utils/ipc';
+import { detectLanguage } from '@/utils/detectLanguage';
+import { friendlyFsError } from '@/utils/constants';
 import { colors, spacing, typography } from '@/design/tokens';
 import type { EditorTile as EditorTileType } from '@/types';
 
@@ -26,18 +28,6 @@ type LoadMode = 'normal' | 'optimized' | 'plaintext';
 
 interface EditorTileProps {
   tile: EditorTileType;
-}
-
-function detectLanguage(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    json: 'json', md: 'markdown', html: 'html', css: 'css', scss: 'scss',
-    rs: 'rust', py: 'python', go: 'go', toml: 'toml', yaml: 'yaml', yml: 'yaml',
-    sh: 'shell', bash: 'shell', zsh: 'shell', sql: 'sql', xml: 'xml',
-    svg: 'xml', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp', java: 'java',
-  };
-  return map[ext] || 'plaintext';
 }
 
 export function EditorTile({ tile }: EditorTileProps) {
@@ -103,7 +93,7 @@ export function EditorTile({ tile }: EditorTileProps) {
         setLoading(false);
       } catch (err) {
         if (filePathRef.current !== tile.filePath) return;
-        setError(String(err));
+        setError(friendlyFsError(err));
         setLoading(false);
       }
     };

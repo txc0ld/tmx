@@ -4,6 +4,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useProjectStore } from '@/stores/projectStore';
 import { gitFilesStatus, gitShowHeadFile, readFileText, type GitFileStatus } from '@/utils/ipc';
+import { detectLanguage } from '@/utils/detectLanguage';
 import { colors, fonts, spacing, typography, radius, alpha, motion } from '@/design/tokens';
 import type { DiffTile as DiffTileType } from '@/types';
 
@@ -13,27 +14,22 @@ interface DiffTileProps {
 
 type DiffMode = 'git' | 'compare' | 'paste';
 
-function detectLanguage(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    json: 'json', md: 'markdown', html: 'html', css: 'css', scss: 'scss',
-    rs: 'rust', py: 'python', go: 'go', toml: 'toml', yaml: 'yaml', yml: 'yaml',
-    sh: 'shell', bash: 'shell', zsh: 'shell', sql: 'sql', xml: 'xml',
-    svg: 'xml', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp', java: 'java',
-  };
-  return map[ext] || 'plaintext';
-}
-
 function basename(p: string): string {
   if (!p) return '';
   const sep = p.includes('\\') ? '\\' : '/';
   return p.split(sep).pop() || p;
 }
 
+// Status colors come from design tokens so themes override correctly.
+// Untracked uses onSurfaceVariant (neutral grey), rename/copy uses the
+// accent for "interesting but not an error".
 const STATUS_COLOR: Record<string, string> = {
-  M: '#facc15', A: '#22c55e', D: '#ef4444', '??': '#94a3b8',
-  R: '#a855f7', C: '#a855f7',
+  M: colors.yellow,
+  A: colors.green,
+  D: colors.red,
+  '??': colors.onSurfaceVariant,
+  R: colors.primary,
+  C: colors.primary,
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -187,6 +183,7 @@ function GitMode({ tile, repoPath, update }: {
           <button
             onClick={refresh}
             title="Refresh"
+            aria-label="Refresh git status"
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
               color: colors.secondary, fontSize: 12, padding: 0,
@@ -528,8 +525,8 @@ function DiffPane({ language, original, modified, originalLabel, modifiedLabel, 
         color: colors.secondary,
         flexShrink: 0,
       }}>
-        <span style={{ flex: 1, color: '#ef4444' }}>−  {originalLabel}</span>
-        <span style={{ flex: 1, color: '#22c55e' }}>+  {modifiedLabel}</span>
+        <span style={{ flex: 1, color: colors.red }}>−  {originalLabel}</span>
+        <span style={{ flex: 1, color: colors.green }}>+  {modifiedLabel}</span>
         {fileLabel && (
           <span style={{ marginLeft: spacing.md, fontFamily: fonts.mono }}>{fileLabel}</span>
         )}

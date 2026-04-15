@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { gitStatus, gitLog, gitBranches, gitCheckout, gitFilesStatus, gitStage, gitUnstage, gitCommit } from '@/utils/ipc';
 import type { GitLogEntry, GitFileStatus } from '@/utils/ipc';
 import type { GitTile as GitTileType } from '@/types';
+import { POLL_INTERVAL_MS } from '@/utils/constants';
 import { colors, fonts, radius, spacing, typography, motion, alpha } from '@/design/tokens';
 
 interface GitTileProps {
@@ -42,7 +43,7 @@ export function GitTile({ tile }: GitTileProps) {
   // Refresh on mount + every 30s
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 30_000);
+    const interval = setInterval(refresh, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [refresh]);
 

@@ -2,8 +2,9 @@ import { useEffect, useRef } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useToastStore } from '@/stores/toastStore';
 import { ptyWrite } from '@/utils/ipc';
+import { isAgentTile, hasPty } from '@/utils/tileTypeGuards';
 import { sendNotification } from '@tauri-apps/plugin-notification';
-import type { Wire, Tile, AgentTile } from '@/types';
+import type { Wire, Tile } from '@/types';
 
 const EMPTY_WIRES: Wire[] = [];
 const EMPTY_TILES: Tile[] = [];
@@ -72,8 +73,8 @@ export function useWiringEngine() {
       const nextStatuses: Record<string, string> = {};
 
       for (const tile of tiles) {
-        if (tile.type === 'agent') {
-          nextStatuses[tile.id] = (tile as AgentTile).status;
+        if (isAgentTile(tile)) {
+          nextStatuses[tile.id] = tile.status;
         }
       }
 
@@ -88,7 +89,7 @@ export function useWiringEngine() {
         if (!fromTile || !toTile) continue;
 
         // ─── Data flow activation (context-pipe) ─────────
-        const fromPtyId = 'ptyId' in fromTile ? (fromTile as { ptyId?: string }).ptyId : undefined;
+        const fromPtyId = hasPty(fromTile) ? fromTile.ptyId : undefined;
         if (fromPtyId) {
           const currentData = wireData[fromPtyId] || '';
           const prevData = prevWireData[fromPtyId] || '';
@@ -106,13 +107,13 @@ export function useWiringEngine() {
         }
 
         // ─── Agent chain (agent->agent) ──────────────────
-        if (wire.wireType === 'agent-chain' && fromTile.type === 'agent' && toTile.type === 'agent') {
+        if (wire.wireType === 'agent-chain' && isAgentTile(fromTile) && isAgentTile(toTile)) {
           const prevStatus = prevStatuses[fromTile.id];
-          const currStatus = (fromTile as AgentTile).status;
+          const currStatus = fromTile.status;
 
           // Agent just completed
           if (prevStatus && prevStatus !== 'done' && currStatus === 'done') {
-            const toPtyId = (toTile as AgentTile).ptyId;
+            const toPtyId = toTile.ptyId;
             if (toPtyId) {
               // Collect wireData from the source agent
               const sourceData = wireData[fromPtyId || ''] || '';
@@ -134,9 +135,9 @@ export function useWiringEngine() {
         }
 
         // ─── Refresh trigger (agent->browser) ────────────
-        if (wire.wireType === 'refresh-trigger' && fromTile.type === 'agent') {
+        if (wire.wireType === 'refresh-trigger' && isAgentTile(fromTile)) {
           const prevStatus = prevStatuses[fromTile.id];
-          const currStatus = (fromTile as AgentTile).status;
+          const currStatus = fromTile.status;
 
           if (prevStatus && prevStatus !== 'done' && currStatus === 'done') {
             // Show a notification since we can't actually refresh a webview
@@ -155,12 +156,12 @@ export function useWiringEngine() {
         }
 
         // ─── Context pipe: auto-pipe on agent completion ──
-        if (wire.wireType === 'context-pipe' && fromTile.type === 'agent') {
+        if (wire.wireType === 'context-pipe' && isAgentTile(fromTile)) {
           const prevStatus = prevStatuses[fromTile.id];
-          const currStatus = (fromTile as AgentTile).status;
+          const currStatus = fromTile.status;
 
           if (prevStatus && prevStatus !== 'done' && currStatus === 'done') {
-            const toPtyId = 'ptyId' in toTile ? (toTile as { ptyId?: string }).ptyId : undefined;
+            const toPtyId = hasPty(toTile) ? toTile.ptyId : undefined;
             if (toPtyId) {
               const sourceData = wireData[fromPtyId || ''] || '';
               const lines = sourceData.split('\n');
@@ -179,9 +180,9 @@ export function useWiringEngine() {
         }
 
         // ─── Task assign (agent->todo) ───────────────────
-        if (wire.wireType === 'task-assign' && fromTile.type === 'agent' && toTile.type === 'todo') {
+        if (wire.wireType === 'task-assign' && isAgentTile(fromTile) && toTile.type === 'todo') {
           const prevStatus = prevStatuses[fromTile.id];
-          const currStatus = (fromTile as AgentTile).status;
+          const currStatus = fromTile.status;
 
           if (prevStatus && prevStatus !== 'done' && currStatus === 'done') {
             const sourceData = wireData[fromPtyId || ''] || '';
@@ -205,9 +206,9 @@ export function useWiringEngine() {
         }
 
         // ─── Diff feed (agent->diff) ─────────────────────
-        if (wire.wireType === 'diff-feed' && fromTile.type === 'agent' && toTile.type === 'diff') {
+        if (wire.wireType === 'diff-feed' && isAgentTile(fromTile) && toTile.type === 'diff') {
           const prevStatus = prevStatuses[fromTile.id];
-          const currStatus = (fromTile as AgentTile).status;
+          const currStatus = fromTile.status;
 
           if (prevStatus && prevStatus !== 'done' && currStatus === 'done') {
             // Notify that diff should be refreshed
@@ -235,8 +236,8 @@ export function useWiringEngine() {
         const wire = wires.find(w => w.fromTile === runner.id);
         if (!wire) continue;
         const targetTile = tileById.get(wire.toTile);
-        if (!targetTile || targetTile.type !== 'agent') continue;
-        const agentPty = (targetTile as AgentTile).ptyId;
+        if (!targetTile || !isAgentTile(targetTile)) continue;
+        const agentPty = targetTile.ptyId;
         if (!agentPty) continue;
         const output = wireData[runner.ptyId || ''] || '';
         if (!output) continue;
