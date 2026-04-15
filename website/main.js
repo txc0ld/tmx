@@ -35,15 +35,16 @@ window.addEventListener('scroll', () => {
 
 // ----- TERMINAL TYPING ANIMATION -----
 const terminalLines = [
-  { text: '$ terminalx init --agents 3', type: 'cmd' },
-  { text: '> Spawning infinite canvas...', type: 'output' },
+  { text: '$ terminalx spawn --workspace', type: 'cmd' },
+  { text: '> Canvas initialized. 15 tile types available.', type: 'output' },
   { text: '> Agent[claude-code] ........ ', type: 'output', suffix: 'READY', suffixType: 'ok' },
   { text: '> Agent[codex-cli] .......... ', type: 'output', suffix: 'READY', suffixType: 'ok' },
   { text: '> Agent[gemini-cli] ......... ', type: 'output', suffix: 'READY', suffixType: 'ok' },
-  { text: '> Wiring: agent_01 → agent_02', type: 'output' },
-  { text: '> Wiring: agent_02 → agent_03', type: 'output' },
-  { text: '> All pipelines operational.', type: 'ok' },
-  { text: '> Workspace auto-saved.', type: 'ok' },
+  { text: '> Wire: terminal → claude (context-pipe)', type: 'output' },
+  { text: '> Wire: claude → codex (agent-chain)', type: 'output' },
+  { text: '> Wire: codex → diff (diff-feed)', type: 'output' },
+  { text: '> MCP: Slack + GitHub synced.', type: 'ok' },
+  { text: '> Workspace auto-saved. Ready to ship.', type: 'ok' },
 ];
 
 const container = document.getElementById('terminal-lines');

@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TerminalX — The Command Center for AI Agents</title>
-  <meta name="description" content="An infinite canvas workspace for orchestrating Claude Code, Codex, and Gemini CLI in parallel. Native desktop. Rust-powered. Zero compromise." />
+  <title>TerminalX — The canvas-native terminal for AI agents</title>
+  <meta name="description" content="An infinite canvas workspace for orchestrating Claude Code, Codex, and Gemini CLI in parallel. Drag to wire. Native desktop. Rust-powered." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -23,6 +23,7 @@
         <a href="#capabilities">CAPABILITIES</a>
         <a href="#architecture">ARCHITECTURE</a>
         <a href="#agents">AGENTS</a>
+        <a href="https://github.com/txc0ld/tmx/tree/main/docs/features" target="_blank" rel="noopener">DOCS</a>
       </div>
       <a href="https://github.com/txc0ld/tmx" class="btn btn-primary" target="_blank" rel="noopener">DOWNLOAD</a>
     </div>
@@ -35,17 +36,18 @@
     <div class="blueprint-grid"></div>
     <div class="hero-inner">
       <div class="hero-content">
-        <div class="chip" data-reveal>NATIVE DESKTOP APPLICATION</div>
+        <div class="chip" data-reveal>NATIVE DESKTOP · TAURI 2 · RUST</div>
         <h1 class="hero-headline" data-reveal data-reveal-delay="1">
-          THE COMMAND<br />CENTER FOR<br /><span class="lime">AI AGENTS</span>
+          THE CANVAS<br />FOR<br /><span class="lime">AI AGENTS</span>
         </h1>
         <p class="hero-sub" data-reveal data-reveal-delay="2">
-          Orchestrate Claude Code, Codex, and Gemini CLI on an infinite canvas.
-          Wire them together. Ship faster.
+          Run Claude Code, Codex, and Gemini side-by-side on an infinite canvas.
+          Drag to wire them together. Pipe task inboxes from Slack, GitHub,
+          Linear directly into them. Ship 10&times; faster.
         </p>
         <div class="hero-actions" data-reveal data-reveal-delay="3">
           <a href="https://github.com/txc0ld/tmx" class="btn btn-primary btn-lg" target="_blank" rel="noopener">DOWNLOAD</a>
-          <a href="https://github.com/txc0ld/tmx" class="btn btn-secondary btn-lg" target="_blank" rel="noopener">VIEW SOURCE</a>
+          <a href="https://github.com/txc0ld/tmx/tree/main/docs/features" class="btn btn-secondary btn-lg" target="_blank" rel="noopener">READ THE DOCS</a>
         </div>
       </div>
       <div class="hero-terminal" data-reveal data-reveal-delay="2">
@@ -70,23 +72,23 @@
     <div class="ticker-track">
       <span>INFINITE_CANVAS</span><span class="ticker-dot">&bull;</span>
       <span>MULTI_AGENT</span><span class="ticker-dot">&bull;</span>
-      <span>WIRE_SYSTEM</span><span class="ticker-dot">&bull;</span>
+      <span>6_WIRE_TYPES</span><span class="ticker-dot">&bull;</span>
+      <span>15_TILE_TYPES</span><span class="ticker-dot">&bull;</span>
+      <span>MCP_INTEGRATIONS</span><span class="ticker-dot">&bull;</span>
       <span>NATIVE_PTY</span><span class="ticker-dot">&bull;</span>
       <span>RUST_BACKEND</span><span class="ticker-dot">&bull;</span>
       <span>MONACO_EDITOR</span><span class="ticker-dot">&bull;</span>
       <span>AUTO_SAVE</span><span class="ticker-dot">&bull;</span>
+      <span>TIME_TRAVEL</span><span class="ticker-dot">&bull;</span>
       <span>FOCUS_MODE</span><span class="ticker-dot">&bull;</span>
-      <span>13_TILE_TYPES</span><span class="ticker-dot">&bull;</span>
       <span>ZERO_ELECTRON</span><span class="ticker-dot">&bull;</span>
       <span>INFINITE_CANVAS</span><span class="ticker-dot">&bull;</span>
       <span>MULTI_AGENT</span><span class="ticker-dot">&bull;</span>
-      <span>WIRE_SYSTEM</span><span class="ticker-dot">&bull;</span>
+      <span>6_WIRE_TYPES</span><span class="ticker-dot">&bull;</span>
+      <span>15_TILE_TYPES</span><span class="ticker-dot">&bull;</span>
+      <span>MCP_INTEGRATIONS</span><span class="ticker-dot">&bull;</span>
       <span>NATIVE_PTY</span><span class="ticker-dot">&bull;</span>
       <span>RUST_BACKEND</span><span class="ticker-dot">&bull;</span>
-      <span>MONACO_EDITOR</span><span class="ticker-dot">&bull;</span>
-      <span>AUTO_SAVE</span><span class="ticker-dot">&bull;</span>
-      <span>FOCUS_MODE</span><span class="ticker-dot">&bull;</span>
-      <span>13_TILE_TYPES</span><span class="ticker-dot">&bull;</span>
       <span>ZERO_ELECTRON</span><span class="ticker-dot">&bull;</span>
     </div>
   </div>
@@ -107,8 +109,9 @@
         <div class="feature-index">01</div>
         <h3 class="feature-title">INFINITE_CANVAS</h3>
         <p class="feature-desc">
-          Arrange terminals, agents, and editors spatially on a boundless workspace.
-          No tabs. No splits. Pure spatial freedom with pan, zoom, and minimap navigation.
+          Pan, zoom, snap-to-edge, rubber-band select. 15 tile types arranged
+          spatially. Multi-workspace, bookmarks, minimap — your mental model,
+          made physical.
         </p>
         <div class="feature-tag">SPATIAL</div>
       </div>
@@ -117,8 +120,9 @@
         <div class="feature-index">02</div>
         <h3 class="feature-title">AGENT_ORCHESTRATION</h3>
         <p class="feature-desc">
-          Run multiple AI coding agents simultaneously. Compare approaches,
-          chain operations, and multiply your throughput across every task.
+          Claude, Codex, Gemini as first-class tiles. Auto-complete via DONE
+          sentinel or idle detection. Per-project memory injects architecture
+          context into every spawn.
         </p>
         <div class="feature-tag">PARALLEL</div>
       </div>
@@ -127,40 +131,44 @@
         <div class="feature-index">03</div>
         <h3 class="feature-title">WIRE_SYSTEM</h3>
         <p class="feature-desc">
-          Connect tiles with data wires. Output from one agent pipes directly
-          into another. Build visual processing chains without touching config files.
+          Drag port-to-port: 6 wire types auto-inferred. Terminal &rarr; Agent pipes
+          context. Agent &rarr; Agent chains hands-free. Runner &rarr; Agent rebuilds on
+          failure. File tree &rarr; editor routes clicks.
         </p>
         <div class="feature-tag">DATAFLOW</div>
       </div>
 
       <div class="feature-card" data-reveal data-reveal-delay="3">
         <div class="feature-index">04</div>
-        <h3 class="feature-title">13_TILE_TYPES</h3>
+        <h3 class="feature-title">MCP_INBOX</h3>
         <p class="feature-desc">
-          Terminals, agents, code editors, browsers, file trees, runners, and more.
-          Every tool you need on a single surface.
+          Connectors for Slack, GitHub, Linear, Jira, Notion, Google Calendar,
+          Gmail. Tasks sync into a Todo tile &mdash; optionally auto-dispatched
+          to a wired agent. Zero context switch.
         </p>
-        <div class="feature-tag">MODULAR</div>
+        <div class="feature-tag">INTEGRATED</div>
       </div>
 
       <div class="feature-card" data-reveal data-reveal-delay="4">
         <div class="feature-index">05</div>
         <h3 class="feature-title">NATIVE_PERFORMANCE</h3>
         <p class="feature-desc">
-          Tauri 2 with a Rust backend. Real PTY sessions via portable-pty.
-          Native OS integration, sub-50ms latency, a fraction of Electron's memory.
+          Tauri 2 + Rust. 47 MB idle. Native PTY with bounded-channel
+          backpressure. WebGL-rendered terminals. Connection-pooled HTTP
+          proxy. A fraction of Electron's footprint.
         </p>
         <div class="feature-tag">RUST</div>
       </div>
 
       <div class="feature-card" data-reveal data-reveal-delay="5">
         <div class="feature-index">06</div>
-        <h3 class="feature-title">WORKSPACE_PERSISTENCE</h3>
+        <h3 class="feature-title">NEVER_LOSES_WORK</h3>
         <p class="feature-desc">
-          Auto-save captures every tile, wire, and position. Switch projects,
-          restart your machine. Everything is exactly where you left it.
+          Three-layer auto-save (localStorage + disk + beforeunload).
+          Auto-snapshots every 5 min for time-travel. Export entire
+          workspaces as portable JSON. Session recording for full PTY replay.
         </p>
-        <div class="feature-tag">AUTOSAVE</div>
+        <div class="feature-tag">DURABLE</div>
       </div>
 
     </div>
@@ -180,16 +188,16 @@
 
       <div class="stats-grid" data-reveal>
         <div class="stat-block">
-          <div class="stat-value" data-count="13">0</div>
+          <div class="stat-value" data-count="15">0</div>
           <div class="stat-label">TILE_TYPES</div>
         </div>
         <div class="stat-block">
-          <div class="stat-value" data-count="5">0</div>
-          <div class="stat-label">BUILT_IN_THEMES</div>
+          <div class="stat-value" data-count="6">0</div>
+          <div class="stat-label">WIRE_TYPES</div>
         </div>
         <div class="stat-block">
-          <div class="stat-value" data-count-prefix="<" data-count="50">0</div>
-          <div class="stat-label">MS_LATENCY</div>
+          <div class="stat-value" data-count="8">0</div>
+          <div class="stat-label">INTEGRATIONS</div>
         </div>
         <div class="stat-block">
           <div class="stat-value" data-count="0" data-count-static>0</div>
@@ -201,37 +209,55 @@
         <div class="specs-col">
           <h4 class="specs-heading">EDITOR_&_TERMINAL</h4>
           <ul class="specs-list">
-            <li>Monaco Editor integration</li>
-            <li>xterm.js 5.5 terminal emulation</li>
-            <li>Full PTY with resize support</li>
-            <li>Multi-cursor editing</li>
+            <li>Monaco editor with tiered loading for big files</li>
+            <li>xterm.js 5 with WebGL renderer</li>
+            <li>Split panes (up to 4 per terminal)</li>
+            <li>Git/Compare/Paste diff modes</li>
+          </ul>
+        </div>
+        <div class="specs-col">
+          <h4 class="specs-heading">AGENT_ENGINE</h4>
+          <ul class="specs-list">
+            <li>DONE sentinel + idle auto-complete</li>
+            <li>Hands-free auto-pipe with ready-signal</li>
+            <li>Per-project agent memory injection</li>
+            <li>Agent-chain fires on logical completion</li>
           </ul>
         </div>
         <div class="specs-col">
           <h4 class="specs-heading">WORKSPACE</h4>
           <ul class="specs-list">
-            <li>Focus mode with tile dimming</li>
-            <li>Minimap navigation</li>
-            <li>Multi-select and batch ops</li>
-            <li>Bookmark system</li>
+            <li>Auto-snapshots every 5 min (time travel)</li>
+            <li>5 layout slots + default per project</li>
+            <li>Multi-workspace tabs</li>
+            <li>Portable JSON workspace export/import</li>
           </ul>
         </div>
         <div class="specs-col">
           <h4 class="specs-heading">INTEGRATION</h4>
           <ul class="specs-list">
-            <li>Git clone, status, diff</li>
-            <li>Filesystem watcher</li>
-            <li>Timeline event recording</li>
-            <li>Project-level persistence</li>
+            <li>MCP: Slack, GitHub, Linear, Jira, Notion</li>
+            <li>Google Calendar, Gmail, OpenUsage</li>
+            <li>Full git panel (status, log, branches, commit)</li>
+            <li>Docker container attach + SSH sessions</li>
+          </ul>
+        </div>
+        <div class="specs-col">
+          <h4 class="specs-heading">HARDENED</h4>
+          <ul class="specs-list">
+            <li>SSRF-guarded HTTP with pinned DNS</li>
+            <li>64-PTY cap, shell allowlist, path scope</li>
+            <li>Workspace schema validation on import</li>
+            <li>92 frontend + 38 Rust unit tests</li>
           </ul>
         </div>
         <div class="specs-col">
           <h4 class="specs-heading">THEMING</h4>
           <ul class="specs-list">
-            <li>5 themes: Electric, Phantom, Ember, Ice, Snow</li>
+            <li>6 themes: Electric, Phantom, Ember, Ice, Snow, Slate</li>
+            <li>Light-theme surface inversion (tiles stay dark)</li>
             <li>CSS custom property system</li>
             <li>Glass-morphism tile shells</li>
-            <li>Mouse-tracking glow overlays</li>
           </ul>
         </div>
       </div>
@@ -258,7 +284,7 @@
             <div class="arch-block">React 19</div>
             <div class="arch-block">TypeScript 5</div>
             <div class="arch-block">Zustand 5</div>
-            <div class="arch-block">xterm.js 5.5</div>
+            <div class="arch-block">xterm.js 5</div>
             <div class="arch-block">Monaco Editor</div>
           </div>
         </div>
@@ -271,7 +297,7 @@
               <polygon points="110,5 120,10 110,15" fill="#C9FF00" />
             </svg>
           </div>
-          <div class="arch-bridge-sublabel">invoke()</div>
+          <div class="arch-bridge-sublabel">invoke() &amp; events</div>
         </div>
 
         <div class="arch-col">
@@ -279,15 +305,15 @@
           <div class="arch-stack">
             <div class="arch-block arch-block-accent">Tauri 2 (Rust)</div>
             <div class="arch-block">portable-pty</div>
+            <div class="arch-block">reqwest (SSRF-safe)</div>
             <div class="arch-block">parking_lot::Mutex</div>
-            <div class="arch-block">AppState</div>
-            <div class="arch-block">PtyManager</div>
+            <div class="arch-block">PtyManager &middot; AppState</div>
           </div>
         </div>
       </div>
 
       <div class="arch-flow" data-reveal data-reveal-delay="1">
-        <div class="arch-flow-label">DATA_FLOW</div>
+        <div class="arch-flow-label">PTY_DATAFLOW</div>
         <div class="arch-flow-steps">
           <div class="arch-step">
             <span class="arch-step-num">01</span>
@@ -311,7 +337,7 @@
           <div class="arch-arrow">&rarr;</div>
           <div class="arch-step">
             <span class="arch-step-num">05</span>
-            <span class="arch-step-text">emit()</span>
+            <span class="arch-step-text">bounded channel</span>
           </div>
           <div class="arch-arrow">&rarr;</div>
           <div class="arch-step">
@@ -348,8 +374,8 @@
         <h3 class="agent-name">CLAUDE_CODE</h3>
         <p class="agent-org">ANTHROPIC</p>
         <p class="agent-desc">
-          Anthropic's agentic coding CLI. Full file editing,
-          terminal access, and multi-step task execution.
+          Anthropic's agentic coding CLI. Full file editing, terminal access,
+          multi-step task execution with memory injection.
         </p>
         <div class="agent-status">
           <span class="status-dot"></span> SUPPORTED
@@ -366,8 +392,8 @@
         <h3 class="agent-name">CODEX_CLI</h3>
         <p class="agent-org">OPENAI</p>
         <p class="agent-desc">
-          OpenAI's terminal-native coding agent.
-          Sandboxed execution with approval workflows.
+          OpenAI's terminal-native coding agent. Sandboxed execution with
+          approval workflows. Full tile chrome + wiring.
         </p>
         <div class="agent-status">
           <span class="status-dot"></span> SUPPORTED
@@ -385,8 +411,8 @@
         <h3 class="agent-name">GEMINI_CLI</h3>
         <p class="agent-org">GOOGLE</p>
         <p class="agent-desc">
-          Google's AI in the terminal. Direct access to
-          Gemini models with tool-use and code generation.
+          Google's AI in the terminal. Direct access to Gemini models with
+          tool-use and code generation.
         </p>
         <div class="agent-status">
           <span class="status-dot"></span> SUPPORTED
@@ -403,8 +429,8 @@
         <h3 class="agent-name">ANY_CLI</h3>
         <p class="agent-org">UNIVERSAL</p>
         <p class="agent-desc">
-          Any command-line tool runs as a tile. If it works
-          in your terminal, it works in TerminalX.
+          Any command-line tool runs as a tile. If it works in your terminal,
+          it works in TerminalX &mdash; custom command field on the Agent tile.
         </p>
         <div class="agent-status">
           <span class="status-dot"></span> SUPPORTED
@@ -428,10 +454,10 @@
       <div class="step-item" data-reveal data-reveal-delay="0">
         <div class="step-num">01</div>
         <div class="step-content">
-          <h3 class="step-title">SPAWN_AGENTS</h3>
+          <h3 class="step-title">SPAWN_TILES</h3>
           <p class="step-desc">
-            Click a tile in the dock to spawn a terminal, agent, editor, or any of 13 tile types.
-            Each tile gets its own PTY session backed by Rust.
+            Click the dock to spawn any of 15 tile types &mdash; terminal, agent,
+            editor, git, runner, file tree, more. Each backed by native Rust.
           </p>
         </div>
       </div>
@@ -441,8 +467,8 @@
         <div class="step-content">
           <h3 class="step-title">ARRANGE_SPATIALLY</h3>
           <p class="step-desc">
-            Drag tiles anywhere on the infinite canvas. Resize, stack, group.
-            The workspace is your mental model made physical.
+            Drag anywhere on the infinite canvas. Snap to edges. Group related
+            tiles. Save layouts to slots. Switch between workspaces per project.
           </p>
         </div>
       </div>
@@ -452,8 +478,9 @@
         <div class="step-content">
           <h3 class="step-title">WIRE_TOGETHER</h3>
           <p class="step-desc">
-            Connect tile outputs to tile inputs. Data flows through wires automatically.
-            Build multi-agent pipelines visually.
+            Drag port-to-port. Wire type is auto-inferred &mdash; context-pipe,
+            agent-chain, task-assign, file-open, refresh-trigger, diff-feed.
+            Six wires cover every common workflow.
           </p>
         </div>
       </div>
@@ -463,8 +490,8 @@
         <div class="step-content">
           <h3 class="step-title">SHIP_FASTER</h3>
           <p class="step-desc">
-            Run agents in parallel. Compare outputs. Chain reasoning.
-            Your workspace auto-saves. Come back to exactly where you left off.
+            Agents chain hands-free. MCP tasks dispatch automatically.
+            Workspace auto-saves. Come back to exactly where you left off.
           </p>
         </div>
       </div>
@@ -479,7 +506,7 @@
       <div class="cta-label" data-reveal>READY</div>
       <h2 class="cta-headline" data-reveal data-reveal-delay="1">TAKE CONTROL</h2>
       <p class="cta-sub" data-reveal data-reveal-delay="2">
-        Stop switching between terminals. Start orchestrating.
+        Stop switching between terminals, editors, and chat windows. Start orchestrating.
       </p>
       <div class="cta-actions" data-reveal data-reveal-delay="3">
         <a href="https://github.com/txc0ld/tmx" class="btn btn-cta btn-lg" target="_blank" rel="noopener">GET TERMINALX ON GITHUB</a>
@@ -504,10 +531,10 @@
         <span class="footer-version">v0.1.0</span>
       </div>
       <div class="footer-links">
-        <a href="#">DOCUMENTATION</a>
-        <a href="#">GITHUB</a>
-        <a href="#">CHANGELOG</a>
-        <a href="#">LICENSE</a>
+        <a href="https://github.com/txc0ld/tmx/tree/main/docs/features" target="_blank" rel="noopener">DOCUMENTATION</a>
+        <a href="https://github.com/txc0ld/tmx" target="_blank" rel="noopener">GITHUB</a>
+        <a href="https://github.com/txc0ld/tmx/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG</a>
+        <a href="https://github.com/txc0ld/tmx/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE</a>
       </div>
       <div class="footer-copy">
         &copy; 2026 TERMINALX. BUILT WITH TAURI, RUST, AND INTENT.
