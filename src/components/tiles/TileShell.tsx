@@ -6,9 +6,7 @@ import { ptyKill } from '@/utils/ipc';
 import { detachTile } from '@/utils/detachTile';
 import { useTemplateStore } from '@/stores/templateStore';
 import { useWiringStore } from '@/stores/wiringStore';
-import type { Tile, Wire, TileType } from '@/types';
-
-const EMPTY_WIRES: Wire[] = [];
+import type { Tile, TileType } from '@/types';
 
 interface TileShellProps {
   tile: Tile;
@@ -30,19 +28,23 @@ const RESIZE_CURSORS: Record<ResizeEdge, string> = {
 };
 
 export const TileShell = memo(function TileShell({ tile, zIndex, children }: TileShellProps) {
-  const focusedTile = useCanvasStore(s => s.focusedTile);
-  const focusModeActive = useCanvasStore(s => s.focusModeActive);
-  const focusModeTiles = useCanvasStore(s => s.focusModeTiles);
-  const activeProject = useCanvasStore(s => s.activeProject);
-  const wiresMap = useCanvasStore(s => s.wires);
-  const selectedTiles = useCanvasStore(s => s.selectedTiles);
-
-  const wires = wiresMap[activeProject] ?? EMPTY_WIRES;
-  const hasIncomingWire = wires.some(w => w.toTile === tile.id && w.active);
-
-  const isFocused = focusedTile === tile.id;
-  const isSelected = selectedTiles.includes(tile.id);
-  const isDimmed = focusModeActive && !focusModeTiles.includes(tile.id);
+  // Each subscription returns a primitive so Zustand's default Object.is
+  // equality check short-circuits re-renders unless THIS tile's state
+  // actually flipped. Subscribing to `s.wires` (a Record) would re-render
+  // this shell on every wire added/removed to any tile in any project.
+  const isFocused = useCanvasStore(s => s.focusedTile === tile.id);
+  const isSelected = useCanvasStore(s => s.selectedTiles.includes(tile.id));
+  const isDimmed = useCanvasStore(
+    s => s.focusModeActive && !s.focusModeTiles.includes(tile.id),
+  );
+  const hasIncomingWire = useCanvasStore(s => {
+    const wires = s.wires[s.activeProject];
+    if (!wires) return false;
+    for (const w of wires) {
+      if (w.toTile === tile.id && w.active) return true;
+    }
+    return false;
+  });
 
   const dragRef = useRef<{ startX: number; startY: number; tileX: number; tileY: number } | null>(null);
   const resizeRef = useRef<{ edge: ResizeEdge; startX: number; startY: number; tileX: number; tileY: number; tileW: number; tileH: number } | null>(null);

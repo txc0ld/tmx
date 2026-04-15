@@ -10,22 +10,27 @@ import { Minimap } from './Minimap';
 import { FocusMode } from './FocusMode';
 import { WiringLayer } from '@/components/wiring/WiringLayer';
 import { TileShell } from '@/components/tiles/TileShell';
+// Core workflow tiles are imported eagerly so they're in the initial bundle
+// and show up instantly — users open these first.
 import { TerminalTile } from '@/components/tiles/TerminalTile';
 import { AgentTile } from '@/components/tiles/AgentTile';
 import { NoteTile } from '@/components/tiles/NoteTile';
 import { TodoTile } from '@/components/tiles/TodoTile';
-// Lazy-load heavy tile components (Monaco editor)
-const EditorTile = lazy(() => import('@/components/tiles/EditorTile').then(m => ({ default: m.EditorTile })));
-const DiffTile = lazy(() => import('@/components/tiles/DiffTile').then(m => ({ default: m.DiffTile })));
-import { BrowserTile } from '@/components/tiles/BrowserTile';
 import { FileTreeTile } from '@/components/tiles/FileTreeTile';
 import { GroupTileComponent } from '@/components/tiles/GroupTile';
 import { RunnerTile as RunnerTileComponent } from '@/components/tiles/RunnerTile';
-import { SshTile } from '@/components/tiles/SshTile';
-import { DockerTile } from '@/components/tiles/DockerTile';
-import { KanbanTile as KanbanTileComponent } from '@/components/tiles/KanbanTile';
 import { GitTile } from '@/components/tiles/GitTile';
-import { UsageTile } from '@/components/tiles/UsageTile';
+
+// Lazy-load tile components that pull large dependencies or aren't used in
+// the typical first-load flow. Each becomes its own chunk; Suspense shows a
+// tiny loading fallback on first mount.
+const EditorTile = lazy(() => import('@/components/tiles/EditorTile').then(m => ({ default: m.EditorTile })));
+const DiffTile = lazy(() => import('@/components/tiles/DiffTile').then(m => ({ default: m.DiffTile })));
+const BrowserTile = lazy(() => import('@/components/tiles/BrowserTile').then(m => ({ default: m.BrowserTile })));
+const SshTile = lazy(() => import('@/components/tiles/SshTile').then(m => ({ default: m.SshTile })));
+const DockerTile = lazy(() => import('@/components/tiles/DockerTile').then(m => ({ default: m.DockerTile })));
+const KanbanTileComponent = lazy(() => import('@/components/tiles/KanbanTile').then(m => ({ default: m.KanbanTile })));
+const UsageTile = lazy(() => import('@/components/tiles/UsageTile').then(m => ({ default: m.UsageTile })));
 import { TileErrorBoundary } from '@/components/tiles/TileErrorBoundary';
 import { TileDock } from './TileDock';
 import { WorkspaceTabs } from './WorkspaceTabs';
@@ -89,7 +94,6 @@ export function InfiniteCanvas() {
   useWiringEngine();
   const activeProject = useCanvasStore(s => s.activeProject);
   const tilesMap = useCanvasStore(s => s.tiles);
-  const wiresMap = useCanvasStore(s => s.wires);
   const transformsMap = useCanvasStore(s => s.transforms);
   const zStack = useCanvasStore(s => s.zStack);
   const focusModeActive = useCanvasStore(s => s.focusModeActive);
@@ -141,15 +145,16 @@ export function InfiniteCanvas() {
   }, []);
 
   // ─── Auto-save canvas state ─────────────────────────────
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cacheTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+  // Subscribe directly to Zustand instead of using useEffect deps so the
+  // effect doesn't re-run on every state change. Previously, a 50-tile
+  // drag restarted two setTimeouts ~3000 times per second (60 fps × 50
+  // tiles) — not catastrophic but wasted work. With Zustand.subscribe the
+  // hook mounts once and only reschedules when relevant fields change.
   useEffect(() => {
-    if (!activeProject) return;
+    let saveTimer: number | null = null;
+    let cacheTimer: number | null = null;
 
-    // Debounced disk save (2s)
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
+    const doSave = () => {
       const s = useCanvasStore.getState();
       const pid = s.activeProject;
       if (!pid) return;
@@ -159,7 +164,6 @@ export function InfiniteCanvas() {
         wires: s.wires[pid] ?? [],
         transform: s.transforms[pid] ?? { x: 0, y: 0, scale: 1 },
       }).catch((err) => {
-        // Only warn once per session to avoid toast spam
         if (!window.__txSaveErrorShown) {
           window.__txSaveErrorShown = true;
           import('@/stores/toastStore').then(({ useToastStore }) => {
@@ -167,11 +171,9 @@ export function InfiniteCanvas() {
           });
         }
       });
-    }, 2000);
+    };
 
-    // Fast localStorage cache (500ms) — survives crashes
-    if (cacheTimer.current) clearTimeout(cacheTimer.current);
-    cacheTimer.current = setTimeout(() => {
+    const doCache = () => {
       const s = useCanvasStore.getState();
       const pid = s.activeProject;
       if (!pid) return;
@@ -188,19 +190,15 @@ export function InfiniteCanvas() {
         localStorage.setItem(`tx-cache-${pid}`, json);
         localStorage.setItem('tx-active-project', pid);
       } catch (err) {
-        // Quota exceeded — try to free up old auto-snapshots
         if (err instanceof Error && (err.name === 'QuotaExceededError' || err.message.includes('quota'))) {
           const snapKeys = Object.keys(localStorage)
             .filter(k => k.startsWith('tx-autosnapshot-'))
             .sort();
-          // Delete oldest half of auto-snapshots
           const toDelete = snapKeys.slice(0, Math.ceil(snapKeys.length / 2));
           for (const k of toDelete) localStorage.removeItem(k);
-          // Retry
           try {
             localStorage.setItem(`tx-cache-${pid}`, json);
           } catch {
-            // Still failed — notify user once
             if (!window.__txQuotaWarned) {
               window.__txQuotaWarned = true;
               import('@/stores/toastStore').then(({ useToastStore }) => {
@@ -210,13 +208,37 @@ export function InfiniteCanvas() {
           }
         }
       }
-    }, 500);
+    };
+
+    const schedule = () => {
+      if (saveTimer !== null) clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(doSave, 2000);
+      if (cacheTimer !== null) clearTimeout(cacheTimer);
+      cacheTimer = window.setTimeout(doCache, 500);
+    };
+
+    const unsub = useCanvasStore.subscribe((state, prev) => {
+      const active = state.activeProject;
+      if (!active) return;
+      // Only the current project's data + the activeProject pointer itself
+      // affect what we save. Tile focus/selection/bookmarks/etc. don't.
+      if (
+        state.tiles[active] === prev.tiles[active] &&
+        state.wires[active] === prev.wires[active] &&
+        state.transforms[active] === prev.transforms[active] &&
+        state.activeProject === prev.activeProject
+      ) {
+        return;
+      }
+      schedule();
+    });
 
     return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      if (cacheTimer.current) clearTimeout(cacheTimer.current);
+      unsub();
+      if (saveTimer !== null) clearTimeout(saveTimer);
+      if (cacheTimer !== null) clearTimeout(cacheTimer);
     };
-  }, [activeProject, tilesMap, wiresMap, transformsMap]);
+  }, []);
 
   // ─── Immediate save on exit / beforeunload ─────────────
   useEffect(() => {

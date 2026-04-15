@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, memo } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useWiringStore } from '@/stores/wiringStore';
 import { colors } from '@/design/tokens';
@@ -91,7 +91,10 @@ export function WiringLayer() {
   );
 }
 
-function WirePath({ wire, from, to }: { wire: Wire; from: Tile; to: Tile }) {
+// Memoized with shallow-equal default: when ONE tile moves, only the wires
+// whose endpoints changed re-render. Zustand's moveTile preserves other
+// tiles' object identity, so the other WirePaths short-circuit here.
+const WirePath = memo(function WirePath({ wire, from, to }: { wire: Wire; from: Tile; to: Tile }) {
   const sx = from.x + from.w;
   const sy = from.y + from.h / 2;
   const ex = to.x;
@@ -126,7 +129,7 @@ function WirePath({ wire, from, to }: { wire: Wire; from: Tile; to: Tile }) {
       />
     </g>
   );
-}
+});
 
 function PreviewWire({ from, cursorScreenX, cursorScreenY, transform, svgRef }:
   {
