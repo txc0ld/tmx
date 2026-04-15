@@ -18,6 +18,9 @@ Run Claude, Codex, and Gemini side-by-side. Wire them together. Ship 10× faster
 
 ---
 
+<img width="2560" height="1392" alt="termX" src="https://github.com/user-attachments/assets/ec45aee4-c69d-481a-a96f-9e4da97d804f" />
+
+
 ## What is TerminalX?
 
 TerminalX is a native desktop app that turns your terminal workflow into a spatial canvas. Instead of juggling tabs, windows, and AI tools, you arrange everything on an infinite canvas — terminals, agents, editors, git panels, browsers — and wire them together for automated workflows.
