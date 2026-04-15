@@ -352,6 +352,45 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
       },
     });
 
+    // ─── Toggle Agent Auto-Complete ────────────────────
+    result.push({
+      id: 'cmd-toggle-autocomplete',
+      label: 'Toggle Agent Auto-Complete (idle + DONE sentinel)',
+      category: 'command',
+      action: () => {
+        const store = useCanvasStore.getState();
+        const focused = store.focusedTile;
+        if (!focused) { alert('Focus an agent tile first.'); return; }
+        const pid = store.activeProject;
+        const tile = (store.tiles[pid] || []).find(t => t.id === focused);
+        if (!tile || tile.type !== 'agent') { alert('Focused tile is not an agent.'); return; }
+        const agentTile = tile as import('@/types').AgentTile;
+        const next = agentTile.autoComplete === false; // toggle; undefined counts as on
+        store.updateTile(focused, { autoComplete: next } as Partial<import('@/types').AgentTile>);
+      },
+    });
+
+    result.push({
+      id: 'cmd-set-idle-threshold',
+      label: 'Set Agent Idle Threshold (seconds)',
+      category: 'command',
+      action: () => {
+        const store = useCanvasStore.getState();
+        const focused = store.focusedTile;
+        if (!focused) { alert('Focus an agent tile first.'); return; }
+        const pid = store.activeProject;
+        const tile = (store.tiles[pid] || []).find(t => t.id === focused);
+        if (!tile || tile.type !== 'agent') { alert('Focused tile is not an agent.'); return; }
+        const agentTile = tile as import('@/types').AgentTile;
+        const current = (agentTile.idleThresholdMs ?? 8000) / 1000;
+        const input = prompt('Seconds of silence before auto-completing (default 8):', String(current));
+        if (!input) return;
+        const secs = parseFloat(input);
+        if (isNaN(secs) || secs < 1 || secs > 300) { alert('Value must be between 1 and 300.'); return; }
+        store.updateTile(focused, { idleThresholdMs: Math.round(secs * 1000) } as Partial<import('@/types').AgentTile>);
+      },
+    });
+
     // ─── Agent Memory ─────────────────────────────────
     result.push({
       id: 'cmd-agent-memory',

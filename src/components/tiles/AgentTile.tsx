@@ -51,15 +51,96 @@ export function AgentTile({ tile }: AgentTileProps) {
   const [configOpen, setConfigOpen] = useState(false);
   const [customCmd, setCustomCmd] = useState(tile.command || '');
 
+  // ─── Auto-complete detection ─────────────────────────────────────────
+  // Fires the agent's status → 'done' without requiring the process to exit,
+  // so agent-chain wires can trigger after each response.
+  //
+  // Two triggers, both optional and configurable per-tile:
+  //  1. DONE sentinel — the agent (or user) writes "DONE" / "✅ DONE" /
+  //     "[DONE]" on its own line. Fires immediately.
+  //  2. Idle — no PTY output for `idleThresholdMs` (default 8s) after
+  //     the agent has produced substantial output since its last transition.
+  const idleTimerRef = useRef<number | null>(null);
+  const sentinelFiredRef = useRef(false);
+  const bytesSinceResetRef = useRef(0);
+  const spawnedAtRef = useRef<number>(Date.now());
+
+  const autoComplete = tile.autoComplete !== false; // default on
+  const idleMs = tile.idleThresholdMs ?? 8000;
+  const sentinelSource = tile.doneSentinel
+    ?? String.raw`(?:^|\n)\s*(?:[✅✓]\s*|\[|##\s*)?DONE(?:\]|!|\.)?\s*(?:$|\n|\r)`;
+
+  const markDoneFromAuto = useCallback((reason: 'sentinel' | 'idle') => {
+    const store = useCanvasStore.getState();
+    const pid = store.activeProject;
+    const current = (store.tiles[pid] || []).find(t => t.id === tile.id) as AgentTileType | undefined;
+    if (!current || current.status !== 'working') return;
+    // Visually tag the agent's output so the user knows why the wire fired
+    const marker = reason === 'sentinel'
+      ? '\r\n\x1b[90m[auto-complete: DONE sentinel detected]\x1b[0m\r\n'
+      : `\r\n\x1b[90m[auto-complete: idle > ${Math.round(idleMs / 1000)}s]\x1b[0m\r\n`;
+    termRef.current?.write(marker);
+    store.updateTile(tile.id, { status: 'done' } as Partial<AgentTileType>);
+  }, [tile.id, idleMs]);
+
   const onData = useCallback((data: string) => {
     termRef.current?.write(data);
     termRef.current?.scrollToBottom();
-  }, []);
+
+    if (!autoComplete) return;
+
+    // Grace period: ignore the first 3 seconds after spawn (welcome banners,
+    // initial prompt render etc. shouldn't count as work).
+    const elapsedSinceSpawn = Date.now() - spawnedAtRef.current;
+    if (elapsedSinceSpawn < 3000) return;
+
+    bytesSinceResetRef.current += data.length;
+
+    // If we're currently 'done' and fresh output arrives, reset to 'working'
+    // so the next idle/sentinel cycle can fire again on the next response.
+    const store = useCanvasStore.getState();
+    const pid = store.activeProject;
+    const current = (store.tiles[pid] || []).find(t => t.id === tile.id) as AgentTileType | undefined;
+    if (current && current.status === 'done') {
+      sentinelFiredRef.current = false;
+      bytesSinceResetRef.current = data.length;
+      store.updateTile(tile.id, { status: 'working' } as Partial<AgentTileType>);
+    }
+
+    // Sentinel: literal "DONE" (case-insensitive) on its own line
+    if (!sentinelFiredRef.current) {
+      try {
+        const re = new RegExp(sentinelSource, 'im');
+        if (re.test(data)) {
+          sentinelFiredRef.current = true;
+          // Brief delay so the engine sees the final output in wireData
+          setTimeout(() => markDoneFromAuto('sentinel'), 250);
+          return;
+        }
+      } catch { /* bad regex — silently skip */ }
+    }
+
+    // Idle: reset timer on every output chunk, fire after silence
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(() => {
+      // Require substantial output since last reset to avoid firing on
+      // transient status lines / boot messages.
+      if (bytesSinceResetRef.current >= 50) {
+        markDoneFromAuto('idle');
+      }
+    }, idleMs);
+  }, [autoComplete, idleMs, sentinelSource, tile.id, markDoneFromAuto]);
 
   const onExit = useCallback(() => {
     termRef.current?.write('\r\n\x1b[90m[agent exited]\x1b[0m\r\n');
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     useCanvasStore.getState().updateTile(tile.id, { status: 'done' } as Partial<AgentTileType>);
   }, [tile.id]);
+
+  // Clean up idle timer on unmount
+  useEffect(() => () => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+  }, []);
 
   const { write, resize } = usePty(tile.ptyId, onData, onExit);
 
@@ -130,6 +211,9 @@ export function AgentTile({ tile }: AgentTileProps) {
   useEffect(() => {
     if (spawnedRef.current || tile.ptyId) return;
     spawnedRef.current = true;
+    spawnedAtRef.current = Date.now(); // anchor for the 3s grace period
+    bytesSinceResetRef.current = 0;
+    sentinelFiredRef.current = false;
 
     const agentTypeMap: Record<string, string> = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' };
     const agentType = agentTypeMap[tile.agent] || 'Claude';

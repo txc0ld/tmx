@@ -36,6 +36,10 @@ export interface AgentTile extends TileBase {
   ptyId?: string;
   elapsed: number;
   command?: string;
+  // Auto-completion detection — fires wires without requiring the agent process to exit
+  autoComplete?: boolean;         // default true
+  idleThresholdMs?: number;       // default 8000
+  doneSentinel?: string;          // regex source — default matches DONE / ✅ DONE / [DONE] / ## Done
 }
 
 export interface TerminalTile extends TileBase {
