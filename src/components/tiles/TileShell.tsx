@@ -5,6 +5,7 @@ import { snapToGrid, snapToTiles } from '@/utils/layout';
 import { ptyKill } from '@/utils/ipc';
 import { detachTile } from '@/utils/detachTile';
 import { useTemplateStore } from '@/stores/templateStore';
+import { useWiringStore } from '@/stores/wiringStore';
 import type { Tile, Wire, TileType } from '@/types';
 
 const EMPTY_WIRES: Wire[] = [];
@@ -443,6 +444,10 @@ export const TileShell = memo(function TileShell({ tile, zIndex, children }: Til
         {children}
       </div>
 
+      {/* Wiring ports — right = output, left = input */}
+      <WiringPortHandle tileId={tile.id} side="right" visible={hovered} />
+      <WiringPortHandle tileId={tile.id} side="left" visible={hovered} />
+
       {/* Resize handles */}
       {(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as ResizeEdge[]).map(edge => (
         <div
@@ -460,6 +465,63 @@ export const TileShell = memo(function TileShell({ tile, zIndex, children }: Til
     </div>
   );
 });
+
+function WiringPortHandle({ tileId, side, visible }: { tileId: string; side: 'left' | 'right'; visible: boolean }) {
+  const dragging = useWiringStore(s => s.dragging);
+  const isSource = useWiringStore(s => s.fromTileId === tileId);
+
+  // Hide the source tile's left port during drag, hide target's right port during drag
+  const show = visible || dragging;
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (side !== 'right') return;
+    e.stopPropagation();
+    e.preventDefault();
+    useWiringStore.getState().start(tileId, e.clientX, e.clientY);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    if (side !== 'left') return;
+    e.stopPropagation();
+    e.preventDefault();
+    useWiringStore.getState().finish(tileId);
+  };
+
+  const handlePointerEnter = () => {
+    // Highlight the port when hovered during a drag
+  };
+
+  if (!show) return null;
+
+  const leftOffset = side === 'left' ? -6 : undefined;
+  const rightOffset = side === 'right' ? -6 : undefined;
+
+  return (
+    <div
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerEnter={handlePointerEnter}
+      title={side === 'right' ? 'Drag to connect to another tile' : 'Connection input'}
+      style={{
+        position: 'absolute',
+        top: '50%',
+        left: leftOffset,
+        right: rightOffset,
+        transform: 'translateY(-50%)',
+        width: 14,
+        height: 14,
+        borderRadius: radius.full,
+        border: `2px solid ${colors.primary}`,
+        background: (dragging && side === 'left' && !isSource) ? colors.primary : colors.bg,
+        cursor: side === 'right' ? 'crosshair' : (dragging ? 'crosshair' : 'default'),
+        zIndex: 20,
+        transition: `background ${motion.hover}, box-shadow ${motion.hover}`,
+        boxShadow: (dragging && side === 'left' && !isSource) ? `0 0 10px ${alpha(colors.primary, 40)}` : 'none',
+      }}
+    />
+  );
+}
 
 function getResizeHandleStyle(edge: ResizeEdge): React.CSSProperties {
   const base: React.CSSProperties = { zIndex: 10 };

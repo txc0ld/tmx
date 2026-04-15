@@ -1,5 +1,8 @@
+import { useEffect } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
+import { useWiringStore } from '@/stores/wiringStore';
 import { colors } from '@/design/tokens';
+import { screenToCanvas } from '@/utils/layout';
 import type { Wire, Tile } from '@/types';
 
 const EMPTY: never[] = [];
@@ -8,13 +11,42 @@ export function WiringLayer() {
   const activeProject = useCanvasStore(s => s.activeProject);
   const tilesMap = useCanvasStore(s => s.tiles);
   const wiresMap = useCanvasStore(s => s.wires);
+  const transformsMap = useCanvasStore(s => s.transforms);
+
+  const dragging = useWiringStore(s => s.dragging);
+  const fromTileId = useWiringStore(s => s.fromTileId);
+  const cursorX = useWiringStore(s => s.cursorX);
+  const cursorY = useWiringStore(s => s.cursorY);
 
   const tiles = tilesMap[activeProject] ?? EMPTY;
   const wires = wiresMap[activeProject] ?? EMPTY;
+  const transform = transformsMap[activeProject] ?? { x: 0, y: 0, scale: 1 };
 
-  if (wires.length === 0) return null;
+  // Global pointer tracking during drag + cancel on escape / right-click
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: PointerEvent) => useWiringStore.getState().moveCursor(e.clientX, e.clientY);
+    const onUp = () => {
+      // If pointer-up happens outside any port, cancel
+      setTimeout(() => useWiringStore.getState().cancel(), 0);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') useWiringStore.getState().cancel();
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [dragging]);
+
+  if (wires.length === 0 && !dragging) return null;
 
   const tileMap = new Map(tiles.map(t => [t.id, t]));
+  const fromTile = fromTileId ? tileMap.get(fromTileId) : null;
 
   return (
     <svg
@@ -40,20 +72,20 @@ export function WiringLayer() {
         const from = tileMap.get(wire.fromTile);
         const to = tileMap.get(wire.toTile);
         if (!from || !to) return null;
-
-        return (
-          <WirePath key={wire.id} wire={wire} from={from} to={to} />
-        );
+        return <WirePath key={wire.id} wire={wire} from={from} to={to} />;
       })}
+
+      {/* Live preview wire while dragging */}
+      {dragging && fromTile && (
+        <PreviewWire from={fromTile} cursorScreenX={cursorX} cursorScreenY={cursorY} transform={transform} />
+      )}
     </svg>
   );
 }
 
 function WirePath({ wire, from, to }: { wire: Wire; from: Tile; to: Tile }) {
-  // Output port: right center of source tile
   const sx = from.x + from.w;
   const sy = from.y + from.h / 2;
-  // Input port: left center of target tile
   const ex = to.x;
   const ey = to.y + to.h / 2;
 
@@ -61,13 +93,50 @@ function WirePath({ wire, from, to }: { wire: Wire; from: Tile; to: Tile }) {
   const d = `M ${sx},${sy} C ${sx + dx},${sy} ${ex - dx},${ey} ${ex},${ey}`;
 
   return (
+    <g>
+      {/* Invisible fat hit area for right-click delete */}
+      <path
+        d={d}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={12}
+        style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+        onContextMenu={e => {
+          e.preventDefault();
+          if (confirm('Remove this wire?')) {
+            useCanvasStore.getState().removeWire(wire.id);
+          }
+        }}
+      />
+      <path
+        d={d}
+        fill="none"
+        stroke={wire.active ? colors.primary : colors.outlineVariant}
+        strokeWidth={2}
+        strokeDasharray={wire.active ? '6 4' : 'none'}
+        style={wire.active ? { animation: 'wire-flow 1.2s linear infinite' } : undefined}
+      />
+    </g>
+  );
+}
+
+function PreviewWire({ from, cursorScreenX, cursorScreenY, transform }:
+  { from: Tile; cursorScreenX: number; cursorScreenY: number; transform: { x: number; y: number; scale: number } }) {
+  const sx = from.x + from.w;
+  const sy = from.y + from.h / 2;
+  // Convert cursor screen coords to canvas coords
+  const { x: ex, y: ey } = screenToCanvas(cursorScreenX, cursorScreenY, transform);
+  const dx = Math.max(40, Math.abs(ex - sx) / 2);
+  const d = `M ${sx},${sy} C ${sx + dx},${sy} ${ex - dx},${ey} ${ex},${ey}`;
+
+  return (
     <path
       d={d}
       fill="none"
-      stroke={wire.active ? colors.primary : colors.outlineVariant}
+      stroke={colors.primary}
       strokeWidth={2}
-      strokeDasharray={wire.active ? '6 4' : 'none'}
-      style={wire.active ? { animation: 'wire-flow 1.2s linear infinite' } : undefined}
+      strokeDasharray="6 4"
+      opacity={0.8}
     />
   );
 }
