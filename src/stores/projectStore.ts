@@ -1,15 +1,9 @@
 import { create } from 'zustand';
 import type { Project } from '@/types';
 import { useCanvasStore } from './canvasStore';
-import { loadProjects, saveProjects, addProjectToStore, deleteProjectFromStore, gitClone } from '@/utils/ipc';
+import { loadProjects, addProjectToStore, deleteProjectFromStore, gitClone } from '@/utils/ipc';
 
-const DEFAULT_PROJECTS: Project[] = [
-  { id: 'findable', name: 'FINDABLE', icon: 'F', color: '#CCFF00', description: 'AI Commerce Scanner', cwd: '~/Projects/findable' },
-  { id: 'agnt', name: '.agnt', icon: 'A', color: '#CCFF00', description: 'On-chain Agent Identity', cwd: '~/Projects/agnt-protocol' },
-  { id: 'raven', name: 'Raven', icon: 'R', color: '#CCFF00', description: 'Multi-Agent Swarm', cwd: '~/Projects/raven' },
-  { id: 'warpath', name: 'War Path', icon: 'W', color: '#CCFF00', description: 'NFT Battle Game', cwd: '~/Projects/warpath' },
-  { id: 'openclaw', name: 'OpenClaw', icon: 'O', color: '#CCFF00', description: 'Agent Infrastructure', cwd: '~/Projects/openclaw' },
-];
+const DEFAULT_PROJECTS: Project[] = [];
 
 interface ProjectState {
   projects: Project[];
@@ -26,7 +20,7 @@ interface ProjectState {
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: DEFAULT_PROJECTS,
-  active: DEFAULT_PROJECTS[0].id,
+  active: DEFAULT_PROJECTS[0]?.id ?? '',
   loading: false,
   cloning: false,
 
@@ -58,9 +52,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         useCanvasStore.getState().switchProject(projects[0].id);
       }
     } catch {
-      // First run — use defaults and save them
-      const { projects } = get();
-      await saveProjects(projects.map(toIpc)).catch(() => {});
+      // First run with no saved file — start empty; user adds their own via the + button.
     } finally {
       set({ loading: false });
     }
