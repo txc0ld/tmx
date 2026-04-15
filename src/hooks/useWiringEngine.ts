@@ -24,8 +24,24 @@ export function useWiringEngine() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const pendingTimers = useRef(new Set<number>()); // used in effect cleanup
 
+  // Re-entry guard: when handlers call setWireActive / updateTile, Zustand
+  // notifies subscribers synchronously — without this flag we'd recurse
+  // into ourselves before prevAgentStatusRef has been committed, and fire
+  // the same transition handler repeatedly (infinite loop).
+  const reentryGuard = useRef(false);
+
   useEffect(() => {
     const unsub = useCanvasStore.subscribe((state) => {
+      if (reentryGuard.current) return;
+      reentryGuard.current = true;
+      try {
+        runEngine(state);
+      } finally {
+        reentryGuard.current = false;
+      }
+    });
+
+    function runEngine(state: ReturnType<typeof useCanvasStore.getState>) {
       const pid = state.activeProject;
       if (!pid) return;
 
@@ -47,6 +63,11 @@ export function useWiringEngine() {
           nextStatuses[tile.id] = (tile as AgentTile).status;
         }
       }
+
+      // Commit prevStatuses IMMEDIATELY so any re-entrant subscriber fires
+      // (from setWireActive/updateTile below) see the already-processed
+      // transitions as "previous" and don't replay the same handler.
+      prevAgentStatusRef.current = nextStatuses;
 
       for (const wire of wires) {
         const fromTile = tileById.get(wire.fromTile);
@@ -233,8 +254,8 @@ export function useWiringEngine() {
       }
 
       prevWireDataRef.current = { ...wireData };
-      prevAgentStatusRef.current = nextStatuses;
-    });
+      // prevAgentStatusRef was already committed at top of runEngine
+    }
 
     return () => {
       unsub();
