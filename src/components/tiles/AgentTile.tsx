@@ -516,15 +516,25 @@ function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPrompt
   const handleClick = () => pipe('');
 
   // ─── Auto-pipe: fire after source silence ──────────────────────────
-  // Tracks a ref to the last time we observed unreadBytes changing; when
-  // it plateaus for `autoPipeIdleMs`, we fire pipe() automatically with
-  // the user's autoPromptTemplate (if set).
+  // Stash the latest pipe fn in a ref so the effect's setTimeout can call
+  // the up-to-date version without including `pipe` in deps (which would
+  // otherwise thrash — `pipe` depends on `sources`, a new array every
+  // render, so the effect would cleanup-kill its own timer every tick).
+  const pipeRef = useRef(pipe);
+  useEffect(() => { pipeRef.current = pipe; }, [pipe]);
+
   const autoPipeTimerRef = useRef<number | null>(null);
   const lastUnreadRef = useRef(0);
+
   useEffect(() => {
-    if (!autoPipe || !ptyId) return;
-    if (unreadBytes === 0) {
+    if (!autoPipe || !ptyId) {
       if (autoPipeTimerRef.current) { clearTimeout(autoPipeTimerRef.current); autoPipeTimerRef.current = null; }
+      lastUnreadRef.current = 0;
+      return;
+    }
+    if (unreadBytes === 0) {
+      // Source went back to zero (we just piped) — reset so the next
+      // batch of terminal output re-arms the timer
       lastUnreadRef.current = 0;
       return;
     }
@@ -534,13 +544,17 @@ function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPrompt
       if (autoPipeTimerRef.current) clearTimeout(autoPipeTimerRef.current);
       autoPipeTimerRef.current = window.setTimeout(() => {
         autoPipeTimerRef.current = null;
-        pipe(autoPromptTemplate);
+        pipeRef.current(autoPromptTemplate);
       }, autoPipeIdleMs);
     }
-    return () => {
-      if (autoPipeTimerRef.current) { clearTimeout(autoPipeTimerRef.current); autoPipeTimerRef.current = null; }
-    };
-  }, [autoPipe, autoPipeIdleMs, autoPromptTemplate, unreadBytes, ptyId, pipe]);
+    // NOTE: intentionally no cleanup here — we want the timer to survive
+    // re-renders so it actually fires. Unmount cleanup is handled below.
+  }, [autoPipe, autoPipeIdleMs, autoPromptTemplate, unreadBytes, ptyId]);
+
+  // Clean up any pending auto-pipe timer on unmount
+  useEffect(() => () => {
+    if (autoPipeTimerRef.current) clearTimeout(autoPipeTimerRef.current);
+  }, []);
 
   // Don't render at all if no incoming context-pipe wires
   if (!hasIncoming) return null;
