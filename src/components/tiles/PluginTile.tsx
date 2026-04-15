@@ -13,27 +13,39 @@ export function PluginTile({ tile }: PluginTileProps) {
     s.plugins.find(p => p.id === tile.pluginId && p.enabled),
   );
 
-  // Post tile config to iframe on load
+  // Post tile config to iframe on load — target plugin's origin, not '*'
   const handleIframeLoad = useCallback(() => {
-    if (!iframeRef.current || !plugin) return;
-    iframeRef.current.contentWindow?.postMessage({
-      type: 'tx-plugin-init',
-      tileId: tile.id,
-      config: tile,
-    }, '*');
+    if (!iframeRef.current || !plugin?.entryUrl) return;
+    try {
+      const targetOrigin = new URL(plugin.entryUrl).origin;
+      iframeRef.current.contentWindow?.postMessage({
+        type: 'tx-plugin-init',
+        tileId: tile.id,
+        config: tile,
+      }, targetOrigin);
+    } catch {
+      // Invalid URL — skip init
+    }
   }, [tile, plugin]);
 
-  // Listen for messages from iframe
+  // Listen for messages from iframe — validate origin
   useEffect(() => {
+    if (!plugin?.entryUrl) return;
+    let expectedOrigin: string;
+    try {
+      expectedOrigin = new URL(plugin.entryUrl).origin;
+    } catch {
+      return;
+    }
     const handler = (e: MessageEvent) => {
+      if (e.origin !== expectedOrigin) return;
       if (e.data?.type === 'tx-plugin-action' && e.data?.tileId === tile.id) {
-        // Handle plugin actions (future: wire to canvasStore)
         console.log('[Plugin action]', e.data);
       }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [tile.id]);
+  }, [tile.id, plugin?.entryUrl]);
 
   if (!plugin) {
     return (

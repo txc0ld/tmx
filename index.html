@@ -17,6 +17,10 @@
       input:focus-visible, textarea:focus-visible { outline: 2px solid var(--tx-accent); outline-offset: 0; }
       /* Smooth transitions on all interactive elements */
       button, [role="button"] { transition: background 150ms ease, color 150ms ease, opacity 150ms ease; }
+      /* Global disabled button state */
+      button:disabled { opacity: 0.5; cursor: not-allowed !important; }
+      /* Input focus state */
+      input:focus, textarea:focus { border-color: var(--tx-accent) !important; }
     </style>
   </head>
   <body>

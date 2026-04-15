@@ -38,6 +38,11 @@ export function DockerTile({ tile }: DockerTileProps) {
   useEffect(() => { refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAttach = useCallback(async (containerId: string) => {
+    // Validate container ID — Docker IDs are hex only (12 or 64 chars)
+    if (!/^[a-f0-9]{12,64}$/i.test(containerId)) {
+      setError('Invalid container ID');
+      return;
+    }
     try {
       const id = await ptySpawn({ shell: 'docker', args: ['exec', '-it', containerId, '/bin/sh'] });
       useCanvasStore.getState().updateTile(tile.id, { ptyId: id, selectedContainer: containerId } as Partial<DockerTileType>);

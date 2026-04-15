@@ -35,7 +35,13 @@ fn sanitize_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
         return Err("Name cannot be empty".to_string());
     }
-    if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') {
+    if name.len() > 255 {
+        return Err("Name too long (max 255 chars)".to_string());
+    }
+    if name == "." || name == ".." {
+        return Err("Name cannot be '.' or '..'".to_string());
+    }
+    if name.contains('/') || name.contains('\\') || name.contains("..") || name.contains('\0') || name.contains(':') {
         return Err(format!("Invalid name: {}", name));
     }
     Ok(())

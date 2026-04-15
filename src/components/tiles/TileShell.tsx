@@ -303,6 +303,7 @@ export const TileShell = memo(function TileShell({ tile, zIndex, children }: Til
             onClick={handlePinOutput}
             onPointerDown={e => e.stopPropagation()}
             title="Pin output as note"
+            aria-label="Pin output as note"
             style={{
               width: 20, height: 20,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -328,6 +329,7 @@ export const TileShell = memo(function TileShell({ tile, zIndex, children }: Til
             onClick={handleClone}
             onPointerDown={e => e.stopPropagation()}
             title="Duplicate tile"
+            aria-label="Duplicate tile"
             style={{
               width: 20, height: 20,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -353,6 +355,7 @@ export const TileShell = memo(function TileShell({ tile, zIndex, children }: Til
             onClick={() => detachTile(tile.id)}
             onPointerDown={e => e.stopPropagation()}
             title="Detach to new window"
+            aria-label="Detach tile to new window"
             style={{
               width: 20, height: 20,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -378,6 +381,7 @@ export const TileShell = memo(function TileShell({ tile, zIndex, children }: Til
             onClick={handleSaveAsTemplate}
             onPointerDown={e => e.stopPropagation()}
             title="Save as template"
+            aria-label="Save tile as template"
             style={{
               width: 20, height: 20,
               display: 'flex', alignItems: 'center', justifyContent: 'center',

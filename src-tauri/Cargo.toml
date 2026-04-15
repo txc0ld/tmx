@@ -38,6 +38,7 @@ tokio = { version = "1", features = ["full"] }
 
 # HTTP client for MCP API proxy
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+url = "2"
 
 # Error handling
 thiserror = "2"

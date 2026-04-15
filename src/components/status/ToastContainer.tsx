@@ -31,16 +31,21 @@ export function ToastContainer() {
   if (toasts.length === 0) return null;
 
   return (
-    <div style={{
-      position: 'fixed',
-      bottom: 40,
-      right: 16,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: spacing.sm,
-      zIndex: 9999,
-      pointerEvents: 'none',
-    }}>
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="false"
+      style={{
+        position: 'fixed',
+        bottom: 40,
+        right: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: spacing.sm,
+        zIndex: 9999,
+        pointerEvents: 'none',
+      }}
+    >
       {toasts.map(toast => (
         <div
           key={toast.id}

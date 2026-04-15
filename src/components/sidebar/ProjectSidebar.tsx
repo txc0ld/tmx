@@ -380,8 +380,8 @@ const inputStyle: React.CSSProperties = {
   fontFamily: fonts.body,
   fontSize: '0.8125rem',
   padding: '0 8px',
-  outline: 'none',
   width: '100%',
+  transition: 'border-color 150ms ease',
 };
 
 const smallBtnStyle: React.CSSProperties = {
@@ -398,6 +398,7 @@ const smallBtnStyle: React.CSSProperties = {
   transition: 'all 150ms ease',
 };
 
+// Applied to disabled buttons via attribute selector in index.html
 const accentBtnStyle: React.CSSProperties = {
   height: 32,
   padding: '0 14px',

@@ -226,7 +226,13 @@ export const useMcpStore = create<McpState>((set, get) => ({
 
   syncAll: async () => {
     const conns = get().connections;
-    await Promise.allSettled(conns.map(c => get().syncConnection(c.id)));
+    // Sequential with small jitter to avoid hammering all APIs simultaneously
+    for (const c of conns) {
+      try {
+        await get().syncConnection(c.id);
+      } catch { /* already captured in status */ }
+      await new Promise(r => setTimeout(r, 250));
+    }
   },
 
   dismissTask: (taskId) => {
@@ -255,15 +261,17 @@ export const useMcpStore = create<McpState>((set, get) => ({
   },
 }));
 
-// Reload MCP state when active project changes
+// Reload MCP state when active project changes — subscribe to projectStore
+import { useProjectStore } from './projectStore';
+
 let lastPid = getProjectId();
-setInterval(() => {
-  const pid = getProjectId();
+useProjectStore.subscribe((state) => {
+  const pid = state.active;
   if (pid && pid !== lastPid) {
     lastPid = pid;
     useMcpStore.getState().reloadForProject();
   }
-}, 1000);
+});
 
 // ─── Task fetchers per MCP type ────────────────────────
 

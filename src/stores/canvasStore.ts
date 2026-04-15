@@ -587,8 +587,13 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   // ─── Wire Data Bus ────────────────────────────────────
   appendWireData: (tileId, data) => {
+    const MAX_WIREDATA_BYTES = 500 * 1024; // 500KB per tile
     const existing = wireDataBuffer.get(tileId) || get().wireData[tileId] || '';
-    const combined = existing + data;
+    let combined = existing + data;
+    // Byte-size bound — prevents unbounded growth from long single lines
+    if (combined.length > MAX_WIREDATA_BYTES) {
+      combined = combined.slice(-MAX_WIREDATA_BYTES);
+    }
     const lines = combined.split('\n');
     const trimmed = lines.length > 50 ? lines.slice(-50).join('\n') : combined;
     wireDataBuffer.set(tileId, trimmed);

@@ -25,7 +25,9 @@ impl PtyManager {
         master: Box<dyn MasterPty + Send>,
         child: Box<dyn Child + Send>,
     ) -> Result<(), String> {
-        // Take the writer from master once at insert time
+        if self.sessions.contains_key(&id) {
+            return Err(format!("PTY session {} already exists", id));
+        }
         let writer = master.take_writer()
             .map_err(|e| format!("Failed to take PTY writer: {}", e))?;
         self.sessions.insert(id, PtyEntry { writer, master, child });
@@ -79,5 +81,14 @@ impl PtyManager {
 
     pub fn session_ids(&self) -> Vec<String> {
         self.sessions.keys().cloned().collect()
+    }
+}
+
+impl Drop for PtyManager {
+    fn drop(&mut self) {
+        // Ensure all child processes are killed when the manager is dropped
+        for (_, mut entry) in self.sessions.drain() {
+            let _ = entry.child.kill();
+        }
     }
 }

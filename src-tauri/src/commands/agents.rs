@@ -59,9 +59,17 @@ pub async fn agent_spawn(
         }
         (bin_name.to_string(), parts[1..].iter().map(|s| s.to_string()).collect::<Vec<_>>())
     } else {
+        // Validate task doesn't start with '-' (prevents argument injection)
+        if let Some(ref t) = task {
+            if t.starts_with('-') {
+                return Err("Task cannot start with '-'".to_string());
+            }
+            if t.len() > 32768 {
+                return Err("Task too long (max 32KB)".to_string());
+            }
+        }
         match agent_type {
             AgentType::Claude => {
-                // Claude Code CLI: just launch interactive mode. CWD is set by pty_spawn.
                 let mut a: Vec<String> = vec![];
                 if let Some(ref t) = task {
                     a.push("-p".to_string());

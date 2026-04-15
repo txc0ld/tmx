@@ -50,8 +50,10 @@ pub async fn record_event(
     let mut timeline = state.timeline.lock();
     timeline.push(event);
     if timeline.len() > 10000 {
+        // Efficient tail-keep: rotate + truncate instead of drain
         let excess = timeline.len() - 10000;
-        timeline.drain(0..excess);
+        timeline.rotate_left(excess);
+        timeline.truncate(10000);
     }
     drop(timeline);
     Ok(id)

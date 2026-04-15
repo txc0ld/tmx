@@ -158,27 +158,58 @@ export function InfiniteCanvas() {
         tiles: s.tiles[pid] ?? [],
         wires: s.wires[pid] ?? [],
         transform: s.transforms[pid] ?? { x: 0, y: 0, scale: 1 },
-      }).catch(() => {});
+      }).catch((err) => {
+        // Only warn once per session to avoid toast spam
+        if (!window.__txSaveErrorShown) {
+          window.__txSaveErrorShown = true;
+          import('@/stores/toastStore').then(({ useToastStore }) => {
+            useToastStore.getState().addToast(`Save failed: ${String(err).slice(0, 100)}`, 'error');
+          });
+        }
+      });
     }, 2000);
 
     // Fast localStorage cache (500ms) — survives crashes
     if (cacheTimer.current) clearTimeout(cacheTimer.current);
     cacheTimer.current = setTimeout(() => {
+      const s = useCanvasStore.getState();
+      const pid = s.activeProject;
+      if (!pid) return;
+      const cache = {
+        projectId: pid,
+        tiles: s.tiles[pid] ?? [],
+        wires: s.wires[pid] ?? [],
+        transform: s.transforms[pid] ?? { x: 0, y: 0, scale: 1 },
+        zStack: s.zStack,
+        ts: Date.now(),
+      };
+      const json = JSON.stringify(cache);
       try {
-        const s = useCanvasStore.getState();
-        const pid = s.activeProject;
-        if (!pid) return;
-        const cache = {
-          projectId: pid,
-          tiles: s.tiles[pid] ?? [],
-          wires: s.wires[pid] ?? [],
-          transform: s.transforms[pid] ?? { x: 0, y: 0, scale: 1 },
-          zStack: s.zStack,
-          ts: Date.now(),
-        };
-        localStorage.setItem(`tx-cache-${pid}`, JSON.stringify(cache));
+        localStorage.setItem(`tx-cache-${pid}`, json);
         localStorage.setItem('tx-active-project', pid);
-      } catch { /* storage full — non-critical */ }
+      } catch (err) {
+        // Quota exceeded — try to free up old auto-snapshots
+        if (err instanceof Error && (err.name === 'QuotaExceededError' || err.message.includes('quota'))) {
+          const snapKeys = Object.keys(localStorage)
+            .filter(k => k.startsWith('tx-autosnapshot-'))
+            .sort();
+          // Delete oldest half of auto-snapshots
+          const toDelete = snapKeys.slice(0, Math.ceil(snapKeys.length / 2));
+          for (const k of toDelete) localStorage.removeItem(k);
+          // Retry
+          try {
+            localStorage.setItem(`tx-cache-${pid}`, json);
+          } catch {
+            // Still failed — notify user once
+            if (!window.__txQuotaWarned) {
+              window.__txQuotaWarned = true;
+              import('@/stores/toastStore').then(({ useToastStore }) => {
+                useToastStore.getState().addToast('Local storage full — crash recovery disabled', 'warning');
+              });
+            }
+          }
+        }
+      }
     }, 500);
 
     return () => {

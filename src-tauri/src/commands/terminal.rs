@@ -33,8 +33,8 @@ pub async fn pty_spawn(
     args: Option<Vec<String>>,
 ) -> Result<String, String> {
     let id = Uuid::new_v4().to_string();
-    let cols = cols.unwrap_or(120);
-    let rows = rows.unwrap_or(30);
+    let cols = cols.unwrap_or(120).clamp(1, 512);
+    let rows = rows.unwrap_or(30).clamp(1, 512);
 
     let pty_system = native_pty_system();
 

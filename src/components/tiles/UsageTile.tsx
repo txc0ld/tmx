@@ -42,7 +42,7 @@ export function UsageTile() {
   const openUsageConnected = useUsageStore(s => s.openUsageConnected);
   const fetchOpenUsage = useUsageStore(s => s.fetchOpenUsage);
 
-  const stats = useMemo(() => computeStats(sessions), [sessions.length]);
+  const stats = useMemo(() => computeStats(sessions), [sessions]);
 
   // Poll OpenUsage API every 30s
   useEffect(() => {

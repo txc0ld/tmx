@@ -1,3 +1,12 @@
+// ─── Global window augmentation ──────────────────────────────────────
+
+declare global {
+  interface Window {
+    __txQuotaWarned?: boolean;
+    __txSaveErrorShown?: boolean;
+  }
+}
+
 // ─── Tile Types ───────────────────────────────────────────────────────
 
 export type TileType = 'agent' | 'terminal' | 'browser' | 'todo' | 'diff' | 'editor' | 'note' | 'kanban' | 'filetree' | 'group' | 'runner' | 'ssh' | 'docker' | 'git' | 'usage';

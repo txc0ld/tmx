@@ -47,8 +47,20 @@ pub async fn git_clone(url: String, dest: String) -> Result<(), String> {
     if url.starts_with('-') {
         return Err("Invalid git URL: must not start with '-'".to_string());
     }
+    if url.len() > 2048 {
+        return Err("URL too long".to_string());
+    }
+    if dest.starts_with('-') || dest.contains('\0') {
+        return Err("Invalid destination path".to_string());
+    }
 
     let expanded = shellexpand::tilde(&dest).to_string();
+
+    // Refuse to clobber existing directory
+    if std::path::Path::new(&expanded).exists() {
+        return Err(format!("Destination already exists: {}", expanded));
+    }
+
     let output = Command::new("git")
         .args(["clone", &url, &expanded])
         .output()
@@ -202,12 +214,15 @@ pub async fn git_files_status(repo_path: String) -> Result<Vec<GitFileStatus>, S
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut files = Vec::new();
     for line in stdout.lines() {
-        let chars: Vec<char> = line.chars().collect();
-        if chars.len() < 4 { continue; }
-        let index_status = chars[0];
-        let worktree_status = chars[1];
-        // chars[2] is the space separator
-        let path: String = chars[3..].iter().collect();
+        // Git porcelain v1 format: XY<space>path
+        // X and Y are always ASCII, path can be UTF-8
+        if line.len() < 4 { continue; }
+        let bytes = line.as_bytes();
+        let index_status = bytes[0] as char;
+        let worktree_status = bytes[1] as char;
+        // Path starts at byte 3 (after "XY ")
+        if !line.is_char_boundary(3) { continue; }
+        let path = line[3..].to_string();
         let staged = index_status != ' ' && index_status != '?';
         let status = if index_status == '?' {
             "??".to_string()
@@ -257,6 +272,15 @@ pub async fn git_unstage(repo_path: String, path: String) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn git_commit(repo_path: String, message: String) -> Result<String, String> {
+    if message.is_empty() {
+        return Err("Commit message cannot be empty".to_string());
+    }
+    if message.len() > 65536 {
+        return Err("Commit message too long (max 64KB)".to_string());
+    }
+    if message.contains('\0') {
+        return Err("Commit message contains null byte".to_string());
+    }
     let expanded = shellexpand::tilde(&repo_path).to_string();
     let output = Command::new("git")
         .args(["commit", "-m", &message])
