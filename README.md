@@ -22,14 +22,64 @@
 
 ## Why it's different
 
-Most dev tools give you one thing at a time: one terminal, one editor, one browser tab. **TerminalX gives you a canvas.** Tiles — terminals, agents, editors, git panels, browsers, tests, task lists — arrange spatially, connect with wires, and automate the copy-paste out of your day.
+Most dev tools give you one thing at a time: one terminal, one editor, one browser tab.
 
-- 🧠 **Orchestrate AI CLIs.** Spawn Claude Code, Codex, and Gemini as first-class tiles. Auto-complete detection (no more waiting for process exit). Chain one into the next.
-- 🔗 **Wire anything to anything.** 6 wire types, drag-to-connect. `Terminal → Agent`, `Agent → Agent`, `FileTree → Editor`, `Runner → Agent` for auto-fix loops, `Todo → Agent` for hands-free task dispatch.
-- 💬 **Inbox, meet IDE.** MCP connectors for Slack, GitHub, Linear, Jira, Notion, Google Calendar, Gmail. Tasks sync into a Todo tile — optionally auto-dispatched to an agent.
-- ⚡ **Native performance.** Tauri 2 + Rust. 47 MB idle, native PTY with backpressure, WebGL-rendered terminals, connection-pooled HTTP proxy, per-tile lazy chunks.
-- 🛡️ **Hardened.** SSRF-guarded HTTP with pinned DNS, shell allowlist, 64-PTY cap, path validation, atomic writes, workspace schema validation, CSP without `unsafe-inline` script-src.
-- 💾 **Never loses work.** 3-layer auto-save (localStorage / disk / beforeunload). Auto-snapshots every 5 min for time-travel. Export workspaces as JSON.
+**TerminalX gives you a canvas.** Tiles arrange spatially, connect with wires, and automate the copy-paste out of your day.
+
+<br />
+
+### 🧠 &nbsp; Orchestrate AI CLIs
+
+Spawn Claude, Codex, and Gemini as first-class tiles.
+
+Auto-complete detection means you don't wait for process exit — chains fire on logical completion.
+
+<br />
+
+### 🔗 &nbsp; Wire anything to anything
+
+Six wire types. Drag from one tile's output port to another's input port — the type auto-infers.
+
+```
+Terminal  →  Agent      context-pipe
+Agent     →  Agent      agent-chain
+Runner    →  Agent      auto-fix loop
+Todo      →  Agent      task dispatch
+FileTree  →  Editor     file-open routing
+Agent     →  Browser    refresh trigger
+```
+
+<br />
+
+### 💬 &nbsp; Inbox, meet IDE
+
+MCP connectors for Slack, GitHub, Linear, Jira, Notion, Calendar, Gmail.
+
+Tasks land in a Todo tile — optionally auto-dispatched to a wired agent.
+
+<br />
+
+### ⚡ &nbsp; Native performance
+
+Tauri 2 + Rust. **47 MB idle.**
+
+Native PTY with bounded-channel backpressure. WebGL-rendered terminals. Connection-pooled HTTP proxy. Per-tile lazy chunks.
+
+<br />
+
+### 🛡️ &nbsp; Hardened
+
+SSRF-guarded HTTP with pinned DNS. Shell allowlist. 64-PTY cap. Path validation. Atomic writes.
+
+Workspace schema validation on import. CSP without `unsafe-inline` in `script-src`.
+
+<br />
+
+### 💾 &nbsp; Never loses work
+
+Three-layer auto-save: `localStorage` → disk → `beforeunload`.
+
+Auto-snapshots every 5 min for time-travel. Export workspaces as portable JSON.
 
 ---
 
