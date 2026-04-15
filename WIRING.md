@@ -64,6 +64,16 @@ TerminalX picks the right wire type automatically based on what you connect. You
 
 **Why explicit?** Auto-piping every keystroke would spam the agent. Manual pipe means YOU decide when the agent gets fresh context — usually right before asking it a question.
 
+**Want hands-free mode?** Enable **Auto-Pipe** on the agent tile:
+
+1. Focus the agent tile (click its header)
+2. Press `Ctrl+K` / `⌘K` → search **"Toggle Agent Auto-Pipe"** → Enter
+3. Optionally press `Ctrl+K` / `⌘K` → **"Set Agent Auto-Prompt"** → type something like `"Analyze the output above and explain what happened."`
+
+Now when the terminal produces output and goes silent for 2 seconds, the agent **auto-pipes the new content + auto-sends your prompt**. Claude answers without you lifting a finger. Full hands-free chain: terminal → agent → response.
+
+The button label changes to **"Auto-Pipe"** so you know the mode is active.
+
 **Example workflow:**
 
 1. Wire Terminal → Claude agent

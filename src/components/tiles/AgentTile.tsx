@@ -333,7 +333,13 @@ export function AgentTile({ tile }: AgentTileProps) {
         </span>
 
         {/* Pipe context from incoming wires */}
-        <PipeContextButton tileId={tile.id} ptyId={tile.ptyId} />
+        <PipeContextButton
+          tileId={tile.id}
+          ptyId={tile.ptyId}
+          autoPipe={tile.autoPipe === true}
+          autoPipeIdleMs={tile.autoPipeIdleMs ?? 2000}
+          autoPromptTemplate={tile.autoPromptTemplate ?? ''}
+        />
 
         {/* Config gear */}
         <button
@@ -397,15 +403,61 @@ export function AgentTile({ tile }: AgentTileProps) {
 // Glows accent-colored when there's unread data available to pipe — so
 // users discover it. After piping, we track 'pipedUpTo' (byte offset)
 // per source so the button dims again until more output arrives.
-function PipeContextButton({ tileId, ptyId }: { tileId: string; ptyId: string | undefined }) {
+// Strip ANSI escape sequences, OSC/CSI sequences, and backspace/carriage-return
+// control artifacts — leaves only readable text for the agent.
+function cleanPtyOutput(raw: string): string {
+  return raw
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')   // CSI sequences (colors, cursor movement)
+    .replace(/\x1b\][^\x07]*\x07/g, '')       // OSC sequences (window title etc.)
+    .replace(/\x1b[()][0-9A-Z]/g, '')         // charset switches
+    .replace(/\x1b[=>]/g, '')                 // app/numeric mode
+    .replace(/\r\n/g, '\n')                   // normalize line endings
+    .replace(/\r/g, '')                       // strip bare CR
+    .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '') // other control chars (keep \t=09, \n=0A)
+    .replace(/\n{3,}/g, '\n\n');              // collapse excessive blank lines
+}
+
+function tailLines(text: string, maxLines: number): string {
+  const lines = text.split('\n');
+  return lines.length <= maxLines ? text : lines.slice(-maxLines).join('\n');
+}
+
+const MAX_PIPE_LINES = 50;
+
+interface PipeBtnProps {
+  tileId: string;
+  ptyId: string | undefined;
+  autoPipe: boolean;
+  autoPipeIdleMs: number;
+  autoPromptTemplate: string;
+}
+
+function PipeContextButton({ tileId, ptyId, autoPipe, autoPipeIdleMs, autoPromptTemplate }: PipeBtnProps) {
   const wires = useCanvasStore(s => s.wires[s.activeProject] || []);
   const wireData = useCanvasStore(s => s.wireData);
   const tiles = useCanvasStore(s => s.tiles[s.activeProject] || []);
   const [pipedOffsets, setPipedOffsets] = useState<Record<string, number>>({});
+  // Remember what the buffer looked like when this button first mounted —
+  // anything already there is "history", not unread context. Only new output
+  // AFTER the wire existed counts as pipeable.
+  const initialOffsetsRef = useRef<Record<string, number> | null>(null);
 
   const incoming = wires.filter(w => w.toTile === tileId && w.wireType === 'context-pipe');
 
-  // Compute unread bytes available across all incoming wires
+  // Initialize offsets on first render where we have incoming wires
+  if (initialOffsetsRef.current === null && incoming.length > 0) {
+    const initial: Record<string, number> = {};
+    for (const wire of incoming) {
+      const src = tiles.find(t => t.id === wire.fromTile);
+      if (!src) continue;
+      const srcPtyId = 'ptyId' in src ? (src as { ptyId?: string }).ptyId : undefined;
+      if (!srcPtyId) continue;
+      initial[srcPtyId] = (wireData[srcPtyId] || '').length;
+    }
+    initialOffsetsRef.current = initial;
+  }
+
+  // Compute unread bytes across all incoming wires
   let unreadBytes = 0;
   const sources: { srcPtyId: string; srcName: string; fresh: string }[] = [];
   for (const wire of incoming) {
@@ -414,7 +466,8 @@ function PipeContextButton({ tileId, ptyId }: { tileId: string; ptyId: string | 
     const srcPtyId = 'ptyId' in src ? (src as { ptyId?: string }).ptyId : undefined;
     if (!srcPtyId) continue;
     const data = wireData[srcPtyId] || '';
-    const offset = pipedOffsets[srcPtyId] || 0;
+    const baseline = initialOffsetsRef.current?.[srcPtyId] ?? data.length;
+    const offset = Math.max(pipedOffsets[srcPtyId] ?? 0, baseline);
     const fresh = data.slice(offset);
     if (fresh.length > 0) {
       unreadBytes += fresh.length;
@@ -425,35 +478,107 @@ function PipeContextButton({ tileId, ptyId }: { tileId: string; ptyId: string | 
   const hasIncoming = incoming.length > 0;
   const hasUnread = unreadBytes > 0;
 
-  const handleClick = () => {
+  const pipe = useCallback((autoPrompt = '') => {
     if (!ptyId || sources.length === 0) return;
     let context = '';
     const newOffsets = { ...pipedOffsets };
     for (const { srcPtyId, srcName, fresh } of sources) {
-      context += `--- Piped from ${srcName} ---\n${fresh}\n`;
-      newOffsets[srcPtyId] = (pipedOffsets[srcPtyId] || 0) + fresh.length;
+      const cleaned = tailLines(cleanPtyOutput(fresh).trim(), MAX_PIPE_LINES);
+      if (cleaned) {
+        context += `--- Piped from ${srcName} ---\n${cleaned}\n--- End piped context ---\n`;
+      }
+      newOffsets[srcPtyId] = (initialOffsetsRef.current?.[srcPtyId] ?? 0)
+        + (pipedOffsets[srcPtyId] ?? 0) + fresh.length;
     }
-    ptyWrite(ptyId, context).catch(() => {});
+    if (context) {
+      // Write context, then (if autoPrompt set) append the template + Enter
+      // so the agent starts working on it immediately.
+      const payload = autoPrompt
+        ? `${context}\n${autoPrompt}`
+        : context;
+      ptyWrite(ptyId, payload).catch(() => {});
+      if (autoPrompt) {
+        // Small delay so the prompt lands cleanly after the context block
+        setTimeout(() => ptyWrite(ptyId, '\r').catch(() => {}), 300);
+      }
+    }
     setPipedOffsets(newOffsets);
-    // Toast confirmation
     import('@/stores/toastStore').then(({ useToastStore }) => {
       useToastStore.getState().addToast(
-        `Piped ${unreadBytes} bytes from ${sources.length} source${sources.length === 1 ? '' : 's'}`,
-        'success',
+        context
+          ? `${autoPrompt ? 'Auto-piped' : 'Piped'} ${context.length} chars${autoPrompt ? ' + prompt' : ''}`
+          : 'Nothing to pipe (output was all control codes)',
+        context ? 'success' : 'info',
       );
     });
-  };
+  }, [ptyId, sources, pipedOffsets]);
+
+  const handleClick = () => pipe('');
+
+  // ─── Auto-pipe: fire after source silence ──────────────────────────
+  // Tracks a ref to the last time we observed unreadBytes changing; when
+  // it plateaus for `autoPipeIdleMs`, we fire pipe() automatically with
+  // the user's autoPromptTemplate (if set).
+  const autoPipeTimerRef = useRef<number | null>(null);
+  const lastUnreadRef = useRef(0);
+  useEffect(() => {
+    if (!autoPipe || !ptyId) return;
+    if (unreadBytes === 0) {
+      if (autoPipeTimerRef.current) { clearTimeout(autoPipeTimerRef.current); autoPipeTimerRef.current = null; }
+      lastUnreadRef.current = 0;
+      return;
+    }
+    // Every time unreadBytes grows, reset the idle timer
+    if (unreadBytes !== lastUnreadRef.current) {
+      lastUnreadRef.current = unreadBytes;
+      if (autoPipeTimerRef.current) clearTimeout(autoPipeTimerRef.current);
+      autoPipeTimerRef.current = window.setTimeout(() => {
+        autoPipeTimerRef.current = null;
+        pipe(autoPromptTemplate);
+      }, autoPipeIdleMs);
+    }
+    return () => {
+      if (autoPipeTimerRef.current) { clearTimeout(autoPipeTimerRef.current); autoPipeTimerRef.current = null; }
+    };
+  }, [autoPipe, autoPipeIdleMs, autoPromptTemplate, unreadBytes, ptyId, pipe]);
 
   // Don't render at all if no incoming context-pipe wires
   if (!hasIncoming) return null;
 
+  const handleResetAndPipeAll = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!ptyId || !hasIncoming) return;
+    // Reset baseline to 0 — includes entire history on next click
+    initialOffsetsRef.current = {};
+    setPipedOffsets({});
+    // Let state flush, then synthetically trigger a pipe
+    setTimeout(() => {
+      const freshSources: typeof sources = [];
+      for (const wire of incoming) {
+        const src = tiles.find(t => t.id === wire.fromTile);
+        if (!src) continue;
+        const srcPtyId = 'ptyId' in src ? (src as { ptyId?: string }).ptyId : undefined;
+        if (!srcPtyId) continue;
+        const data = wireData[srcPtyId] || '';
+        if (data) freshSources.push({ srcPtyId, srcName: src.title || src.type, fresh: data });
+      }
+      let ctx = '';
+      for (const { srcName, fresh } of freshSources) {
+        const cleaned = tailLines(cleanPtyOutput(fresh).trim(), MAX_PIPE_LINES);
+        if (cleaned) ctx += `--- Piped from ${srcName} (full history) ---\n${cleaned}\n--- End piped context ---\n`;
+      }
+      if (ctx) ptyWrite(ptyId, ctx).catch(() => {});
+    }, 20);
+  };
+
   return (
     <button
       onClick={handleClick}
+      onContextMenu={handleResetAndPipeAll}
       disabled={!hasUnread || !ptyId}
       title={hasUnread
-        ? `Click to pipe ${unreadBytes} bytes from ${sources.length} connected tile${sources.length === 1 ? '' : 's'}`
-        : 'No new context to pipe'}
+        ? `Click to pipe ${unreadBytes} bytes from ${sources.length} connected tile${sources.length === 1 ? '' : 's'} (right-click to pipe full history)`
+        : 'No new context to pipe (right-click to pipe full history)'}
       style={{
         display: 'flex', alignItems: 'center', gap: 3,
         background: hasUnread ? alpha(colors.primary, 20) : 'none',
@@ -474,7 +599,7 @@ function PipeContextButton({ tileId, ptyId }: { tileId: string; ptyId: string | 
         width: 5, height: 5, borderRadius: '50%',
         background: hasUnread ? colors.primary : colors.secondary,
       }} />
-      Pipe{hasUnread ? ` (${unreadBytes > 999 ? `${Math.round(unreadBytes/1000)}k` : unreadBytes})` : ''}
+      {autoPipe ? 'Auto-Pipe' : 'Pipe'}{hasUnread ? ` (${unreadBytes > 999 ? `${Math.round(unreadBytes/1000)}k` : unreadBytes})` : ''}
       <style>{`
         @keyframes pipe-pulse {
           0%, 100% { box-shadow: 0 0 8px ${alpha(colors.primary, 30)}; }

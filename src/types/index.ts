@@ -40,6 +40,12 @@ export interface AgentTile extends TileBase {
   autoComplete?: boolean;         // default true
   idleThresholdMs?: number;       // default 8000
   doneSentinel?: string;          // regex source — default matches DONE / ✅ DONE / [DONE] / ## Done
+
+  // Auto-pipe: when a wired source produces output and goes idle, automatically
+  // pipe + optionally send a default prompt so the agent responds hands-free.
+  autoPipe?: boolean;             // default false
+  autoPipeIdleMs?: number;        // silence required before auto-pipe fires — default 2000
+  autoPromptTemplate?: string;    // prompt appended after the piped context (empty = pipe only)
 }
 
 export interface TerminalTile extends TileBase {

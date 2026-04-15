@@ -352,6 +352,46 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
       },
     });
 
+    // ─── Toggle Agent Auto-Pipe ────────────────────────
+    result.push({
+      id: 'cmd-toggle-autopipe',
+      label: 'Toggle Agent Auto-Pipe (hands-free piping)',
+      category: 'command',
+      action: () => {
+        const store = useCanvasStore.getState();
+        const focused = store.focusedTile;
+        if (!focused) { alert('Focus an agent tile first.'); return; }
+        const pid = store.activeProject;
+        const tile = (store.tiles[pid] || []).find(t => t.id === focused);
+        if (!tile || tile.type !== 'agent') { alert('Focused tile is not an agent.'); return; }
+        const agentTile = tile as import('@/types').AgentTile;
+        const next = agentTile.autoPipe !== true;
+        store.updateTile(focused, { autoPipe: next } as Partial<import('@/types').AgentTile>);
+      },
+    });
+
+    result.push({
+      id: 'cmd-set-autoprompt',
+      label: 'Set Agent Auto-Prompt (sent after auto-pipe)',
+      category: 'command',
+      action: () => {
+        const store = useCanvasStore.getState();
+        const focused = store.focusedTile;
+        if (!focused) { alert('Focus an agent tile first.'); return; }
+        const pid = store.activeProject;
+        const tile = (store.tiles[pid] || []).find(t => t.id === focused);
+        if (!tile || tile.type !== 'agent') { alert('Focused tile is not an agent.'); return; }
+        const agentTile = tile as import('@/types').AgentTile;
+        const current = agentTile.autoPromptTemplate ?? '';
+        const input = prompt(
+          'What should the agent do after receiving piped context? (leave blank to just pipe silently)\nExamples:\n- "Analyze the output above and explain what happened."\n- "If there are errors, fix them."\n- "Summarize in one paragraph."',
+          current,
+        );
+        if (input === null) return;
+        store.updateTile(focused, { autoPromptTemplate: input } as Partial<import('@/types').AgentTile>);
+      },
+    });
+
     // ─── Toggle Agent Auto-Complete ────────────────────
     result.push({
       id: 'cmd-toggle-autocomplete',
