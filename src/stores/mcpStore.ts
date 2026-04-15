@@ -104,7 +104,8 @@ export const MCP_DEFINITIONS: McpDefinition[] = [
 
 interface McpState {
   connections: McpConnection[];
-  tasks: McpTask[];
+  // Tasks are scoped per-project so switching projects doesn't bleed tasks across them
+  tasksByProject: Record<string, McpTask[]>;
   seenTaskIds: Set<string>; // tasks already imported or dismissed — never show again
 
   addConnection: (conn: Omit<McpConnection, 'id' | 'status'>) => void;
@@ -114,7 +115,7 @@ interface McpState {
   syncAll: () => Promise<void>;
   dismissTask: (taskId: string) => void;
   markSeen: (taskId: string) => void;
-  getTasks: () => McpTask[];
+  getTasksForProject: (projectId: string) => McpTask[];
   reloadForProject: () => void;
 }
 
@@ -161,7 +162,7 @@ function saveSeenIds(ids: Set<string>) {
 
 export const useMcpStore = create<McpState>((set, get) => ({
   connections: loadConnections(),
-  tasks: [],
+  tasksByProject: {},
   seenTaskIds: loadSeenIds(),
 
   addConnection: (conn) => {
@@ -179,14 +180,18 @@ export const useMcpStore = create<McpState>((set, get) => ({
 
   removeConnection: (id) => {
     set(s => {
+      const conn = s.connections.find(c => c.id === id);
       const next = s.connections.filter(c => c.id !== id);
       saveConnections(next);
+      // Drop tasks from the removed connection within the current project only
+      const pid = getProjectId();
+      const currentTasks = s.tasksByProject[pid] || [];
       return {
         connections: next,
-        tasks: s.tasks.filter(t => {
-          const conn = s.connections.find(c => c.id === id);
-          return !conn || t.source !== conn.type;
-        }),
+        tasksByProject: {
+          ...s.tasksByProject,
+          [pid]: conn ? currentTasks.filter(t => t.source !== conn.type) : currentTasks,
+        },
       };
     });
   },
@@ -205,18 +210,30 @@ export const useMcpStore = create<McpState>((set, get) => ({
     const conn = get().connections.find(c => c.id === id);
     if (!conn) return;
 
+    const pidAtStart = getProjectId();
+
     get().updateConnectionStatus(id, 'connecting');
 
     try {
       const allTasks = await fetchTasksForConnection(conn);
+      // If the user switched projects during the fetch, discard these results —
+      // they belong to the previous project's connection set.
+      if (getProjectId() !== pidAtStart) return;
+
       const seen = get().seenTaskIds;
       const newTasks = allTasks.filter(t => !seen.has(t.id));
-      set(s => ({
-        tasks: [
-          ...s.tasks.filter(t => t.source !== conn.type),
-          ...newTasks,
-        ],
-      }));
+      set(s => {
+        const existing = s.tasksByProject[pidAtStart] || [];
+        return {
+          tasksByProject: {
+            ...s.tasksByProject,
+            [pidAtStart]: [
+              ...existing.filter(t => t.source !== conn.type),
+              ...newTasks,
+            ],
+          },
+        };
+      });
       get().updateConnectionStatus(id, 'connected');
     } catch (e) {
       const errMsg = String(e);
@@ -248,7 +265,14 @@ export const useMcpStore = create<McpState>((set, get) => ({
     const seen = new Set(get().seenTaskIds);
     seen.add(taskId);
     saveSeenIds(seen);
-    set(s => ({ tasks: s.tasks.filter(t => t.id !== taskId), seenTaskIds: seen }));
+    const pid = getProjectId();
+    set(s => ({
+      tasksByProject: {
+        ...s.tasksByProject,
+        [pid]: (s.tasksByProject[pid] || []).filter(t => t.id !== taskId),
+      },
+      seenTaskIds: seen,
+    }));
   },
 
   markSeen: (taskId) => {
@@ -258,14 +282,14 @@ export const useMcpStore = create<McpState>((set, get) => ({
     set({ seenTaskIds: seen });
   },
 
-  getTasks: () => get().tasks,
+  getTasksForProject: (projectId) => get().tasksByProject[projectId] || [],
 
-  // Reload connections for the current project
+  // Reload connections for the current project — tasks for this project
+  // stay in place (already scoped), other projects' tasks are preserved.
   reloadForProject: () => {
     set({
       connections: loadConnections(),
       seenTaskIds: loadSeenIds(),
-      tasks: [],
     });
   },
 }));

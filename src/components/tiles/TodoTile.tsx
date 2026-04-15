@@ -21,7 +21,8 @@ export function TodoTile({ tile }: TodoTileProps) {
   const [input, setInput] = useState('');
   const [showMcp, setShowMcp] = useState(false);
   const items = tile.items ?? EMPTY_ITEMS;
-  const mcpTasks = useMcpStore(s => s.tasks ?? EMPTY_TASKS);
+  const activeProject = useCanvasStore(s => s.activeProject);
+  const mcpTasks = useMcpStore(s => s.tasksByProject[activeProject] ?? EMPTY_TASKS);
   const mcpConnections = useMcpStore(s => s.connections);
 
   const autoDispatch = tile.autoDispatch ?? false;
