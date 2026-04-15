@@ -412,6 +412,6 @@ MIT © [Fantom Labs](https://github.com/txc0ld)
 
 **Built by [Tay](https://github.com/txc0ld) at Fantom Labs**
 
-[Website](https://fantomlabs.com) · [GitHub](https://github.com/txc0ld/tmx) · [Issues](https://github.com/txc0ld/tmx/issues) · [Feature docs](./docs/features/README.md)
+[Website](https://fantomlabs.io) · [GitHub](https://github.com/txc0ld/tmx) · [Issues](https://github.com/txc0ld/tmx/issues) · [Feature docs](./docs/features/README.md)
 
 </div>
