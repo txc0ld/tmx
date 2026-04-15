@@ -139,11 +139,15 @@ function animateCounter(el, target, prefix) {
   requestAnimationFrame(step);
 }
 
-// ----- SMOOTH SCROLL FOR NAV LINKS -----
-document.querySelectorAll('.nav-links a[href^="#"]').forEach((link) => {
+// ----- SMOOTH SCROLL FOR INTERNAL LINKS -----
+// Includes nav links AND the hero/nav "EARLY ACCESS" buttons pointing at
+// #early-access. One query catches all of them.
+document.querySelectorAll('a[href^="#"]').forEach((link) => {
   link.addEventListener('click', (e) => {
+    const href = link.getAttribute('href');
+    if (!href || href === '#') return;
     e.preventDefault();
-    const id = link.getAttribute('href').slice(1);
+    const id = href.slice(1);
     const target = document.getElementById(id);
     if (target) {
       const y = target.getBoundingClientRect().top + window.scrollY - 70;
@@ -151,3 +155,58 @@ document.querySelectorAll('.nav-links a[href^="#"]').forEach((link) => {
     }
   });
 });
+
+// ----- EARLY ACCESS FORM (AJAX → Formspree) -----
+// Falls back to a full-page POST if JS fails — Formspree handles that path
+// and redirects to their thanks page. The JS branch keeps the user on-site
+// and renders a success message inline, which 95% of visitors get.
+const earlyForm = document.getElementById('early-access-form');
+const earlyStatus = document.getElementById('early-status');
+
+if (earlyForm && earlyStatus) {
+  earlyForm.addEventListener('submit', async (e) => {
+    const action = earlyForm.getAttribute('action') || '';
+    // Guard: if the Formspree endpoint hasn't been wired up, stop the
+    // submission and explain the site owner needs to configure it.
+    if (action.includes('YOUR_FORMSPREE_ID')) {
+      e.preventDefault();
+      earlyStatus.textContent = 'Form endpoint not yet configured — check back soon.';
+      earlyStatus.className = 'early-status is-error';
+      return;
+    }
+
+    e.preventDefault();
+    const submit = earlyForm.querySelector('.early-submit');
+    const label = earlyForm.querySelector('.early-submit-label');
+    const prevLabel = label ? label.textContent : '';
+
+    submit.disabled = true;
+    if (label) label.textContent = 'SENDING…';
+    earlyStatus.textContent = '';
+    earlyStatus.className = 'early-status';
+
+    try {
+      const res = await fetch(action, {
+        method: 'POST',
+        body: new FormData(earlyForm),
+        headers: { 'Accept': 'application/json' },
+      });
+      if (res.ok) {
+        earlyForm.reset();
+        earlyStatus.textContent = "THANKS — YOU'RE ON THE LIST. WE'LL BE IN TOUCH.";
+        earlyStatus.className = 'early-status is-success';
+      } else {
+        const data = await res.json().catch(() => ({}));
+        const msg = (data && data.errors && data.errors[0] && data.errors[0].message) || 'Submission failed — try again.';
+        earlyStatus.textContent = msg.toUpperCase();
+        earlyStatus.className = 'early-status is-error';
+      }
+    } catch {
+      earlyStatus.textContent = 'NETWORK ERROR — CHECK YOUR CONNECTION AND RETRY.';
+      earlyStatus.className = 'early-status is-error';
+    } finally {
+      submit.disabled = false;
+      if (label) label.textContent = prevLabel;
+    }
+  });
+}

@@ -45,7 +45,7 @@
         <a href="#agents">AGENTS</a>
         <a href="https://github.com/txc0ld/tmx/tree/main/docs/features" target="_blank" rel="noopener">DOCS</a>
       </div>
-      <a href="mailto:hello@fantomlabs.io?subject=TerminalX%20Early%20Access&body=I'd%20like%20early%20access%20to%20TerminalX.%0A%0AHow%20I'd%20use%20it%3A%20" class="btn btn-primary">EARLY ACCESS</a>
+      <a href="#early-access" class="btn btn-primary">EARLY ACCESS</a>
     </div>
   </nav>
 
@@ -66,7 +66,7 @@
           Linear directly into them. Ship 10&times; faster.
         </p>
         <div class="hero-actions" data-reveal data-reveal-delay="3">
-          <a href="mailto:hello@fantomlabs.io?subject=TerminalX%20Early%20Access&body=I'd%20like%20early%20access%20to%20TerminalX.%0A%0AHow%20I'd%20use%20it%3A%20" class="btn btn-primary btn-lg">REQUEST EARLY ACCESS</a>
+          <a href="#early-access" class="btn btn-primary btn-lg">REQUEST EARLY ACCESS</a>
           <a href="#features" class="btn btn-secondary btn-lg">SEE THE FEATURES</a>
         </div>
       </div>
@@ -538,6 +538,14 @@
 
   <!-- =========================================
        CTA / EARLY ACCESS
+       =========================================
+       Form submits to Formspree. To activate:
+         1. Sign up at https://formspree.io (use connect@fantomlabs.io)
+         2. Create a new form, copy the endpoint ID
+         3. Replace YOUR_FORMSPREE_ID below with the real ID
+       Submissions email to your Formspree-registered address. The
+       form below degrades gracefully if JS fails — it POSTs directly
+       to Formspree which returns their default thanks page.
        ========================================= -->
   <section class="cta-section" id="early-access">
     <div class="cta-inner">
@@ -546,9 +554,40 @@
       <p class="cta-sub" data-reveal data-reveal-delay="2">
         TerminalX is shipping to a small group of developers first. Tell us how you'd use it.
       </p>
-      <div class="cta-actions" data-reveal data-reveal-delay="3">
-        <a href="mailto:hello@fantomlabs.io?subject=TerminalX%20Early%20Access&body=I'd%20like%20early%20access%20to%20TerminalX.%0A%0AHow%20I'd%20use%20it%3A%20" class="btn btn-cta btn-lg">REQUEST EARLY ACCESS</a>
-      </div>
+
+      <form
+        class="early-form"
+        id="early-access-form"
+        action="https://formspree.io/f/YOUR_FORMSPREE_ID"
+        method="POST"
+        data-reveal
+        data-reveal-delay="3"
+      >
+        <input
+          type="email"
+          name="email"
+          placeholder="your@email.com"
+          autocomplete="email"
+          required
+          aria-label="Email address"
+          class="early-input"
+        />
+        <textarea
+          name="usecase"
+          placeholder="How would you use TerminalX? (optional — helps us prioritize invites)"
+          rows="3"
+          maxlength="500"
+          aria-label="Use case"
+          class="early-textarea"
+        ></textarea>
+        <!-- Honeypot: real users don't fill this. Bots do. -->
+        <input type="text" name="_gotcha" style="display:none" tabindex="-1" autocomplete="off" />
+        <button type="submit" class="btn btn-cta btn-lg early-submit">
+          <span class="early-submit-label">REQUEST EARLY ACCESS</span>
+        </button>
+        <div class="early-status" id="early-status" aria-live="polite"></div>
+      </form>
+
       <div class="cta-platforms" data-reveal data-reveal-delay="4">
         <span>MAC</span>
         <span class="cta-sep">/</span>
