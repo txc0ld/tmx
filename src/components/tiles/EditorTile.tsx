@@ -4,10 +4,20 @@ import { readFileText, writeFileText, getFileSize } from '@/utils/ipc';
 import { colors, spacing, typography } from '@/design/tokens';
 import type { EditorTile as EditorTileType } from '@/types';
 
-// Files larger than this threshold prompt the user before loading into
-// Monaco. Monaco parses the entire source synchronously for syntax
-// highlighting — above a few MB, opening freezes the UI for seconds.
-const LARGE_FILE_THRESHOLD = 2 * 1024 * 1024; // 2 MB
+// Tiered load strategy — Monaco's sync tokenizer pass costs roughly
+// 100-200 ms per MB on modern hardware, and semantic/bracket features add
+// more. We match thresholds to perceived pain thresholds:
+//   < 512 KB  → normal Monaco (no-op)
+//   512 KB-5 MB → auto-optimized (silently disable heavy decorations)
+//   5 MB-20 MB → prompt the user; on confirm load plain-text mode
+//   > 20 MB   → prompt strongly (near Monaco's own internal ceiling)
+// The 10 MB Rust read cap means we never actually see >10 MB in practice,
+// but the 20 MB tier is kept for future-proofing.
+const MEDIUM_FILE_THRESHOLD = 512 * 1024;       // 512 KB
+const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024;   // 5 MB
+const HUGE_FILE_THRESHOLD = 20 * 1024 * 1024;   // 20 MB
+
+type LoadMode = 'normal' | 'optimized' | 'plaintext';
 
 interface EditorTileProps {
   tile: EditorTileType;
@@ -29,7 +39,7 @@ export function EditorTile({ tile }: EditorTileProps) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [plainTextMode, setPlainTextMode] = useState(false);
+  const [loadMode, setLoadMode] = useState<LoadMode>('normal');
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filePathRef = useRef(tile.filePath);
 
@@ -45,13 +55,13 @@ export function EditorTile({ tile }: EditorTileProps) {
       setContent(null);
       setLoading(false);
       setError(null);
-      setPlainTextMode(false);
+      setLoadMode('normal');
       return;
     }
 
     setLoading(true);
     setError(null);
-    setPlainTextMode(false);
+    setLoadMode('normal');
 
     // Check size BEFORE reading. Reading a 50 MB log into memory then
     // deciding to cancel is too late — we want to fail cheap.
@@ -59,22 +69,31 @@ export function EditorTile({ tile }: EditorTileProps) {
       try {
         const size = await getFileSize(tile.filePath);
         if (filePathRef.current !== tile.filePath) return;
-        let goPlain = false;
-        if (size > LARGE_FILE_THRESHOLD) {
+
+        let mode: LoadMode = 'normal';
+        if (size > HUGE_FILE_THRESHOLD) {
           const mb = (size / (1024 * 1024)).toFixed(1);
           const ok = window.confirm(
-            `This file is ${mb} MB. Loading large files freezes the editor while Monaco parses. Open in plain-text mode (no syntax highlighting) for better performance?\n\nOK = plain text, Cancel = don't open`,
+            `This file is ${mb} MB — very large. Monaco will drop syntax highlighting, folding, and most features. Open anyway as plain text?\n\nOK = open plain-text, Cancel = don't open`,
           );
-          if (!ok) {
-            setContent(null);
-            setLoading(false);
-            return;
-          }
-          goPlain = true;
+          if (!ok) { setContent(null); setLoading(false); return; }
+          mode = 'plaintext';
+        } else if (size > LARGE_FILE_THRESHOLD) {
+          const mb = (size / (1024 * 1024)).toFixed(1);
+          const ok = window.confirm(
+            `This file is ${mb} MB. Loading it with full syntax highlighting will freeze the editor for ~${Math.ceil(size / (5 * 1024 * 1024))}s. Open in plain-text mode for fast response?\n\nOK = open plain-text, Cancel = don't open`,
+          );
+          if (!ok) { setContent(null); setLoading(false); return; }
+          mode = 'plaintext';
+        } else if (size > MEDIUM_FILE_THRESHOLD) {
+          // Silent middle tier — disable the expensive decorations but
+          // keep syntax highlighting and folding. No prompt, just faster.
+          mode = 'optimized';
         }
+
         const text = await readFileText(tile.filePath);
         if (filePathRef.current !== tile.filePath) return;
-        setPlainTextMode(goPlain);
+        setLoadMode(mode);
         setContent(text);
         setLoading(false);
       } catch (err) {
@@ -159,7 +178,15 @@ export function EditorTile({ tile }: EditorTileProps) {
     );
   }
 
-  const language = plainTextMode ? 'plaintext' : (tile.language || detectLanguage(tile.filePath));
+  const language = loadMode === 'plaintext'
+    ? 'plaintext'
+    : (tile.language || detectLanguage(tile.filePath));
+
+  // Tier the Monaco options. The 'optimized' tier disables decoration
+  // work that dominates parse time on medium files; the 'plaintext' tier
+  // strips folding, validation, and bracket colorization entirely.
+  const isOptimized = loadMode !== 'normal';
+  const isPlaintext = loadMode === 'plaintext';
 
   return (
     <div style={{ width: '100%', height: '100%' }}>
@@ -178,6 +205,14 @@ export function EditorTile({ tile }: EditorTileProps) {
           scrollBeyondLastLine: false,
           padding: { top: 8 },
           automaticLayout: true,
+          largeFileOptimizations: true,
+          // Decoration/UI features scaled back per tier
+          bracketPairColorization: { enabled: !isOptimized },
+          renderValidationDecorations: isOptimized ? 'off' : 'editable',
+          occurrencesHighlight: isOptimized ? 'off' : 'singleFile',
+          folding: !isPlaintext,
+          wordWrap: isPlaintext ? 'on' : 'off',
+          ...(isPlaintext ? { guides: { indentation: false, bracketPairs: false } } : {}),
         }}
         loading={
           <div style={{
