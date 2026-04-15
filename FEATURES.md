@@ -143,7 +143,7 @@ TerminalX is a desktop app that lets you run multiple AI coding agents, terminal
 
 ## Wiring System
 
-Connect tiles with data-flow wires. Drag from output port to input port.
+Connect tiles with data-flow wires. Hover a tile → drag from the accent-colored port on the right edge → drop on another tile's left port. Wire type is inferred automatically from the source/target tile types.
 
 | Wire Type | From → To | Behavior |
 |-----------|-----------|----------|
@@ -152,6 +152,155 @@ Connect tiles with data-flow wires. Drag from output port to input port.
 | **refresh-trigger** | Agent → Browser | Notifies browser tile to refresh on agent completion |
 | **task-assign** | Agent → Todo | Adds agent's last output line as a new task |
 | **diff-feed** | Agent → Diff | Signals diff tile to refresh on agent completion |
+
+---
+
+## X Posts — By Wire Type
+
+Ready-to-ship copy for each wire type. Each has a hook post + a concrete use case.
+
+### context-pipe (Terminal → Agent)
+
+**Hook:**
+> Every dev's nightmare: running a command, copying the output, pasting it into Claude, asking for help.
+>
+> In TerminalX I wire my terminal → Claude. The agent sees every command I run automatically. No more copy-paste tax.
+
+**Use case — debugging from logs:**
+> Wired my server logs tail → Claude agent.
+>
+> Error appears in logs → Claude already has the stack trace → asks me one clarifying question → patches the bug. I just watch.
+
+---
+
+### agent-chain (Agent → Agent)
+
+**Hook:**
+> Multi-agent coding pipelines in TerminalX:
+>
+> Claude (Opus) → designs the architecture
+> Codex → writes the code
+> Claude (Sonnet) → writes the tests
+>
+> I give one prompt. Three agents work sequentially. I go get coffee.
+
+**Use case — spec → build → test:**
+> The Claude → Codex → Gemini chain I run:
+>
+> 1. Claude writes the spec
+> 2. Codex implements it
+> 3. Gemini reviews and suggests fixes
+>
+> All wired on the same canvas. Each agent auto-inherits the previous one's output. Fully hands-off.
+
+**Use case — research → implement:**
+> Wired a "research" Claude to a "build" Codex.
+>
+> First agent: deep-dive the library docs, find best practices, output a spec.
+> Second agent: picks up that spec, writes the code.
+>
+> Think senior → mid coder, except both are AI and neither complains.
+
+---
+
+### refresh-trigger (Agent → Browser)
+
+**Hook:**
+> Most underrated feature in TerminalX:
+>
+> Wire your Claude agent → your browser tile pointing at localhost:3000.
+>
+> Claude finishes editing your React code → browser refreshes → you see the change without touching anything.
+
+**Use case — frontend loop:**
+> My frontend dev loop in TerminalX:
+>
+> 1. Browser tile on localhost:3000 (live app)
+> 2. Claude agent with the UI task
+> 3. Wire agent → browser
+>
+> Claude edits the component → HMR picks it up → browser refreshes automatically → I see the result in seconds.
+
+---
+
+### task-assign (Agent → Todo)
+
+**Hook:**
+> My TerminalX setup knows what to do before I do.
+>
+> Claude finishes refactoring the auth module. Its last line: "Next step: migrate the user session store."
+>
+> Wire agent → todo tile → that line becomes my next task automatically.
+
+**Use case — self-scoping work:**
+> Give Claude a vague goal: "clean up the payment flow."
+>
+> Wire agent → todo tile.
+>
+> Claude does the first pass, then outputs "TODO: deprecate legacy Stripe keys."
+> That goes straight into my task list. I approve or reject. Rinse and repeat.
+
+---
+
+### diff-feed (Agent → Diff)
+
+**Hook:**
+> Code review for AI work, automated:
+>
+> Wire Claude → diff tile. When Claude finishes editing a file, the diff tile refreshes to show exactly what changed. I approve the diff or rollback. No git noise.
+
+**Use case — safe agentic editing:**
+> I never let an agent modify my code without a diff check.
+>
+> Wire Claude → diff tile pinned to the file I care about.
+>
+> Agent edits → diff updates → I see the before/after → commit if good, revert if not. Visual safety net.
+
+---
+
+### Bonus: Runner → Agent (auto-recovery)
+
+This uses context-pipe but triggers on **failure** instead of completion.
+
+**Hook:**
+> Self-healing CI, built in 30 seconds:
+>
+> Runner tile running `npm test` → wire to Claude agent.
+>
+> Tests fail → error output auto-dispatched to Claude → Claude fixes the code → tests re-run. I watch. I never fix a test again.
+
+**Use case — flaky tests:**
+> Wired a "retry on fail" Claude to my test runner.
+>
+> Test breaks at 2am → agent reads the stack trace → patches the obvious fix → commits on a branch → I wake up to a fixed test and a PR waiting.
+
+**Use case — build errors:**
+> Running `cargo build` in a loop?
+>
+> Wire it to an agent. The second it fails, the agent gets the full compile error as a prompt and starts fixing. You're 10x faster on dependency refactors.
+
+---
+
+### Multi-wire workflows
+
+**Hook:**
+> The TerminalX power move: chain 4 tiles together.
+>
+> Slack task → Claude agent → Codex agent → Diff tile → Browser.
+>
+> One Slack message produces working code, a diff review, and a live preview. Zero manual steps in between.
+
+**Use case — the full loop:**
+> Someone drops "add dark mode toggle" in our Slack.
+>
+> TerminalX:
+> 1. MCP pulls task from Slack → TodoTile
+> 2. Auto-dispatch → Claude agent (design)
+> 3. Wired → Codex (implement)
+> 4. Wired → Diff tile (review)
+> 5. Wired → Browser tile (live preview)
+>
+> I come back 10 minutes later to a finished feature. This is 2026 development.
 
 ---
 
