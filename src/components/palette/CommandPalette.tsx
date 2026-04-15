@@ -375,20 +375,42 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
       category: 'command',
       action: async () => {
         const { usePluginStore } = await import('@/stores/pluginStore');
-        const url = prompt('Plugin manifest URL or paste JSON:');
-        if (!url) return;
+        const { httpFetch } = await import('@/utils/ipc');
+        const input = prompt('Plugin manifest URL (https only) or paste JSON:');
+        if (!input) return;
         try {
           let manifest;
-          if (url.startsWith('{')) {
-            manifest = JSON.parse(url);
+          if (input.startsWith('{')) {
+            manifest = JSON.parse(input);
           } else {
-            const res = await fetch(url);
-            manifest = await res.json();
+            // Route through the Rust proxy so SSRF / private-IP guards apply.
+            // Only https is accepted; http/file/other schemes are rejected.
+            if (!/^https:\/\//i.test(input)) {
+              alert('Plugin manifest URL must use https://');
+              return;
+            }
+            const res = await httpFetch({ url: input, method: 'GET' });
+            if (res.status < 200 || res.status >= 300) {
+              alert(`Failed to fetch manifest: HTTP ${res.status}`);
+              return;
+            }
+            manifest = JSON.parse(res.body);
           }
           if (!manifest.id || !manifest.name || !manifest.tileType) {
             alert('Invalid plugin manifest: must have id, name, and tileType');
             return;
           }
+          // entryUrl must be https so the sandboxed iframe can't reach file://, data:, or localhost.
+          if (manifest.entryUrl && !/^https:\/\//i.test(manifest.entryUrl)) {
+            alert('Plugin entryUrl must be https://');
+            return;
+          }
+          const confirmed = confirm(
+            `Register plugin "${manifest.name}"?\n\n` +
+            `It will load ${manifest.entryUrl || '(no UI)'} in a sandboxed iframe. ` +
+            `Only install plugins from sources you trust.`,
+          );
+          if (!confirmed) return;
           usePluginStore.getState().registerPlugin(manifest, manifest.entryUrl);
         } catch (e) {
           alert('Failed to load plugin: ' + String(e));

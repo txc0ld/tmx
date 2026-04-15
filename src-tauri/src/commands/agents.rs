@@ -125,8 +125,24 @@ pub async fn agent_spawn(
         (bin.clone(), args)
     };
 
-    // Spawn via PTY with args
-    let pty_id = super::terminal::pty_spawn(
+    // Validate custom_command args don't contain null bytes before spawning.
+    // We intentionally do NOT reject arg-looking tokens (e.g. `--model sonnet`) —
+    // custom_command is a user trust boundary: users legitimately pass model flags.
+    // Renderer compromise is mitigated at the agent_spawn call site and by the webview CSP.
+    if custom_command.is_some() {
+        for a in &spawn_args {
+            if a.contains('\0') {
+                return Err("Custom command argument contains null byte".to_string());
+            }
+            if a.len() > 16384 {
+                return Err("Custom command argument too long".to_string());
+            }
+        }
+    }
+
+    // Spawn via PTY with args — bypasses renderer-facing allowlist because
+    // bin names are already validated (claude/codex/gemini or path-less custom).
+    let pty_id = super::terminal::pty_spawn_internal(
         app.clone(),
         state.clone(),
         Some(spawn_bin),

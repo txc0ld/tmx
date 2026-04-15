@@ -30,7 +30,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* ipc: tauri:; img-src 'self' data: blob: asset: https:; font-src 'self' data: https://fonts.gstatic.com; frame-src http://localhost:* https://localhost:*"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* ipc: tauri:; img-src 'self' data: blob: asset: https:; font-src 'self' data: https://fonts.gstatic.com; frame-src https: http://localhost:*"
     },
     "trayIcon": {
       "iconPath": "icons/icon.png",

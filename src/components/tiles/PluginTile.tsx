@@ -89,7 +89,7 @@ export function PluginTile({ tile }: PluginTileProps) {
       ref={iframeRef}
       src={plugin.entryUrl}
       onLoad={handleIframeLoad}
-      sandbox="allow-scripts allow-same-origin"
+      sandbox="allow-scripts allow-popups allow-forms"
       style={{
         width: '100%',
         height: '100%',

@@ -21,9 +21,66 @@ pub struct PtyOutput {
     pub data: String,
 }
 
-/// Spawn a new PTY session and begin streaming output
+/// Binaries the renderer is permitted to spawn via `pty_spawn`.
+/// Keep this tight — the renderer is the untrusted boundary.
+/// Internal callers (e.g. agent_spawn) go through `pty_spawn_internal` which bypasses this list.
+const SHELL_ALLOWLIST: &[&str] = &[
+    // Standard shells
+    "/bin/bash", "/bin/zsh", "/bin/sh", "/usr/bin/bash", "/usr/bin/zsh", "/usr/bin/sh",
+    "bash", "zsh", "sh", "fish", "/opt/homebrew/bin/fish",
+    "powershell.exe", "pwsh.exe", "pwsh", "cmd.exe",
+    // Network / container clients permitted as first-class tiles
+    "ssh", "docker",
+];
+
+fn is_shell_allowed(shell: &str) -> bool {
+    if shell.contains('\0') || shell.starts_with('-') { return false; }
+    if SHELL_ALLOWLIST.contains(&shell) { return true; }
+    // Also allow the user's configured SHELL env var
+    if let Ok(user_shell) = std::env::var("SHELL") {
+        if shell == user_shell { return true; }
+    }
+    false
+}
+
+fn validate_pty_args(args: &[String]) -> Result<(), String> {
+    for a in args {
+        if a.contains('\0') {
+            return Err("Argument contains null byte".to_string());
+        }
+        if a.len() > 16384 {
+            return Err("Argument too long".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// Spawn a new PTY session and begin streaming output.
+/// Publicly exposed to the renderer — `shell` is validated against `SHELL_ALLOWLIST`.
 #[tauri::command]
 pub async fn pty_spawn(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    shell: Option<String>,
+    cwd: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    args: Option<Vec<String>>,
+) -> Result<String, String> {
+    if let Some(ref s) = shell {
+        if !is_shell_allowed(s) {
+            return Err(format!("Shell '{}' is not in the allowlist", s));
+        }
+    }
+    if let Some(ref a) = args {
+        validate_pty_args(a)?;
+    }
+    pty_spawn_internal(app, state, shell, cwd, cols, rows, args).await
+}
+
+/// Internal PTY spawner — trusts the caller (e.g. agent_spawn) to have validated inputs.
+/// Not exposed as a tauri command.
+pub async fn pty_spawn_internal(
     app: AppHandle,
     state: State<'_, AppState>,
     shell: Option<String>,

@@ -22,17 +22,37 @@ const IGNORED_DIRS: &[&str] = &[
     "__pycache__", ".turbo", "build", ".cache",
 ];
 
-/// Read directory tree recursively (max depth 4)
+/// Read directory tree recursively (max depth 4).
+/// Rejects paths that resolve outside the user's home / well-known project roots
+/// to limit what a compromised renderer can enumerate.
 #[tauri::command]
 pub async fn read_file_tree(
     path: String,
     max_depth: Option<u32>,
 ) -> Result<Vec<FileNode>, String> {
-    let root = PathBuf::from(shellexpand::tilde(&path).to_string());
-    if !root.exists() {
-        return Err(format!("Path does not exist: {}", path));
+    if path.contains('\0') {
+        return Err("Invalid path".to_string());
     }
-    Ok(read_dir_recursive(&root, 0, max_depth.unwrap_or(4)))
+    let root = PathBuf::from(shellexpand::tilde(&path).to_string());
+    let canonical = root.canonicalize().map_err(|e| format!("Path error: {}", e))?;
+    if !is_path_allowed(&canonical) {
+        return Err("Path is outside the allowed roots (home dir, common project folders)".to_string());
+    }
+    Ok(read_dir_recursive(&canonical, 0, max_depth.unwrap_or(4).min(8)))
+}
+
+fn is_path_allowed(canonical: &std::path::Path) -> bool {
+    let home = match dirs::home_dir() { Some(h) => h, None => return false };
+    // Allow anything under $HOME, plus a few common project mount points.
+    if canonical.starts_with(&home) { return true; }
+    let roots = [
+        "/tmp", "/var/folders",               // macOS temp
+        "/Users",                             // macOS home root (tests, shared work)
+        "/Volumes",                           // external drives
+        "/workspace", "/workspaces", "/srv",  // common container mounts
+        "/home",                              // Linux home root
+    ];
+    roots.iter().any(|r| canonical.starts_with(r))
 }
 
 fn read_dir_recursive(dir: &PathBuf, depth: u32, max_depth: u32) -> Vec<FileNode> {

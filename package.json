@@ -32,7 +32,10 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "dompurify": "^3.3.2"
+    }
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.2.0",

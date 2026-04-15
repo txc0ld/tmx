@@ -41,15 +41,42 @@ pub async fn git_available() -> Result<bool, String> {
     }
 }
 
+/// Validate a git clone URL — accept only https/ssh/git schemes to public-looking hosts.
+/// Blocks `ext::` remote helpers, `file://`, and loopback targets which can be abused
+/// to execute commands on clone (CVE-class) or to exfiltrate local repo data.
+fn validate_git_url(url: &str) -> Result<(), String> {
+    if url.starts_with('-') { return Err("Invalid git URL: must not start with '-'".to_string()); }
+    if url.len() > 2048 { return Err("URL too long".to_string()); }
+    if url.contains('\0') { return Err("URL contains null byte".to_string()); }
+    // Block remote helpers (git supports `ext::sh -c ...`, `transport::`).
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("ext::") || lower.starts_with("transport::") || lower.contains("://ext::") {
+        return Err("Remote helper URLs are not allowed".to_string());
+    }
+    // SCP-style: `user@host:path` — acceptable when host is not loopback.
+    if let Some(rest) = lower.strip_prefix("git@") {
+        if rest.starts_with("localhost") || rest.starts_with("127.") || rest.starts_with("[::1]") {
+            return Err("Loopback git hosts are not allowed".to_string());
+        }
+        return Ok(());
+    }
+    // URL-form validation for everything else.
+    let parsed = url::Url::parse(url).map_err(|e| format!("Invalid git URL: {}", e))?;
+    match parsed.scheme() {
+        "https" | "http" | "ssh" | "git" => {},
+        other => return Err(format!("Git scheme '{}' is not allowed", other)),
+    }
+    let host = parsed.host_str().unwrap_or("");
+    if host.is_empty() { return Err("Git URL must have a host".to_string()); }
+    if host == "localhost" || host == "127.0.0.1" || host == "[::1]" {
+        return Err("Loopback git hosts are not allowed".to_string());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn git_clone(url: String, dest: String) -> Result<(), String> {
-    // Reject URLs starting with '-' to prevent argument injection
-    if url.starts_with('-') {
-        return Err("Invalid git URL: must not start with '-'".to_string());
-    }
-    if url.len() > 2048 {
-        return Err("URL too long".to_string());
-    }
+    validate_git_url(&url)?;
     if dest.starts_with('-') || dest.contains('\0') {
         return Err("Invalid destination path".to_string());
     }
@@ -61,8 +88,14 @@ pub async fn git_clone(url: String, dest: String) -> Result<(), String> {
         return Err(format!("Destination already exists: {}", expanded));
     }
 
+    // Disable remote helpers and local-path protocols at the git level as defense-in-depth,
+    // even though validate_git_url already rejects them. `-c` must precede the subcommand.
     let output = Command::new("git")
-        .args(["clone", &url, &expanded])
+        .args([
+            "-c", "protocol.ext.allow=never",
+            "-c", "protocol.file.allow=never",
+            "clone", "--", &url, &expanded,
+        ])
         .output()
         .await
         .map_err(|e| format!("Failed to run git: {}", e))?;
