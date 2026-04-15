@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
-import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
+import { readFileText, writeFileText } from '@/utils/ipc';
 import { colors, spacing, typography } from '@/design/tokens';
 import type { EditorTile as EditorTileType } from '@/types';
 
@@ -41,7 +41,7 @@ export function EditorTile({ tile }: EditorTileProps) {
     setLoading(true);
     setError(null);
 
-    readTextFile(tile.filePath)
+    readFileText(tile.filePath)
       .then((text) => {
         // Only update if still the same file
         if (filePathRef.current === tile.filePath) {
@@ -72,7 +72,7 @@ export function EditorTile({ tile }: EditorTileProps) {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       if (filePathRef.current) {
-        writeTextFile(filePathRef.current, value).catch(console.error);
+        writeFileText(filePathRef.current, value).catch(console.error);
       }
     }, 1000);
   }, []);

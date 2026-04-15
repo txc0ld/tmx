@@ -139,6 +139,57 @@ fn read_dir_recursive(dir: &PathBuf, depth: u32, max_depth: u32) -> Vec<FileNode
     nodes
 }
 
+/// Read a file as UTF-8 text, validated against the same allowed-roots
+/// list as `read_file_tree`. Used by EditorTile and DiffTile so users can
+/// open any file under their home directory (the Tauri fs plugin scope is
+/// stricter and trips on paths like ~/.claude/projects/...).
+#[tauri::command]
+pub async fn read_file_text(path: String) -> Result<String, String> {
+    if path.contains('\0') {
+        return Err("Invalid path".to_string());
+    }
+    let raw = PathBuf::from(shellexpand::tilde(&path).to_string());
+    let canonical_raw = raw.canonicalize().map_err(|e| format!("Path error: {}", e))?;
+    let canonical = strip_verbatim_prefix(&canonical_raw);
+    if !is_path_allowed(&canonical) {
+        return Err("Path is outside the allowed roots".to_string());
+    }
+    if canonical.is_dir() {
+        return Err("Path is a directory".to_string());
+    }
+    // 10 MB cap — anything bigger is almost certainly not a text file the
+    // user wants to load into Monaco
+    let metadata = fs::metadata(&canonical).map_err(|e| format!("Stat error: {}", e))?;
+    if metadata.len() > 10 * 1024 * 1024 {
+        return Err(format!("File too large ({} bytes — 10 MB cap)", metadata.len()));
+    }
+    fs::read_to_string(&canonical).map_err(|e| format!("Read error: {}", e))
+}
+
+/// Write UTF-8 text to a file, validated against the same allowed-roots
+/// list as `read_file_tree`. Used by EditorTile auto-save.
+#[tauri::command]
+pub async fn write_file_text(path: String, contents: String) -> Result<(), String> {
+    if path.contains('\0') {
+        return Err("Invalid path".to_string());
+    }
+    let raw = PathBuf::from(shellexpand::tilde(&path).to_string());
+    // For writes the file may not exist yet — canonicalize the parent dir
+    // and rejoin with the file name.
+    let parent = raw.parent().ok_or_else(|| "Path has no parent".to_string())?;
+    let file_name = raw.file_name().ok_or_else(|| "Path has no file name".to_string())?;
+    let canonical_parent_raw = parent.canonicalize().map_err(|e| format!("Path error: {}", e))?;
+    let canonical_parent = strip_verbatim_prefix(&canonical_parent_raw);
+    if !is_path_allowed(&canonical_parent) {
+        return Err("Path is outside the allowed roots".to_string());
+    }
+    let final_path = canonical_parent.join(file_name);
+    if final_path.is_dir() {
+        return Err("Path is a directory".to_string());
+    }
+    fs::write(&final_path, contents).map_err(|e| format!("Write error: {}", e))
+}
+
 /// Start watching a directory for changes
 #[tauri::command]
 pub async fn watch_directory(

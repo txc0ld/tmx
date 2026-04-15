@@ -105,6 +105,14 @@ export async function readFileTree(
   return invoke('read_file_tree', { path, maxDepth });
 }
 
+export async function readFileText(path: string): Promise<string> {
+  return invoke('read_file_text', { path });
+}
+
+export async function writeFileText(path: string, contents: string): Promise<void> {
+  return invoke('write_file_text', { path, contents });
+}
+
 export async function watchDirectory(path: string): Promise<void> {
   return invoke('watch_directory', { path });
 }
@@ -266,6 +274,10 @@ export async function gitDiffSummary(repoPath: string): Promise<string> {
 
 export async function gitFilesStatus(repoPath: string): Promise<GitFileStatus[]> {
   return invoke('git_files_status', { repoPath });
+}
+
+export async function gitShowHeadFile(repoPath: string, filePath: string): Promise<string> {
+  return invoke('git_show_head_file', { repoPath, filePath });
 }
 
 export async function gitStage(repoPath: string, path: string): Promise<void> {

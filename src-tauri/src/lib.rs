@@ -41,6 +41,8 @@ pub fn run() {
             commands::agents::agent_list,
             // Filesystem
             commands::filesystem::read_file_tree,
+            commands::filesystem::read_file_text,
+            commands::filesystem::write_file_text,
             commands::filesystem::watch_directory,
             commands::filesystem::unwatch_directory,
             // Workspace persistence
@@ -68,6 +70,7 @@ pub fn run() {
             commands::git::git_checkout,
             commands::git::git_diff_summary,
             commands::git::git_files_status,
+            commands::git::git_show_head_file,
             commands::git::git_stage,
             commands::git::git_unstage,
             commands::git::git_commit,

@@ -10,7 +10,7 @@ import { ptyWrite } from '@/utils/ipc';
 import { colors, glass, radius, spacing, typography, fonts, motion as motionTokens, alpha } from '@/design/tokens';
 import { saveSnapshot, listSnapshots, loadSnapshot } from '@/utils/ipc';
 import { save as dialogSave, open as dialogOpen } from '@tauri-apps/plugin-dialog';
-import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
+import { readFileText, writeFileText } from '@/utils/ipc';
 import type { TileType } from '@/types';
 
 interface CommandPaletteProps {
@@ -181,7 +181,7 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
             filters: [{ name: 'JSON', extensions: ['json'] }],
           });
           if (!filePath) return;
-          await writeTextFile(filePath, JSON.stringify(payload, null, 2));
+          await writeFileText(filePath, JSON.stringify(payload, null, 2));
           useTimelineStore.getState().recordEvent('snapshot-saved', `Exported workspace to file`);
         } catch (e) {
           console.error('Export failed:', e);
@@ -202,7 +202,7 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
             multiple: false,
           });
           if (!filePath) return;
-          const raw = await readTextFile(filePath as string);
+          const raw = await readFileText(filePath as string);
           const data = JSON.parse(raw);
           if (!data || typeof data.version !== 'number' || !Array.isArray(data.tiles)) {
             alert('Invalid workspace file.');
