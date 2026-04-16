@@ -4,6 +4,10 @@ version = "0.1.0"
 description = "Infinite canvas terminal workspace"
 authors = ["Fantom Labs"]
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/txc0ld/tmx"
+homepage = "https://txc0ld.github.io/tmx/"
+readme = "../README.md"
 
 [lib]
 name = "terminalx_lib"
