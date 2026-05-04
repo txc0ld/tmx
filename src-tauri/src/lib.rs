@@ -84,6 +84,11 @@ pub fn run() {
             commands::secrets::secret_set,
             commands::secrets::secret_get,
             commands::secrets::secret_delete,
+            // Pipeline (agentic-pipeline Phase 1)
+            commands::pipeline::pipeline_install_skills,
+            commands::pipeline::pipeline_preflight,
+            commands::pipeline::pipeline_worktree_create,
+            commands::pipeline::pipeline_worktree_destroy,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { TileType } from '@/types';
+import type { TileType, PipelineRole, RoleCapabilities, WireType } from '@/types';
 
 export interface TileTemplate {
   id: string;
@@ -8,6 +8,45 @@ export interface TileTemplate {
   description?: string;
   config: Record<string, unknown>;
   isBuiltin: boolean;
+}
+
+export interface PipelineTileSpec {
+  role: PipelineRole;
+  type: TileType;
+  position: { x: number; y: number; w: number; h: number };
+  config: Record<string, unknown>;
+}
+
+export interface PipelineWireSpec {
+  fromRole: PipelineRole;
+  toRole: PipelineRole;
+  wireType: WireType;
+}
+
+export interface PipelineConfig {
+  retryBudget: { reviewerReject: number; ciFail: number };
+  dualReviewer: boolean;
+  requireMergeGate: boolean;
+  skillBindings: Partial<Record<PipelineRole, string[]>>;
+  testCommand?: string;
+  capabilities?: Partial<Record<PipelineRole, RoleCapabilities>>;
+}
+
+export interface PipelineTemplate {
+  kind: 'pipeline';
+  id: string;
+  name: string;
+  description?: string;
+  isBuiltin: boolean;
+  tiles: PipelineTileSpec[];
+  wires: PipelineWireSpec[];
+  pipeline: PipelineConfig;
+}
+
+export type AnyTemplate = TileTemplate | PipelineTemplate;
+
+export function isPipelineTemplate(t: AnyTemplate): t is PipelineTemplate {
+  return (t as { kind?: string }).kind === 'pipeline';
 }
 
 const BUILTIN_TEMPLATES: TileTemplate[] = [

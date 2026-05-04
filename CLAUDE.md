@@ -33,7 +33,7 @@ cd src-tauri && cargo test     # Rust tests
 
 Entry: `main.tsx` → `AppErrorBoundary` → `App.tsx`. All inline styles (except `xterm.css`). Colors via CSS custom properties set by `themeStore`. Monaco Editor/DiffEditor are lazy-loaded.
 
-**Stores (`stores/`, Zustand 5, 14 total):**
+**Stores (`stores/`, Zustand 5, 15 total):**
 - `canvasStore` — Central state: tiles, wires, transforms, z-stack, focus mode, multi-select, bookmarks, workspace tabs, snap guides, sticky notes, wire data bus (500KB cap per PTY)
 - `projectStore` — Project CRUD, active-project persistence. Starts empty — users add projects via the + button in the sidebar.
 - `themeStore` — 6 themes (5 dark + 1 light `Slate`). CSS var application via `applyThemeToDOM()`. Light themes get dark tile surfaces + dark chrome.
@@ -44,9 +44,10 @@ Entry: `main.tsx` → `AppErrorBoundary` → `App.tsx`. All inline styles (excep
 - `commandHistoryStore` — Per-terminal command buffer.
 - `templateStore` — 16 built-in + user templates in localStorage.
 - `pluginStore` — Custom tile types via sandboxed iframes.
+- `pipelineStore` — Agentic pipeline run state machine (Phase 1: foundation; full execution lands in Phase 2). See `docs/superpowers/specs/2026-05-03-agentic-pipeline-template-design.md`.
 - `toastStore`, `timelineStore`, `clipboardStore`, `paletteStore`.
 
-**Tile system:** 15 types via discriminated union in `types/index.ts` (agent, terminal, editor, diff, note, todo, kanban, filetree, git, browser, runner, ssh, docker, usage, group). Each has a component in `components/tiles/`. `TileShell.tsx` (memo'd) wraps every tile with drag + resize + snap + z-order + title-bar chrome (5 buttons: pin/clone/detach/template/close, shown on hover).
+**Tile system:** 16 types via discriminated union in `types/index.ts` (agent, terminal, editor, diff, note, todo, kanban, filetree, git, browser, runner, ssh, docker, usage, group, pipeline-controller). Each has a component in `components/tiles/`. `TileShell.tsx` (memo'd) wraps every tile with drag + resize + snap + z-order + title-bar chrome (5 buttons: pin/clone/detach/template/close, shown on hover).
 
 - **DiffTile** — three modes via tabs: **Git changes** (sidebar lists `git status --porcelain` files, click one → diff vs HEAD via `git_show_head_file`), **Compare files** (two native file pickers using `@tauri-apps/plugin-dialog`), **Paste** (two textareas → Monaco DiffEditor). Mode + per-mode state (`gitTarget`, `compareLeft/Right`, `pasteOriginal/Modified`) all live on the tile. Back-compat: `mode` optional, defaults to `'git'`.
 
@@ -126,6 +127,18 @@ Large PTY writes get truncated on Windows. `PtyManager.write()` chunks ALL write
 ### Light theme surface inversion
 
 When `isLightBg()` is true, `applyThemeToDOM()` sets dark surface colors so tiles and chrome stay dark with white text while the canvas background is light. xterm terminals also flip via `isLightTheme()` in each terminal component.
+
+## Pipeline Templates (Phase 1 foundation)
+
+Multi-tile templates that lay down a wired set of agent + helper tiles + a `pipeline-controller` tile, owned by `pipelineStore`. Phase 1 ships the foundation: state machine, fingerprint, worktree IPCs, controller tile rendering. Phase 2 wires live agent execution. See `docs/superpowers/specs/2026-05-03-agentic-pipeline-template-design.md` for the full design and `2026-05-04-...-addendum.md` for the post-v1 roadmap.
+
+**State machine** lives in `src/pipeline/state-machine.ts` as a pure reducer; `src/stores/pipelineStore.ts` wraps it. Direct dispatch via `usePipelineStore.getState().dispatch(runId, event)`. The reducer guarantees identity preservation on no-op transitions, and `pipelineStore.dispatch` short-circuits to avoid re-render churn.
+
+**Worktree IPCs** (`pipeline_worktree_create` / `pipeline_worktree_destroy`) and `pipeline_preflight` validate path/branch args against control-char + shell-metachar checks per the same pattern as `agent_spawn` (see `commands/agents.rs`). Cross-platform: cleanup uses `git worktree remove --force` plus a fallback `remove_dir_all` for cases where git's removal misses files.
+
+**Skills installation** (`pipeline_install_skills`) is a Phase 1 stub: it reports the target dir (`~/.claude/skills/`) and which bundled skills are already present, without yet copying files. Phase 2 ships the bundle in `src-tauri/resources/skills/` and signs each `SKILL.md` with the updater key.
+
+## Pass-Through Contracts
 
 ### Reading project files: use the Rust IPC, not the fs plugin
 

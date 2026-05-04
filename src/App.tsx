@@ -27,6 +27,7 @@ export const TILE_DEFAULTS: Record<TileType, { w: number; h: number }> = {
   diff: { w: 500, h: 400 },
   todo: { w: 320, h: 400 },
   note: { w: 320, h: 300 },
+  'pipeline-controller': { w: 600, h: 240 },
   kanban: { w: 700, h: 500 },
   filetree: { w: 280, h: 500 },
   group: { w: 400, h: 300 },

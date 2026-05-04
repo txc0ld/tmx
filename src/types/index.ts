@@ -9,7 +9,7 @@ declare global {
 
 // ─── Tile Types ───────────────────────────────────────────────────────
 
-export type TileType = 'agent' | 'terminal' | 'browser' | 'todo' | 'diff' | 'editor' | 'note' | 'kanban' | 'filetree' | 'group' | 'runner' | 'ssh' | 'docker' | 'git' | 'usage';
+export type TileType = 'agent' | 'terminal' | 'browser' | 'todo' | 'diff' | 'editor' | 'note' | 'kanban' | 'filetree' | 'group' | 'runner' | 'ssh' | 'docker' | 'git' | 'usage' | 'pipeline-controller';
 export type AgentType = 'claude' | 'codex' | 'gemini';
 export type AgentStatus = 'spawning' | 'idle' | 'working' | 'done' | 'error';
 
@@ -207,7 +207,179 @@ export interface UsageTile extends TileBase {
   type: 'usage';
 }
 
-export type Tile = AgentTile | TerminalTile | BrowserTile | TodoTile | DiffTile | EditorTile | NoteTile | KanbanTile | FileTreeTile | GroupTile | RunnerTile | SshTile | DockerTile | GitTile | UsageTile;
+// ─── Pipeline (Phase 1 foundation) ─────────────────────────────────
+
+export type PipelineRole =
+  | 'planner' | 'builder' | 'reviewer' | 'reviewer-codex' | 'controller';
+
+export type PipelineState =
+  | 'idle'
+  | 'planning'
+  | 'awaiting_plan_approval'
+  | 'building'
+  | 'reviewing'
+  | 'awaiting_clarification'
+  | 'awaiting_merge_approval'
+  | 'merging'
+  | 'done'
+  | 'failed'
+  | 'escalated';
+
+export type FailureClass =
+  | 'preflight_env'
+  | 'planner_refused'
+  | 'builder_loop'
+  | 'reviewer_irreconcilable'
+  | 'reviewer_disagreement_unresolved'
+  | 'budget_exceeded'
+  | 'stage_unresponsive'
+  | 'subagent_failed'
+  | 'external_dep'
+  | 'secrets_violation'
+  | 'unknown';
+
+export interface RunFingerprint {
+  templateId: string;
+  templateHash: string;
+  skillHashes: Record<string, string>;
+  rolePromptHashes: Partial<Record<PipelineRole, string>>;
+  invariantsHash?: string;
+  models: Partial<Record<PipelineRole, string>>;
+  capabilityManifests: Partial<Record<PipelineRole, string>>;
+  terminalxVersion: string;
+  claudeVersion?: string;
+  codexVersion?: string;
+  runStartCommit?: string;
+}
+
+export interface RoleCapabilities {
+  fileWrites: { allow: string[]; deny: string[] };
+  shell: { allowPatterns: string[]; denyPatterns: string[] };
+  network: 'none' | 'package-managers' | 'unrestricted';
+  mcpTools: string[];
+  maxFileSize: number;
+}
+
+export interface PlanTask {
+  id: string;
+  summary: string;
+  files: string[];
+  tests: string[];
+  acceptance: string;
+}
+
+export interface PlanArtifact {
+  stage: 'planner';
+  branch: string;
+  specPath: string;
+  planPath: string;
+  tasks: PlanTask[];
+  summary: string;
+  complexity?: 'trivial' | 'standard' | 'complex';
+}
+
+export interface BuildCommit {
+  sha: string;
+  subject: string;
+  files: string[];
+}
+
+export interface BuildArtifact {
+  stage: 'builder';
+  branch: string;
+  headSha: string;
+  round: number;
+  commits: BuildCommit[];
+  filesChanged: string[];
+  testsAdded: string[];
+  ciStatus: 'green' | 'red' | 'unknown';
+  notes?: string;
+}
+
+export interface ReviewComment {
+  severity: 'blocker' | 'concern' | 'nit';
+  file: string;
+  line: number;
+  issue: string;
+  suggestion?: string;
+  seenBy?: Array<'opus' | 'codex'>;
+}
+
+export interface ReviewVerdict {
+  stage: 'reviewer';
+  reviewer: 'opus' | 'codex' | 'merged';
+  verdict: 'approve' | 'reject';
+  round: number;
+  comments: ReviewComment[];
+  summary: string;
+  confidence?: 'verified' | 'likely' | 'uncertain';
+  uncertaintyDrivers?: string[];
+  diffChunksReviewed?: number;
+}
+
+export interface CIFailure {
+  test: string;
+  output: string;
+}
+
+export interface CIResult {
+  sha: string;
+  status: 'pass' | 'fail';
+  step: 'format' | 'lint' | 'typecheck' | 'test' | 'all';
+  command: string;
+  durationMs: number;
+  failures: CIFailure[];
+}
+
+export interface QuestionArtifact {
+  stage: PipelineRole;
+  question: string;
+  context: string;
+  options?: string[];
+  blocking: true;
+}
+
+export interface EscalationEntry {
+  at: number;
+  reason: string;
+  exhaustedCounter?: 'reviewerReject' | 'ciFail';
+  decision: 'replan' | 'escalate' | 'manual_resolve';
+  newPlanRef?: string;
+}
+
+export interface PipelineRunArtifacts {
+  plan?: PlanArtifact;
+  builds: BuildArtifact[];
+  reviews: ReviewVerdict[];
+  ciResults: CIResult[];
+  questions: QuestionArtifact[];
+}
+
+export interface PipelineRun {
+  id: string;
+  templateId: string;
+  projectId: string;
+  worktreePath: string;
+  branch: string;
+  state: PipelineState;
+  artifacts: PipelineRunArtifacts;
+  retryCounters: { reviewerReject: number; ciFail: number };
+  startedAt: number;
+  endedAt?: number;
+  failureReason?: string;
+  failureClass?: FailureClass;
+  escalationLog: EscalationEntry[];
+  tiles: Partial<Record<PipelineRole, string>>;
+  fingerprint: RunFingerprint;
+  lastHeartbeatAt?: number;
+}
+
+export interface PipelineControllerTile extends TileBase {
+  type: 'pipeline-controller';
+  runId: string;
+}
+
+export type Tile = AgentTile | TerminalTile | BrowserTile | TodoTile | DiffTile | EditorTile | NoteTile | KanbanTile | FileTreeTile | GroupTile | RunnerTile | SshTile | DockerTile | GitTile | UsageTile | PipelineControllerTile;
 
 // ─── Project ──────────────────────────────────────────────────────────
 

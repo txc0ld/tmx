@@ -21,6 +21,7 @@ import { FileTreeTile } from '@/components/tiles/FileTreeTile';
 import { GroupTileComponent } from '@/components/tiles/GroupTile';
 import { RunnerTile as RunnerTileComponent } from '@/components/tiles/RunnerTile';
 import { GitTile } from '@/components/tiles/GitTile';
+import { PipelineControllerTile } from '@/components/tiles/PipelineControllerTile';
 
 // Lazy-load tile components that pull large dependencies or aren't used in
 // the typical first-load flow. Each becomes its own chunk; Suspense shows a
@@ -85,6 +86,8 @@ function renderTileContent(tile: Tile) {
       return <GitTile tile={tile as GitTileType} />;
     case 'usage':
       return <UsageTile />;
+    case 'pipeline-controller':
+      return <PipelineControllerTile tile={tile} />;
     default:
       return null;
   }
