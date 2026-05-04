@@ -356,6 +356,15 @@ function validateUsage(_raw: Record<string, unknown>, base: ReturnType<typeof va
   return { ...base, type: 'usage' };
 }
 
+function validatePipelineController(raw: Record<string, unknown>, base: ReturnType<typeof validateBase>): Tile {
+  // pipeline-controller tiles aren't legitimately exportable in Phase 1 —
+  // they're spawned by pipeline runs and bound to runtime-only run state.
+  // Best-effort restore: preserve the runId if present, else empty (the
+  // tile renders a "No run bound" fallback).
+  const runId = typeof raw.runId === 'string' ? raw.runId : '';
+  return { ...base, type: 'pipeline-controller', runId };
+}
+
 // ─── Dispatch table ────────────────────────────────────────────────
 // Using a dispatch table (instead of a switch) keeps the entry points
 // obvious and future tile additions easy to wire in.
@@ -375,6 +384,7 @@ const TILE_VALIDATORS: Record<TileType, (raw: Record<string, unknown>, base: Ret
   docker: validateDocker,
   git: validateGit,
   usage: validateUsage,
+  'pipeline-controller': validatePipelineController,
 };
 
 export function validateTile(raw: unknown): Tile {
