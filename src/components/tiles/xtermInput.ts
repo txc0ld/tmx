@@ -91,6 +91,78 @@ function keyToSequence(e: KeyboardEvent, applicationCursorMode?: boolean): strin
 }
 
 /* ------------------------------------------------------------------ */
+/*  Clipboard paste                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Save a clipboard image blob to the app data dir and write its path to
+ * the PTY. Mirrors the behavior agents expect (`@/path/to/image`).
+ */
+async function pasteImageBlob(
+  blob: Blob,
+  mimeType: string,
+  writeToPty: (data: string) => void,
+): Promise<void> {
+  try {
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const ext = mimeType.split('/')[1]?.split(';')[0] || 'png';
+    const fileName = `clipboard-${Date.now()}.${ext}`;
+
+    const { appDataDir } = await import('@tauri-apps/api/path');
+    const { writeFile, mkdir, exists } = await import('@tauri-apps/plugin-fs');
+
+    const baseDir = await appDataDir();
+    const imgDir = baseDir + 'clipboard-images';
+    if (!(await exists(imgDir))) await mkdir(imgDir, { recursive: true });
+
+    const filePath = imgDir + '/' + fileName;
+    await writeFile(filePath, bytes);
+    writeToPty(filePath);
+  } catch (err) {
+    console.error('Failed to save clipboard image:', err);
+    writeToPty('[image paste failed]');
+  }
+}
+
+/**
+ * Read the system clipboard and write its contents to the PTY.
+ * Used when the user presses Cmd/Ctrl+V (or Ctrl+Shift+V on Linux/Win) —
+ * we can't rely on the native `paste` event firing on a non-editable
+ * `<div tabindex=0>` across WebView2 / WKWebView, and on Win/Linux the
+ * keydown handler intercepts Ctrl+V as ^V before any paste event fires.
+ *
+ * Falls back gracefully: if `clipboard.read()` fails or returns no image,
+ * we read text instead and emit a bracketed-paste sequence so readline-
+ * aware programs (shells, agent CLIs) handle multi-line content correctly.
+ */
+async function pasteFromClipboard(writeToPty: (data: string) => void): Promise<void> {
+  // Image first — covers screenshots / pictures copied from external apps.
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          await pasteImageBlob(blob, imageType, writeToPty);
+          return;
+        }
+      }
+    } catch {
+      // No image, no permission, or unsupported — fall through to text.
+    }
+  }
+
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) writeToPty('\x1b[200~' + text + '\x1b[201~');
+  } catch (err) {
+    console.error('Clipboard read failed:', err);
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public API                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -117,6 +189,18 @@ export function attachKeyboardCapture(
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
+    // Cmd/Ctrl+V (and Ctrl+Shift+V terminal-paste) → read clipboard and
+    // bracketed-paste. Must run BEFORE keyToSequence, which would otherwise
+    // turn Ctrl+V into ^V (0x16) on Windows/Linux.
+    const isPasteShortcut =
+      (e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'v' || e.key === 'V');
+    if (isPasteShortcut) {
+      e.preventDefault();
+      e.stopPropagation();
+      void pasteFromClipboard(writeToPty);
+      return;
+    }
+
     const appCursorMode = terminal?._core?.modes?.applicationCursorKeysMode ?? false;
     const seq = keyToSequence(e, appCursorMode);
     if (seq !== null) {
@@ -130,7 +214,7 @@ export function attachKeyboardCapture(
     const tag = (e.target as HTMLElement)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
-    // Check for image data first (screenshots, copied images)
+    // Image data first (screenshots, copied images from external apps).
     const items = e.clipboardData?.items;
     if (items) {
       for (let i = 0; i < items.length; i++) {
@@ -139,44 +223,14 @@ export function attachKeyboardCapture(
           e.preventDefault();
           const blob = item.getAsFile();
           if (!blob) continue;
-
-          try {
-            // Read image as base64
-            const buffer = await blob.arrayBuffer();
-            const bytes = new Uint8Array(buffer);
-
-            // Save to temp file via Tauri
-            const ext = item.type.split('/')[1] || 'png';
-            const fileName = `clipboard-${Date.now()}.${ext}`;
-
-            const { appDataDir } = await import('@tauri-apps/api/path');
-            const { writeFile, mkdir, exists } = await import('@tauri-apps/plugin-fs');
-
-            const baseDir = await appDataDir();
-            const imgDir = baseDir + 'clipboard-images';
-
-            // Ensure directory exists
-            const dirExists = await exists(imgDir);
-            if (!dirExists) await mkdir(imgDir, { recursive: true });
-
-            const filePath = imgDir + '/' + fileName;
-            await writeFile(filePath, bytes);
-
-            // Paste the file path into the terminal
-            writeToPty(filePath);
-          } catch (err) {
-            console.error('Failed to save clipboard image:', err);
-            writeToPty('[image paste failed]');
-          }
+          await pasteImageBlob(blob, item.type, writeToPty);
           return;
         }
       }
     }
 
-    // Fall back to text paste
     const text = e.clipboardData?.getData('text');
     if (text) {
-      // Bracketed paste so readline-aware programs handle multi-line correctly
       writeToPty('\x1b[200~' + text + '\x1b[201~');
       e.preventDefault();
     }
