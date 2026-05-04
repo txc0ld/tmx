@@ -346,3 +346,59 @@ export async function httpFetch(opts: {
 }): Promise<ProxyResponse> {
   return invoke('http_fetch', { req: opts });
 }
+
+// ─── Pipeline (Phase 1) ───────────────────────────────────────
+
+export interface PreflightResult {
+  is_git_repo: boolean;
+  working_tree_clean: boolean;
+  main_branch: string | null;
+  claude_present: boolean;
+  codex_present: boolean;
+  gh_present: boolean;
+  gh_authenticated: boolean;
+  worktree_dir_writable: boolean;
+  errors: string[];
+}
+
+export interface WorktreeCreateResult {
+  path: string;
+  branch: string;
+}
+
+export interface InstallSkillsResult {
+  skills_dir: string;
+  installed: string[];
+  already_present: string[];
+  stub: boolean;
+}
+
+export async function pipelinePreflight(projectDir: string): Promise<PreflightResult> {
+  return invoke<PreflightResult>('pipeline_preflight', { projectDir });
+}
+
+export async function pipelineWorktreeCreate(opts: {
+  projectDir: string;
+  branch: string;
+  worktreePath: string;
+  baseBranch?: string;
+}): Promise<WorktreeCreateResult> {
+  return invoke<WorktreeCreateResult>('pipeline_worktree_create', {
+    projectDir: opts.projectDir,
+    branch: opts.branch,
+    worktreePath: opts.worktreePath,
+    baseBranch: opts.baseBranch ?? null,
+  });
+}
+
+export async function pipelineWorktreeDestroy(opts: {
+  projectDir: string;
+  worktreePath: string;
+  branch: string;
+}): Promise<void> {
+  await invoke<void>('pipeline_worktree_destroy', opts);
+}
+
+export async function pipelineInstallSkills(): Promise<InstallSkillsResult> {
+  return invoke<InstallSkillsResult>('pipeline_install_skills');
+}
