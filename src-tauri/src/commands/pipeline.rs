@@ -7,11 +7,6 @@
 //!
 //! Future phases extend this with `pipeline_merger_run`, `agent_run_oneshot`, etc.
 
-// Phase 1 lands these commands and result types in tranches; later tasks wire
-// them into lib.rs invoke_handler and consume helper structs. Allow dead code
-// at the module level so the scaffold stays clippy-clean between tranches.
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
