@@ -30,6 +30,7 @@ export const usePipelineStore = create<PipelineStoreShape>((set) => ({
   createRun: (input) => {
     const run = initialRunState(input);
     set(s => {
+      if (s.runs[run.id]) return s;               // idempotent on collision
       const runs = { ...s.runs, [run.id]: run };
       return { runs, activeRunIds: deriveActive(runs) };
     });
@@ -41,6 +42,7 @@ export const usePipelineStore = create<PipelineStoreShape>((set) => ({
       const existing = s.runs[runId];
       if (!existing) return s;
       const next = reducer(existing, ev);
+      if (next === existing) return s;            // identity preserved → no-op, no churn
       const runs = { ...s.runs, [runId]: next };
       return { runs, activeRunIds: deriveActive(runs) };
     });
