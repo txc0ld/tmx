@@ -13,6 +13,7 @@ const REVIEWER_REJECT_BUDGET = 3;
 const CI_FAIL_BUDGET = 3;
 
 const TERMINAL_STATES: ReadonlySet<PipelineState> = new Set(['done', 'failed', 'escalated']);
+const ACTIVE_STAGES: ReadonlySet<PipelineState> = new Set(['planning', 'building', 'reviewing', 'merging']);
 
 export type PipelineEvent =
   | { type: 'start' }
@@ -61,7 +62,7 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
   // Abort and terminal-stickiness handled first
   if (ev.type === 'abort') {
     if (TERMINAL_STATES.has(run.state)) return run;
-    return { ...run, state: 'failed', failureReason: ev.reason, endedAt: Date.now() };
+    return { ...run, state: 'failed', failureReason: ev.reason, failureClass: 'unknown', endedAt: Date.now() };
   }
   if (TERMINAL_STATES.has(run.state)) return run;
 
@@ -85,6 +86,7 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
       return run;
 
     case 'builder_done':
+      if (run.state !== 'building') return run;
       return {
         ...run,
         state: 'reviewing',
@@ -92,6 +94,7 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
       };
 
     case 'reviewer_done': {
+      if (run.state !== 'reviewing') return run;
       const reviews = [...run.artifacts.reviews, ev.verdict];
       if (ev.verdict.verdict === 'approve') {
         return {
@@ -148,6 +151,7 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
     }
 
     case 'question_raised':
+      if (!ACTIVE_STAGES.has(run.state)) return run;
       return {
         ...run,
         state: 'awaiting_clarification',
@@ -163,13 +167,15 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
       return run;
 
     case 'reject_merge':
-      if (run.state === 'awaiting_merge_approval') return { ...run, state: 'failed', failureReason: 'merge_rejected', endedAt: Date.now() };
+      if (run.state === 'awaiting_merge_approval') return { ...run, state: 'failed', failureReason: 'merge_rejected', failureClass: 'unknown', endedAt: Date.now() };
       return run;
 
     case 'merge_done':
+      if (run.state !== 'merging') return run;
       return { ...run, state: 'done', endedAt: Date.now() };
 
     case 'merge_failed':
-      return { ...run, state: 'failed', failureReason: ev.reason, endedAt: Date.now() };
+      if (run.state !== 'merging') return run;
+      return { ...run, state: 'failed', failureReason: ev.reason, failureClass: 'unknown', endedAt: Date.now() };
   }
 }

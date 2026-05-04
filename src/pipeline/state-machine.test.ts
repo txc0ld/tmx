@@ -193,4 +193,80 @@ describe('pipeline state machine', () => {
     expect(run.artifacts.builds).toEqual([]);
     expect(run.retryCounters).toEqual({ reviewerReject: 0, ciFail: 0 });
   });
+
+  it('planner_failed → failed with planner_refused class', () => {
+    const run = makeRun({ state: 'planning' });
+    const ev: PipelineEvent = { type: 'planner_failed', reason: 'cannot resolve plan' };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('failed');
+    expect(next.failureClass).toBe('planner_refused');
+    expect(next.failureReason).toBe('cannot resolve plan');
+    expect(next.endedAt).toBeGreaterThan(0);
+  });
+
+  it('ci_pass appends to ciResults without changing state', () => {
+    const run = makeRun({ state: 'building' });
+    const ev: PipelineEvent = {
+      type: 'ci_pass',
+      result: { sha: 'a', status: 'pass', step: 'all', command: 'npm test', durationMs: 1, failures: [] },
+    };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('building');
+    expect(next.artifacts.ciResults.length).toBe(1);
+  });
+
+  it('awaiting_merge_approval + reject_merge → failed', () => {
+    const run = makeRun({ state: 'awaiting_merge_approval' });
+    const ev: PipelineEvent = { type: 'reject_merge' };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('failed');
+    expect(next.failureReason).toBe('merge_rejected');
+    expect(next.endedAt).toBeGreaterThan(0);
+  });
+
+  it('merging + merge_failed → failed', () => {
+    const run = makeRun({ state: 'merging' });
+    const ev: PipelineEvent = { type: 'merge_failed', reason: 'gh push rejected' };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('failed');
+    expect(next.failureReason).toBe('gh push rejected');
+    expect(next.endedAt).toBeGreaterThan(0);
+  });
+
+  it('abort is a no-op when already in a terminal state (idempotent)', () => {
+    const run = makeRun({ state: 'failed', failureReason: 'first abort', endedAt: 100 });
+    const ev: PipelineEvent = { type: 'abort', reason: 'second abort' };
+    const next = reducer(run, ev);
+    expect(next).toBe(run);
+  });
+
+  it('non-terminal transition does not set endedAt', () => {
+    const run = makeRun({ state: 'building' });
+    const ev: PipelineEvent = {
+      type: 'builder_done',
+      build: {
+        stage: 'builder', branch: 'feat/r1', headSha: 'a', round: 1,
+        commits: [], filesChanged: [], testsAdded: [], ciStatus: 'green',
+      },
+    };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('reviewing');
+    expect(next.endedAt).toBeUndefined();
+  });
+
+  it('reviewer reject exceeds budget sets retryCounter to 4', () => {
+    const run = makeRun({
+      state: 'reviewing',
+      retryCounters: { reviewerReject: 3, ciFail: 0 },
+    });
+    const ev: PipelineEvent = {
+      type: 'reviewer_done',
+      verdict: {
+        stage: 'reviewer', reviewer: 'opus', verdict: 'reject',
+        round: 4, comments: [], summary: 'no',
+      },
+    };
+    const next = reducer(run, ev);
+    expect(next.retryCounters.reviewerReject).toBe(4);
+  });
 });
