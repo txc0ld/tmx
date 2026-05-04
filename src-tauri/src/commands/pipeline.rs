@@ -273,6 +273,40 @@ pub fn pipeline_worktree_destroy(
     destroy_worktree_inner(Path::new(&project_dir), Path::new(&worktree_path), &branch)
 }
 
+fn skills_dir() -> PathBuf {
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join(".claude").join("skills");
+    }
+    if let Some(profile) = std::env::var_os("USERPROFILE") {
+        return PathBuf::from(profile).join(".claude").join("skills");
+    }
+    PathBuf::from(".claude").join("skills")
+}
+
+const BUNDLED_PIPELINE_SKILLS: &[&str] = &["tx-pipeline-stage-handoff", "tx-pipeline-reviewer"];
+
+fn install_skills_inner() -> InstallSkillsResult {
+    let dir = skills_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let mut already = Vec::new();
+    for s in BUNDLED_PIPELINE_SKILLS {
+        if dir.join(s).join("SKILL.md").exists() {
+            already.push((*s).to_string());
+        }
+    }
+    InstallSkillsResult {
+        skills_dir: dir.to_string_lossy().to_string(),
+        installed: Vec::new(),
+        already_present: already,
+        stub: true,
+    }
+}
+
+#[tauri::command]
+pub fn pipeline_install_skills() -> Result<InstallSkillsResult, String> {
+    Ok(install_skills_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,5 +481,12 @@ mod tests {
             "feat/never",
         );
         assert!(res.is_ok(), "destroy should be idempotent");
+    }
+
+    #[test]
+    fn install_skills_stub_returns_metadata() {
+        let res = install_skills_inner();
+        assert!(res.stub);
+        assert!(!res.skills_dir.is_empty());
     }
 }
