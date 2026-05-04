@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { TileType, PipelineRole, RoleCapabilities } from '@/types';
+import type { TileType, PipelineRole, RoleCapabilities, WireType } from '@/types';
 
 export interface TileTemplate {
   id: string;
@@ -20,7 +20,7 @@ export interface PipelineTileSpec {
 export interface PipelineWireSpec {
   fromRole: PipelineRole;
   toRole: PipelineRole;
-  wireType: 'context-pipe' | 'agent-chain' | 'task-assign' | 'refresh-trigger' | 'diff-feed';
+  wireType: WireType;
 }
 
 export interface PipelineConfig {
