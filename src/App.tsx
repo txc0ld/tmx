@@ -4,7 +4,7 @@ import { useProjectStore } from '@/stores/projectStore';
 import { useTimelineStore } from '@/stores/timelineStore';
 import { colors } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
-import { loadWorkspace } from '@/utils/ipc';
+import { loadWorkspace, pipelineInstallSkills } from '@/utils/ipc';
 import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas';
 import { ProjectSidebar } from '@/components/sidebar/ProjectSidebar';
 import { TopBar } from '@/components/topbar/TopBar';
@@ -100,6 +100,29 @@ export default function App() {
   // or the app re-renders at the root.
   useEffect(() => initMcpProjectSync(), []);
   useEffect(() => initUsageTracking(), []);
+
+  // Auto-install pipeline skills (`tx-pipeline-stage-handoff`,
+  // `tx-pipeline-reviewer`) into ~/.claude/skills/ on first mount.
+  // Idempotent: skills already present are skipped. Errors surface
+  // as console.warn but never crash the app.
+  useEffect(() => {
+    let mounted = true;
+    pipelineInstallSkills()
+      .then(res => {
+        if (!mounted) return;
+        if (res.installed.length > 0) {
+          console.info('[pipeline] installed skills:', res.installed.join(', '));
+        }
+        if (res.errors.length > 0) {
+          console.warn('[pipeline] skill install errors:', res.errors);
+        }
+      })
+      .catch(err => {
+        if (!mounted) return;
+        console.warn('[pipeline] skill install failed:', err);
+      });
+    return () => { mounted = false; };
+  }, []);
 
   // One-shot migration on app start: move any MCP secrets still living
   // in localStorage into the OS keychain, strip them from the JSON

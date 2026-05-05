@@ -47,6 +47,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": [
+      "resources/skills/**/*"
+    ],
     "windows": {
       "wix": {
         "language": "en-US"

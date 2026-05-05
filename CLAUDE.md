@@ -136,7 +136,7 @@ Multi-tile templates that lay down a wired set of agent + helper tiles + a `pipe
 
 **Worktree IPCs** (`pipeline_worktree_create` / `pipeline_worktree_destroy`) and `pipeline_preflight` validate path/branch args against control-char + shell-metachar checks per the same pattern as `agent_spawn` (see `commands/agents.rs`). Cross-platform: cleanup uses `git worktree remove --force` plus a fallback `remove_dir_all` for cases where git's removal misses files.
 
-**Skills installation** (`pipeline_install_skills`) is a Phase 1 stub: it reports the target dir (`~/.claude/skills/`) and which bundled skills are already present, without yet copying files. Phase 2 ships the bundle in `src-tauri/resources/skills/` and signs each `SKILL.md` with the updater key.
+**Skills installation** (`pipeline_install_skills`) bundles `tx-pipeline-stage-handoff` + `tx-pipeline-reviewer` SKILL.md files inside the app via Tauri `bundle.resources` (`src-tauri/resources/skills/**/*`). On first mount, `App.tsx` invokes the Rust command which resolves the bundle via `app.path().resource_dir()` and copies any missing skill into `~/.claude/skills/<name>/`. Existing skills are left alone (no auto-overwrite — Phase 3 ships an explicit upgrade UI). Per-skill copy errors are recorded in `errors: string[]` and surfaced as `console.warn` but never crash the app. Skill provenance signing (verifying the bundle hasn't been tampered with vs the TerminalX release key) lands in Phase 2c with the broader security work.
 
 ## Pass-Through Contracts
 

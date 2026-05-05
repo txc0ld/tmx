@@ -370,6 +370,7 @@ export interface InstallSkillsResult {
   skills_dir: string;
   installed: string[];
   already_present: string[];
+  errors: string[];
   stub: boolean;
 }
 
