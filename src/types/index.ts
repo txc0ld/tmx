@@ -276,6 +276,12 @@ export interface PlanArtifact {
   tasks: PlanTask[];
   summary: string;
   complexity?: 'trivial' | 'standard' | 'complex';
+  /**
+   * Commit SHA of the planner's commit that wrote `specPath` + `planPath`.
+   * Required: the planner role-prompt commits before emitting the sentinel.
+   * Captured into `PipelineRun.planLineage` on `planner_done`.
+   */
+  commitSha: string;
 }
 
 export interface BuildCommit {
@@ -372,6 +378,14 @@ export interface PipelineRun {
   tiles: Partial<Record<PipelineRole, string>>;
   fingerprint: RunFingerprint;
   lastHeartbeatAt?: number;
+  /**
+   * Commit SHAs (one per plan version) — index 0 is v1 (initial plan), index N
+   * is v(N+1). Empty until the first `planner_done` lands. Grows by one entry
+   * per `planner_done` (including re-plans triggered via `replan_requested`).
+   * Required (not optional) so missing-field bugs surface at compile time
+   * rather than as silent empty arrays at runtime.
+   */
+  planLineage: string[];
 }
 
 export interface PipelineControllerTile extends TileBase {
