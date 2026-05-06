@@ -87,6 +87,8 @@ pub fn run() {
             commands::secrets::secret_delete,
             // Pipeline (agentic-pipeline Phase 1)
             commands::pipeline::pipeline_install_skills,
+            commands::pipeline::pipeline_merger_request_token,
+            commands::pipeline::pipeline_merger_run,
             commands::pipeline::pipeline_preflight,
             commands::pipeline::pipeline_run_verification_step,
             commands::pipeline::pipeline_telemetry_log,

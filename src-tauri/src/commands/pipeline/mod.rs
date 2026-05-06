@@ -6,13 +6,16 @@
 //! - skills: pipeline_install_skills (bundled SKILL.md → ~/.claude/skills/)
 //! - telemetry: pipeline_telemetry_log (JSONL append per run)
 //! - verification: pipeline_run_verification_step (CI hook executor)
+//! - merger: pipeline_merger_run + pipeline_merger_request_token (Phase 2c-ii)
 
+pub mod merger;
 pub mod preflight;
 pub mod skills;
 pub mod telemetry;
 pub mod verification;
 pub mod worktree;
 
+pub use merger::*;
 pub use preflight::*;
 pub use skills::*;
 pub use telemetry::*;

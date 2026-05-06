@@ -445,6 +445,50 @@ export async function pipelineRunVerificationStep(opts: {
   });
 }
 
+// ─── Pipeline merger (Phase 2c-ii) ────────────────────────────
+
+export interface MergerResult {
+  status: 'success' | 'failure' | 'invalid_token';
+  mode: 'pr' | 'local' | 'unknown';
+  pr_url: string | null;
+  detail: string;
+}
+
+/**
+ * Request a one-shot 5-min confirm-token bound to `runId`. The UI confirm modal
+ * (Phase 2c-ii.2) issues this immediately before calling `pipelineMergerRun` so
+ * no IPC caller can merge without going through the modal.
+ */
+export async function pipelineMergerRequestToken(runId: string): Promise<string> {
+  return invoke<string>('pipeline_merger_request_token', { runId });
+}
+
+/**
+ * Run the merger step: opens a PR via `gh pr create` when a GitHub remote is
+ * detected, otherwise performs a local `git switch <base> && git merge --no-ff
+ * <branch>`. `confirmToken` MUST be a token previously returned by
+ * `pipelineMergerRequestToken(runId)`; tokens are one-shot and expire after 5
+ * minutes. Runtime failures fold into `{ status: 'failure'|'invalid_token' }`
+ * rather than rejecting.
+ */
+export async function pipelineMergerRun(opts: {
+  runId: string;
+  projectDir: string;
+  branch: string;
+  baseBranch: string;
+  confirmToken: string;
+}): Promise<MergerResult> {
+  return invoke<MergerResult>('pipeline_merger_run', {
+    input: {
+      run_id: opts.runId,
+      project_dir: opts.projectDir,
+      branch: opts.branch,
+      base_branch: opts.baseBranch,
+      confirm_token: opts.confirmToken,
+    },
+  });
+}
+
 export interface OneshotResult {
   stdout: string;
   stderr: string;
