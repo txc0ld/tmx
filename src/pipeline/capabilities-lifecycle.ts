@@ -32,8 +32,15 @@ import {
   pipelineCapabilitiesInstall,
   pipelineCapabilitiesUninstall,
 } from '@/utils/ipc';
-import type { LifecycleEvent } from '@/stores/pipelineStore';
+import { emitTelemetry, type LifecycleEvent } from '@/stores/pipelineStore';
 import type { PipelineRole, PipelineState } from '@/types';
+
+/** Truncate `error` strings before they hit the JSONL line. */
+const ERROR_MAX = 500;
+function truncErr(err: unknown): string {
+  const s = err instanceof Error ? err.message : String(err);
+  return s.length > ERROR_MAX ? s.slice(0, ERROR_MAX) : s;
+}
 
 /**
  * Map a pipeline state to the role whose capabilities should be active
@@ -88,23 +95,66 @@ export function handleCapabilitiesLifecycle(ev: LifecycleEvent): void {
     pipelineCapabilitiesUninstall({
       worktreeDir: ev.worktreePath,
       role: previous,
-    }).catch((err) => {
-      console.warn(`[pipeline] capabilities uninstall failed for ${previous}:`, err);
-    });
+    }).then(
+      () => {
+        emitTelemetry({
+          at: Date.now(),
+          event: 'capability_uninstall',
+          runId: ev.runId,
+          projectId: ev.projectId,
+          role: previous,
+          ok: true,
+        });
+      },
+      (err) => {
+        console.warn(`[pipeline] capabilities uninstall failed for ${previous}:`, err);
+        emitTelemetry({
+          at: Date.now(),
+          event: 'capability_uninstall',
+          runId: ev.runId,
+          projectId: ev.projectId,
+          role: previous,
+          ok: false,
+          error: truncErr(err),
+        });
+      },
+    );
   }
 
   // 2. If the new state has an active role, install its caps.
   //    Skip if the same role is already marked installed (idempotent fast-path).
   if (nextRole && entry.installedRole !== nextRole) {
     entry.installedRole = nextRole;
-    const caps = defaultRoleCapabilities(nextRole);
+    const installRole = nextRole;
+    const caps = defaultRoleCapabilities(installRole);
     pipelineCapabilitiesInstall({
       worktreeDir: ev.worktreePath,
-      role: nextRole,
+      role: installRole,
       capabilities: caps,
-    }).catch((err) => {
-      console.warn(`[pipeline] capabilities install failed for ${nextRole}:`, err);
-    });
+    }).then(
+      () => {
+        emitTelemetry({
+          at: Date.now(),
+          event: 'capability_install',
+          runId: ev.runId,
+          projectId: ev.projectId,
+          role: installRole,
+          ok: true,
+        });
+      },
+      (err) => {
+        console.warn(`[pipeline] capabilities install failed for ${installRole}:`, err);
+        emitTelemetry({
+          at: Date.now(),
+          event: 'capability_install',
+          runId: ev.runId,
+          projectId: ev.projectId,
+          role: installRole,
+          ok: false,
+          error: truncErr(err),
+        });
+      },
+    );
   }
 
   // 3. Terminal state: bookkeeping cleanup. Uninstall already happened

@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react';
 import type { PipelineRun, ReviewVerdict } from '@/types';
-import { usePipelineStore } from '@/stores/pipelineStore';
+import { emitTelemetry, usePipelineStore } from '@/stores/pipelineStore';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToastStore } from '@/stores/toastStore';
 import { pipelineMergerRequestToken, pipelineMergerRun } from '@/utils/ipc';
+
+/** Truncate `detail` before it lands in the JSONL line. */
+const DETAIL_MAX = 500;
+function truncDetail(s: string): string {
+  return s.length > DETAIL_MAX ? s.slice(0, DETAIL_MAX) : s;
+}
 
 interface Props {
   run: PipelineRun;
@@ -154,6 +160,13 @@ export function MergerConfirmModal({ run, baseBranch = 'main' }: Props) {
     // the right machine state.
     dispatch(run.id, { type: 'approve_merge' });
 
+    emitTelemetry({
+      at: Date.now(),
+      event: 'merger_invoked',
+      runId: run.id,
+      projectId: run.projectId,
+    });
+
     try {
       const token = await pipelineMergerRequestToken(run.id);
       const result = await pipelineMergerRun({
@@ -162,6 +175,16 @@ export function MergerConfirmModal({ run, baseBranch = 'main' }: Props) {
         branch: run.branch,
         baseBranch,
         confirmToken: token,
+      });
+
+      emitTelemetry({
+        at: Date.now(),
+        event: 'merger_completed',
+        runId: run.id,
+        projectId: run.projectId,
+        status: result.status,
+        mode: result.mode,
+        detail: result.detail ? truncDetail(result.detail) : undefined,
       });
 
       if (result.status === 'success') {
@@ -178,6 +201,14 @@ export function MergerConfirmModal({ run, baseBranch = 'main' }: Props) {
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
+      emitTelemetry({
+        at: Date.now(),
+        event: 'merger_completed',
+        runId: run.id,
+        projectId: run.projectId,
+        status: 'failure',
+        detail: truncDetail(reason),
+      });
       dispatch(run.id, { type: 'merge_failed', reason });
       addToast(`Merge failed: ${reason}`, 'error');
     } finally {

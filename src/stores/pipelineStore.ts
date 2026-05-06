@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PipelineRun } from '@/types';
+import type { PipelineRole, PipelineRun } from '@/types';
 import {
   reducer,
   initialRunState,
@@ -11,8 +11,13 @@ import {
 /**
  * Telemetry emitter — registered at app boot via `setPipelineTelemetryEmitter`
  * so this module stays free of IPC concerns. Tests leave it unset (no-op).
+ *
+ * `TelemetryEvent` is a discriminated union over `event`. The Rust IPC
+ * (`pipeline_telemetry_log`) writes `JSON.stringify(ev)` as one JSONL line and
+ * is agnostic to the exact shape — every variant carries `runId` + `projectId`
+ * which is all App.tsx's wiring needs.
  */
-export interface TelemetryEvent {
+export interface StateChangeTelemetryEvent {
   at: number;
   event: 'state_change';
   runId: string;
@@ -21,11 +26,69 @@ export interface TelemetryEvent {
   to: string;
   trigger: string;
 }
+
+/** Capability/guardrails install/uninstall outcome. (Phase 2c-ii.7) */
+export interface LifecycleTelemetryEvent {
+  at: number;
+  event:
+    | 'capability_install'
+    | 'capability_uninstall'
+    | 'guardrails_install'
+    | 'guardrails_uninstall';
+  runId: string;
+  projectId: string;
+  /**
+   * Role on capability events; undefined on guardrails (worktree-wide).
+   * Typed as `PipelineRole` for ergonomics — `controller` never reaches the
+   * capability install/uninstall path (filtered by `activeRoleForState`).
+   */
+  role?: PipelineRole;
+  /** True when the IPC call succeeded; false on failure. */
+  ok: boolean;
+  /** Optional failure detail (truncated to ~500 chars). */
+  error?: string;
+}
+
+/** Merger invocation outcome. (Phase 2c-ii.7) */
+export interface MergerTelemetryEvent {
+  at: number;
+  event: 'merger_invoked' | 'merger_completed';
+  runId: string;
+  projectId: string;
+  /** On merger_completed: the result.status field. */
+  status?: 'success' | 'failure' | 'invalid_token';
+  /** On merger_completed: the result.mode field. */
+  mode?: 'pr' | 'local' | 'unknown';
+  /** Optional detail when not success (truncated to ~500 chars). */
+  detail?: string;
+}
+
+export type TelemetryEvent =
+  | StateChangeTelemetryEvent
+  | LifecycleTelemetryEvent
+  | MergerTelemetryEvent;
+
 type TelemetryEmitter = (event: TelemetryEvent) => void;
 let telemetryEmitter: TelemetryEmitter | null = null;
 
 export function setPipelineTelemetryEmitter(fn: TelemetryEmitter | null): void {
   telemetryEmitter = fn;
+}
+
+/**
+ * Emit a telemetry event from outside the store reducer. Used by the
+ * lifecycle handlers (capabilities/guardrails) and the MergerConfirmModal
+ * to record outcomes that aren't tied to a state-machine transition.
+ *
+ * Safe no-op when no emitter is registered (e.g. vitest jsdom).
+ */
+export function emitTelemetry(event: TelemetryEvent): void {
+  if (!telemetryEmitter) return;
+  try {
+    telemetryEmitter(event);
+  } catch (err) {
+    console.warn('[pipeline] telemetry emitter threw:', err);
+  }
 }
 
 /**
@@ -83,7 +146,7 @@ export const usePipelineStore = create<PipelineStoreShape>((set) => ({
   },
 
   dispatch: (runId, ev) => {
-    let pendingTelemetry: TelemetryEvent | null = null;
+    let pendingTelemetry: StateChangeTelemetryEvent | null = null;
     let pendingLifecycle: LifecycleEvent | null = null;
     set(s => {
       const existing = s.runs[runId];

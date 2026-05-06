@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 vi.mock('@/utils/ipc', () => ({
   pipelineCapabilitiesInstall: vi.fn(async () => undefined),
@@ -14,6 +14,10 @@ import {
   pipelineCapabilitiesInstall,
   pipelineCapabilitiesUninstall,
 } from '@/utils/ipc';
+import {
+  setPipelineTelemetryEmitter,
+  type TelemetryEvent,
+} from '@/stores/pipelineStore';
 
 const installMock = pipelineCapabilitiesInstall as unknown as ReturnType<typeof vi.fn>;
 const uninstallMock = pipelineCapabilitiesUninstall as unknown as ReturnType<typeof vi.fn>;
@@ -165,6 +169,89 @@ describe('capabilities lifecycle', () => {
     expect(installMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
       worktreeDir: '/wt/r2', role: 'planner',
     }));
+  });
+
+  describe('telemetry (Phase 2c-ii.7)', () => {
+    let captured: TelemetryEvent[];
+
+    beforeEach(() => {
+      captured = [];
+      setPipelineTelemetryEmitter(ev => captured.push(ev));
+    });
+
+    afterEach(() => {
+      setPipelineTelemetryEmitter(null);
+    });
+
+    it('emits capability_install with role on transition into an active stage', async () => {
+      installMock.mockResolvedValueOnce(undefined);
+
+      handleCapabilitiesLifecycle({
+        runId: 'r1', projectId: 'p1', worktreePath: '/wt/r1',
+        from: 'idle', to: 'planning', trigger: 'start',
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const ev = captured.find(e => e.event === 'capability_install');
+      expect(ev).toMatchObject({
+        event: 'capability_install',
+        runId: 'r1',
+        projectId: 'p1',
+        role: 'planner',
+        ok: true,
+      });
+    });
+
+    it('emits capability_uninstall on terminal transition', async () => {
+      installMock.mockResolvedValueOnce(undefined);
+      uninstallMock.mockResolvedValueOnce(undefined);
+
+      handleCapabilitiesLifecycle({
+        runId: 'r1', projectId: 'p1', worktreePath: '/wt/r1',
+        from: 'idle', to: 'planning', trigger: 'start',
+      });
+      handleCapabilitiesLifecycle({
+        runId: 'r1', projectId: 'p1', worktreePath: '/wt/r1',
+        from: 'planning', to: 'failed', trigger: 'abort',
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const uninstallEv = captured.find(e => e.event === 'capability_uninstall');
+      expect(uninstallEv).toMatchObject({
+        event: 'capability_uninstall',
+        runId: 'r1',
+        projectId: 'p1',
+        role: 'planner',
+        ok: true,
+      });
+    });
+
+    it('on IPC failure, emits ok:false with truncated error', async () => {
+      const huge = 'y'.repeat(1200);
+      installMock.mockRejectedValueOnce(new Error(huge));
+
+      handleCapabilitiesLifecycle({
+        runId: 'r1', projectId: 'p1', worktreePath: '/wt/r1',
+        from: 'idle', to: 'planning', trigger: 'start',
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const ev = captured.find(e => e.event === 'capability_install');
+      expect(ev).toMatchObject({
+        event: 'capability_install',
+        runId: 'r1',
+        role: 'planner',
+        ok: false,
+      });
+      if (ev && ev.event === 'capability_install') {
+        expect(ev.error).toBeDefined();
+        expect(ev.error!.length).toBeLessThanOrEqual(500);
+      }
+    });
   });
 
   it('does not re-install the same role on internal transitions', () => {

@@ -24,8 +24,15 @@ import {
   pipelineGuardrailsInstall,
   pipelineGuardrailsUninstall,
 } from '@/utils/ipc';
-import type { LifecycleEvent } from '@/stores/pipelineStore';
+import { emitTelemetry, type LifecycleEvent } from '@/stores/pipelineStore';
 import type { PipelineState } from '@/types';
+
+/** Truncate `error` strings before they hit the JSONL line. */
+const ERROR_MAX = 500;
+function truncErr(err: unknown): string {
+  const s = err instanceof Error ? err.message : String(err);
+  return s.length > ERROR_MAX ? s.slice(0, ERROR_MAX) : s;
+}
 
 interface RunBookkeeping {
   installed: boolean;
@@ -60,9 +67,28 @@ export function handleGuardrailsLifecycle(ev: LifecycleEvent): void {
   if (!entry.installed && ev.from === 'idle' && ev.to !== 'idle') {
     entry.installed = true;
     if (ev.worktreePath) {
-      pipelineGuardrailsInstall(ev.worktreePath).catch(err => {
-        console.warn('[pipeline] guardrails install failed:', err);
-      });
+      pipelineGuardrailsInstall(ev.worktreePath).then(
+        () => {
+          emitTelemetry({
+            at: Date.now(),
+            event: 'guardrails_install',
+            runId: ev.runId,
+            projectId: ev.projectId,
+            ok: true,
+          });
+        },
+        (err) => {
+          console.warn('[pipeline] guardrails install failed:', err);
+          emitTelemetry({
+            at: Date.now(),
+            event: 'guardrails_install',
+            runId: ev.runId,
+            projectId: ev.projectId,
+            ok: false,
+            error: truncErr(err),
+          });
+        },
+      );
     }
   }
 
@@ -70,9 +96,28 @@ export function handleGuardrailsLifecycle(ev: LifecycleEvent): void {
   if (!entry.uninstalled && reachedTerminal) {
     entry.uninstalled = true;
     if (ev.worktreePath) {
-      pipelineGuardrailsUninstall(ev.worktreePath).catch(err => {
-        console.warn('[pipeline] guardrails uninstall failed:', err);
-      });
+      pipelineGuardrailsUninstall(ev.worktreePath).then(
+        () => {
+          emitTelemetry({
+            at: Date.now(),
+            event: 'guardrails_uninstall',
+            runId: ev.runId,
+            projectId: ev.projectId,
+            ok: true,
+          });
+        },
+        (err) => {
+          console.warn('[pipeline] guardrails uninstall failed:', err);
+          emitTelemetry({
+            at: Date.now(),
+            event: 'guardrails_uninstall',
+            runId: ev.runId,
+            projectId: ev.projectId,
+            ok: false,
+            error: truncErr(err),
+          });
+        },
+      );
     }
     return;
   }

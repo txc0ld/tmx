@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 
 // Mock IPC before component imports.
@@ -13,7 +13,11 @@ import {
   type MergerResult,
 } from '@/utils/ipc';
 import { MergerConfirmModal } from './MergerConfirmModal';
-import { usePipelineStore } from '@/stores/pipelineStore';
+import {
+  usePipelineStore,
+  setPipelineTelemetryEmitter,
+  type TelemetryEvent,
+} from '@/stores/pipelineStore';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToastStore } from '@/stores/toastStore';
 import type { PipelineRun } from '@/types';
@@ -231,6 +235,87 @@ describe('MergerConfirmModal', () => {
 
     expect(usePipelineStore.getState().runs['run-test-1'].state).toBe('failed');
     expect(usePipelineStore.getState().runs['run-test-1'].failureReason).toBe('merge_rejected');
+  });
+
+  describe('telemetry (Phase 2c-ii.7)', () => {
+    let captured: TelemetryEvent[];
+
+    beforeEach(() => {
+      captured = [];
+      setPipelineTelemetryEmitter(ev => captured.push(ev));
+    });
+
+    afterEach(() => {
+      setPipelineTelemetryEmitter(null);
+    });
+
+    it('emits merger_invoked + merger_completed(success) around a successful merge', async () => {
+      const run = makeRun();
+      seedStores(run);
+
+      mockRequestToken.mockResolvedValue('tok-abc');
+      mockRun.mockResolvedValue({
+        status: 'success',
+        mode: 'pr',
+        pr_url: 'https://github.com/x/y/pull/42',
+        detail: 'opened pr',
+      });
+
+      render(<MergerConfirmModal run={run} />);
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('merger-modal-merge'));
+      });
+
+      const invoked = captured.find(e => e.event === 'merger_invoked');
+      const completed = captured.find(e => e.event === 'merger_completed');
+      expect(invoked).toMatchObject({
+        event: 'merger_invoked',
+        runId: 'run-test-1',
+        projectId: 'proj-1',
+      });
+      expect(completed).toMatchObject({
+        event: 'merger_completed',
+        runId: 'run-test-1',
+        projectId: 'proj-1',
+        status: 'success',
+        mode: 'pr',
+      });
+
+      // Order: invoked must precede completed.
+      const iIdx = captured.findIndex(e => e.event === 'merger_invoked');
+      const cIdx = captured.findIndex(e => e.event === 'merger_completed');
+      expect(iIdx).toBeLessThan(cIdx);
+    });
+
+    it('emits merger_completed(invalid_token) with truncated detail on failure', async () => {
+      const run = makeRun();
+      seedStores(run);
+
+      mockRequestToken.mockResolvedValue('tok-bad');
+      const huge = 'z'.repeat(1200);
+      mockRun.mockResolvedValue({
+        status: 'invalid_token',
+        mode: 'unknown',
+        pr_url: null,
+        detail: huge,
+      });
+
+      render(<MergerConfirmModal run={run} />);
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('merger-modal-merge'));
+      });
+
+      const completed = captured.find(e => e.event === 'merger_completed');
+      expect(completed).toMatchObject({
+        event: 'merger_completed',
+        status: 'invalid_token',
+        mode: 'unknown',
+      });
+      if (completed && completed.event === 'merger_completed') {
+        expect(completed.detail).toBeDefined();
+        expect(completed.detail!.length).toBeLessThanOrEqual(500);
+      }
+    });
   });
 
   it('disables both buttons while merge is in flight', async () => {
