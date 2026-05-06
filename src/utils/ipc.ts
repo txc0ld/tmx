@@ -358,6 +358,10 @@ export interface PreflightResult {
   gh_present: boolean;
   gh_authenticated: boolean;
   worktree_dir_writable: boolean;
+  // 2c-ii.6 additions (kept at end so older deserializers stay compat).
+  signed_skills_ok: boolean;
+  capability_binaries_ok: boolean;
+  skill_cache_writable: boolean;
   errors: string[];
 }
 
