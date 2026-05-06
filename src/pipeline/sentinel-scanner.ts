@@ -1,18 +1,14 @@
 import type { PlanArtifact, BuildArtifact, ReviewVerdict, QuestionArtifact } from '@/types';
 
+export { stripAnsi } from '@/utils/ansi';
+import { stripAnsi } from '@/utils/ansi';
+
 export type SentinelEvent =
   | { kind: 'done'; payload: PlanArtifact | BuildArtifact | ReviewVerdict; consumedThrough: number }
   | { kind: 'failed'; payload: { reason: string; suggestedFix?: string }; consumedThrough: number }
   | { kind: 'question'; payload: QuestionArtifact; consumedThrough: number }
   | { kind: 'heartbeat'; payload: { progress: string; taskId?: string }; consumedThrough: number }
   | { kind: 'parse_error'; raw: string; error: string; consumedThrough: number };
-
-// eslint-disable-next-line no-control-regex
-const ANSI_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]/g;
-
-export function stripAnsi(s: string): string {
-  return s.replace(ANSI_PATTERN, '');
-}
 
 const MARKERS = [
   { marker: '<<<TX_STAGE_DONE>>>',     kind: 'done'      as const },
@@ -21,9 +17,11 @@ const MARKERS = [
   { marker: '<<<TX_HEARTBEAT>>>',      kind: 'heartbeat' as const },
 ];
 
+type SentinelKind = (typeof MARKERS)[number]['kind'];
+
 interface MatchedMarker {
   index: number;
-  kind: 'done' | 'failed' | 'question' | 'heartbeat';
+  kind: SentinelKind;
   marker: string;
 }
 

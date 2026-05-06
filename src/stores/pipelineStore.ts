@@ -1,13 +1,13 @@
 import { create } from 'zustand';
 import type { PipelineRun } from '@/types';
+import { pipelineTelemetryLog } from '@/utils/ipc';
 import {
   reducer,
   initialRunState,
+  isTerminalState,
   type PipelineEvent,
   type InitialRunInputs,
 } from '@/pipeline/state-machine';
-
-const TERMINAL = new Set(['done', 'failed', 'escalated']);
 
 interface PipelineStoreShape {
   runs: Record<string, PipelineRun>;
@@ -19,7 +19,7 @@ interface PipelineStoreShape {
 
 function deriveActive(runs: Record<string, PipelineRun>): string[] {
   return Object.values(runs)
-    .filter(r => !TERMINAL.has(r.state))
+    .filter(r => !isTerminalState(r.state))
     .map(r => r.id);
 }
 
@@ -30,7 +30,7 @@ export const usePipelineStore = create<PipelineStoreShape>((set) => ({
   createRun: (input) => {
     const run = initialRunState(input);
     set(s => {
-      if (s.runs[run.id]) return s;               // idempotent on collision
+      if (s.runs[run.id]) return s;
       const runs = { ...s.runs, [run.id]: run };
       return { runs, activeRunIds: deriveActive(runs) };
     });
@@ -46,7 +46,6 @@ export const usePipelineStore = create<PipelineStoreShape>((set) => ({
       const next = reducer(existing, ev);
       if (next === existing) return s;
 
-      // Capture telemetry payload for fire-and-forget log after state update
       const stateChanged = existing.state !== next.state;
       if (stateChanged) {
         projectId = existing.projectId;
@@ -60,17 +59,21 @@ export const usePipelineStore = create<PipelineStoreShape>((set) => ({
         });
       }
 
+      // activeRunIds membership only changes when a run crosses the
+      // terminal boundary; otherwise reuse the prior reference so
+      // subscribers selecting `activeRunIds` don't re-render needlessly.
+      const terminalBoundaryCrossed =
+        isTerminalState(existing.state) !== isTerminalState(next.state);
       const runs = { ...s.runs, [runId]: next };
-      return { runs, activeRunIds: deriveActive(runs) };
+      const activeRunIds = terminalBoundaryCrossed
+        ? deriveActive(runs)
+        : s.activeRunIds;
+      return { runs, activeRunIds };
     });
 
-    // Fire-and-forget. projectId here is the project root path the run was
-    // created with (PipelineRun.projectId stores a filesystem path).
     if (logLine && projectId) {
-      void import('@/utils/ipc').then(({ pipelineTelemetryLog }) =>
-        pipelineTelemetryLog({ projectDir: projectId!, runId, line: logLine! })
-          .catch(err => console.warn('[pipeline] telemetry log failed:', err)),
-      );
+      pipelineTelemetryLog({ projectDir: projectId, runId, line: logLine })
+        .catch(err => console.warn('[pipeline] telemetry log failed:', err));
     }
   },
 

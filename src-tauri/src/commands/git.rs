@@ -206,7 +206,7 @@ fn validate_repo_path(repo_path: &str) -> Result<String, String> {
     Ok(expanded)
 }
 
-fn validate_branch_name(branch: &str) -> Result<(), String> {
+pub(crate) fn validate_branch_name(branch: &str) -> Result<(), String> {
     if branch.is_empty() {
         return Err("Branch name cannot be empty".to_string());
     }

@@ -1,11 +1,18 @@
 import { usePipelineStore } from '@/stores/pipelineStore';
+import { isTerminalState } from '@/pipeline/state-machine';
 import type { PipelineControllerTile as Tile } from '@/types';
-
-const EMPTY_RUN_PLACEHOLDER = '—';
 
 interface Props {
   tile: Tile;
 }
+
+const BUTTON_BASE = {
+  padding: '4px 10px',
+  color: 'var(--tx-text)',
+  cursor: 'pointer',
+  border: '1px solid var(--tx-border)',
+  borderRadius: 3,
+} as const;
 
 export function PipelineControllerTile({ tile }: Props) {
   const run = usePipelineStore(s => s.runs[tile.runId]);
@@ -15,12 +22,12 @@ export function PipelineControllerTile({ tile }: Props) {
   if (!run) {
     return (
       <div style={{ padding: 12, color: 'var(--tx-text-muted)' }}>
-        No run bound (runId={tile.runId || EMPTY_RUN_PLACEHOLDER}).
+        No run bound (runId={tile.runId}).
       </div>
     );
   }
 
-  const isTerminal = run.state === 'done' || run.state === 'failed' || run.state === 'escalated';
+  const isTerminal = isTerminalState(run.state);
 
   return (
     <div style={{
@@ -44,24 +51,27 @@ export function PipelineControllerTile({ tile }: Props) {
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         {!isTerminal && run.state === 'idle' && (
           <button
+            type="button"
             onClick={() => dispatch(run.id, { type: 'start' })}
-            style={{ padding: '4px 10px', background: 'var(--tx-accent)', color: 'var(--tx-text)' }}
+            style={{ ...BUTTON_BASE, background: 'var(--tx-accent)' }}
           >
             Start
           </button>
         )}
         {!isTerminal && (
           <button
+            type="button"
             onClick={() => dispatch(run.id, { type: 'abort', reason: 'user clicked abort' })}
-            style={{ padding: '4px 10px', background: 'var(--tx-surface-2)', color: 'var(--tx-text)' }}
+            style={{ ...BUTTON_BASE, background: 'var(--tx-surface-2)' }}
           >
             Abort
           </button>
         )}
         {isTerminal && (
           <button
+            type="button"
             onClick={() => removeRun(run.id)}
-            style={{ padding: '4px 10px', background: 'var(--tx-surface-2)', color: 'var(--tx-text)' }}
+            style={{ ...BUTTON_BASE, background: 'var(--tx-surface-2)' }}
           >
             Clear
           </button>

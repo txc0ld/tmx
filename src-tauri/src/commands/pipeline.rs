@@ -157,18 +157,10 @@ pub fn pipeline_preflight(project_dir: String) -> Result<PreflightResult, String
     Ok(run_preflight_inner(&p))
 }
 
-fn validate_branch_name(b: &str) -> Result<(), String> {
-    if b.is_empty() {
-        return Err("empty branch".into());
-    }
-    if b.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err("branch name contains whitespace/control".into());
-    }
-    if b.starts_with('-') || b.contains("..") || b.contains("//") {
-        return Err("invalid branch name".into());
-    }
-    Ok(())
-}
+// Branch validation lives in git.rs (`validate_branch_name`) so the pipeline
+// applies the same git-refname rules as the rest of the codebase. Re-exported
+// for symmetry with the rest of pipeline.rs's helper layer.
+use super::git::validate_branch_name;
 
 fn create_worktree_inner(
     project_dir: &Path,

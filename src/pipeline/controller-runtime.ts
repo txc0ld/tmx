@@ -85,7 +85,6 @@ function dispatchSentinel(runId: string, role: PipelineRole, ev: SentinelEvent):
       dispatch(runId, { type: 'question_raised', question: ev.payload as QuestionArtifact });
       break;
     case 'heartbeat':
-      // No-op for Phase 2b. Phase 2c uses for stuck detection.
       break;
     case 'parse_error':
       if (role === 'planner') {
@@ -105,15 +104,39 @@ function dispatchDone(
 ): void {
   if (payload.stage === 'planner' && role === 'planner') {
     dispatch(runId, { type: 'planner_done', plan: payload as PlanArtifact });
-  } else if (payload.stage === 'builder' && role === 'builder') {
-    dispatch(runId, { type: 'builder_done', build: payload as BuildArtifact });
-  } else if (payload.stage === 'reviewer' && (role === 'reviewer' || role === 'reviewer-codex')) {
-    dispatch(runId, { type: 'reviewer_done', verdict: payload as ReviewVerdict });
+    return;
   }
-  // Mismatch silently ignored — Phase 2c may add a parse_error toast.
+  if (payload.stage === 'builder' && role === 'builder') {
+    dispatch(runId, { type: 'builder_done', build: payload as BuildArtifact });
+    return;
+  }
+  if (payload.stage === 'reviewer' && (role === 'reviewer' || role === 'reviewer-codex')) {
+    dispatch(runId, { type: 'reviewer_done', verdict: payload as ReviewVerdict });
+    return;
+  }
+
+  // Role/stage mismatch — a hallucinating LLM emitted an artifact for the
+  // wrong stage. Abort instead of silently ignoring; otherwise the run
+  // hangs forever waiting for a sentinel that will never arrive correctly.
+  const reason = `role/stage mismatch: ${role} emitted ${payload.stage}`;
+  if (role === 'planner') {
+    dispatch(runId, { type: 'planner_failed', reason });
+  } else {
+    dispatch(runId, { type: 'abort', reason });
+  }
 }
 
-/** Test helper — reset internal buffers between vitest cases. */
-export function _resetForTest(): void {
+/** Purge accumulator buffers for a run (call on terminal state to bound memory). */
+export function clearRunBuffers(runId: string): void {
+  for (const key of ptyBuffers.keys()) {
+    if (key.startsWith(`${runId}:`)) ptyBuffers.delete(key);
+  }
+}
+
+/** Test helper — reset all internal buffers between vitest cases. */
+export function resetIngestionBuffersForTest(): void {
   ptyBuffers.clear();
 }
+
+/** @deprecated use `resetIngestionBuffersForTest`. */
+export const _resetForTest = resetIngestionBuffersForTest;
