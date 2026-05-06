@@ -1,5 +1,6 @@
 import { usePipelineStore } from '@/stores/pipelineStore';
 import { isTerminalState } from '@/pipeline/state-machine';
+import { MergerConfirmModal } from '@/components/pipeline/MergerConfirmModal';
 import type { PipelineControllerTile as Tile } from '@/types';
 
 interface Props {
@@ -77,6 +78,7 @@ export function PipelineControllerTile({ tile }: Props) {
           </button>
         )}
       </div>
+      {run.state === 'awaiting_merge_approval' && <MergerConfirmModal run={run} />}
     </div>
   );
 }
