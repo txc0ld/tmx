@@ -71,11 +71,14 @@ function vacuousPassResult(sha: string): CIResult {
   };
 }
 
-function failuresFromOutput(output: string): { test: string; output: string }[] {
+function synthesizeFailureEntries(
+  stepKind: string,
+  output: string,
+): { test: string; output: string }[] {
   // We don't parse structured failures here — the Rust IPC returns a single
   // `output` blob. Surface the trailing chunk so the controller has something
   // human-readable. Phase 2c-ii may parse JUnit / cargo-test JSON.
-  return [{ test: 'verification-step', output: output.slice(-2000) }];
+  return [{ test: stepKind, output: output.slice(-2000) }];
 }
 
 /**
@@ -97,6 +100,11 @@ async function runChainOnce(
   const { dispatch, runs } = usePipelineStore.getState();
   if (runs[runId]?.state !== 'building') return;
 
+  // SHA is captured once at chain start. If a second commit lands during the
+  // chain, `pending` will trigger another full run with the new HEAD; the
+  // intermediate dispatches will carry the chain-start SHA, not current HEAD.
+  // Right tradeoff (no per-step git invocation), worth a comment so it doesn't
+  // read like a bug.
   const sha = await readHeadSha();
   const manifests = await readManifests();
   const chain = resolveVerificationChain(worktreePath, manifests);
@@ -120,7 +128,7 @@ async function runChainOnce(
       step: step.kind,
       command: step.command,
       durationMs: result.duration_ms,
-      failures: result.status === 'fail' ? failuresFromOutput(result.output) : [],
+      failures: result.status === 'fail' ? synthesizeFailureEntries(step.kind, result.output) : [],
     };
 
     if (result.status === 'fail') {
@@ -216,7 +224,9 @@ export async function startCommitWatcher(
     }
     // Fire-and-forget the unwatch — failure here is non-fatal.
     void unwatchDirectory(dir).catch(() => { /* ignore */ });
-    // Defensively await the unlisten resolution (ignored by the caller).
+    // Reference held to keep unlistenPromise alive through cleanup; the
+    // .then() handler above will tear down the late-resolved fn via the
+    // `stopped` flag set on the line above.
     void unlistenPromise;
   };
 }
