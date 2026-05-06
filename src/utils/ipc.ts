@@ -403,3 +403,29 @@ export async function pipelineWorktreeDestroy(opts: {
 export async function pipelineInstallSkills(): Promise<InstallSkillsResult> {
   return invoke<InstallSkillsResult>('pipeline_install_skills');
 }
+
+export interface OneshotResult {
+  stdout: string;
+  stderr: string;
+  exit_code: number | null;
+  timed_out: boolean;
+  duration_ms: number;
+}
+
+export async function agentRunOneshot(opts: {
+  agent: 'claude' | 'codex' | 'gemini';
+  args: string[];
+  stdin?: string;
+  timeoutSecs?: number;
+  cwd?: string;
+}): Promise<OneshotResult> {
+  return invoke<OneshotResult>('agent_run_oneshot', {
+    input: {
+      agent: opts.agent,
+      args: opts.args,
+      stdin: opts.stdin ?? null,
+      timeout_secs: opts.timeoutSecs ?? 600,
+      cwd: opts.cwd ?? null,
+    },
+  });
+}

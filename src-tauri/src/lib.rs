@@ -39,6 +39,7 @@ pub fn run() {
             commands::agents::agent_spawn,
             commands::agents::agent_kill,
             commands::agents::agent_list,
+            commands::agents::agent_run_oneshot,
             // Filesystem
             commands::filesystem::read_file_tree,
             commands::filesystem::read_file_text,
