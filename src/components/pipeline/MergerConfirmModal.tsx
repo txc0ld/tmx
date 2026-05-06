@@ -108,7 +108,6 @@ export function MergerConfirmModal({ run, baseBranch = 'main' }: Props) {
   const dispatch = usePipelineStore(s => s.dispatch);
   const addToast = useToastStore(s => s.addToast);
   const [submitting, setSubmitting] = useState(false);
-  const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
   // Latest build (if any) — bullet list comes from its commits.
   const lastBuild = run.artifacts.builds[run.artifacts.builds.length - 1];
@@ -142,11 +141,9 @@ export function MergerConfirmModal({ run, baseBranch = 'main' }: Props) {
   async function handleMerge() {
     if (submitting) return;
     setSubmitting(true);
-    setErrorDetail(null);
 
     const project = useProjectStore.getState().projects.find(p => p.id === run.projectId);
     if (!project) {
-      setErrorDetail('project not loaded');
       addToast('Merge aborted: project not loaded', 'error');
       setSubmitting(false);
       return;
@@ -177,13 +174,11 @@ export function MergerConfirmModal({ run, baseBranch = 'main' }: Props) {
       } else {
         const reason = result.detail || result.status;
         dispatch(run.id, { type: 'merge_failed', reason });
-        setErrorDetail(reason);
         addToast(`Merge failed: ${reason}`, 'error');
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       dispatch(run.id, { type: 'merge_failed', reason });
-      setErrorDetail(reason);
       addToast(`Merge failed: ${reason}`, 'error');
     } finally {
       setSubmitting(false);
@@ -286,7 +281,7 @@ export function MergerConfirmModal({ run, baseBranch = 'main' }: Props) {
           </div>
 
           <div>
-            <div style={sectionLabelStyle}>Will run</div>
+            <div style={sectionLabelStyle}>Will run one of these (auto-detected at merge time)</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div>
                 <div style={{ marginBottom: 2 }}>If a GitHub remote is detected:</div>
@@ -298,12 +293,6 @@ export function MergerConfirmModal({ run, baseBranch = 'main' }: Props) {
               </div>
             </div>
           </div>
-
-          {errorDetail && (
-            <div style={{ color: 'var(--tx-error)' }} data-testid="merger-modal-error">
-              error: {errorDetail}
-            </div>
-          )}
         </div>
 
         <div style={footerStyle}>

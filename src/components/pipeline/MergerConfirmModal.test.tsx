@@ -215,10 +215,11 @@ describe('MergerConfirmModal', () => {
     expect(finalRun.state).toBe('failed');
     expect(finalRun.failureReason).toBe('token expired');
 
-    // Inline error surfaces (note: by the time state hits `failed`, the modal
-    // would unmount in production via PipelineControllerTile's conditional, but
-    // here we control the mount, so the error block renders).
-    expect(screen.getByTestId('merger-modal-error').textContent).toContain('token expired');
+    // The toast is the user-visible failure surface (the modal unmounts as
+    // soon as state moves to `failed`, so an inline error block would never
+    // render in production).
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts.some(t => t.message.includes('token expired'))).toBe(true);
   });
 
   it('Escape key triggers cancel', () => {
