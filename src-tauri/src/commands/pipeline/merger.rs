@@ -50,13 +50,11 @@ fn gc_tokens(store: &mut HashMap<String, TokenEntry>) {
 
 /// Issue a fresh confirm-token bound to `run_id`. Returns the token (UUID v4).
 /// The caller (UI confirm modal) passes this back via `MergerInput.confirm_token`.
-fn issue_token_inner(run_id: String) -> String {
-    let token = uuid::Uuid::new_v4().to_string();
-    let mut store = token_store().lock();
-    gc_tokens(&mut store);
-    // Defensive cap: if the store has filled despite GC, evict the oldest entry
-    // before inserting. Prevents unbounded growth from a caller that issues
-    // tokens but never consumes them.
+/// Defensive cap: if the store is at capacity, evict the oldest entry to make
+/// room. Prevents unbounded growth from a caller that issues tokens but never
+/// consumes them. Pure operation on the supplied map so tests can verify the
+/// algorithm without touching the global token store.
+fn evict_oldest_if_at_cap(store: &mut HashMap<String, TokenEntry>) {
     if store.len() >= TOKEN_STORE_CAP {
         if let Some((oldest_token, _)) = store
             .iter()
@@ -66,6 +64,13 @@ fn issue_token_inner(run_id: String) -> String {
             store.remove(&oldest_token);
         }
     }
+}
+
+fn issue_token_inner(run_id: String) -> String {
+    let token = uuid::Uuid::new_v4().to_string();
+    let mut store = token_store().lock();
+    gc_tokens(&mut store);
+    evict_oldest_if_at_cap(&mut store);
     store.insert(
         token.clone(),
         TokenEntry {
@@ -424,29 +429,44 @@ mod tests {
     }
 
     #[test]
-    fn token_store_caps_growth_via_oldest_eviction() {
-        // Force the store past the cap with synthetic entries (avoid issuing
-        // 1024 fresh tokens — slow + interferes with other tests).
-        {
-            let mut store = token_store().lock();
-            store.clear();
-            for i in 0..TOKEN_STORE_CAP {
-                store.insert(
-                    format!("synthetic-{i}"),
-                    TokenEntry {
-                        run_id: format!("run-{i}"),
-                        issued_at: Instant::now(),
-                    },
-                );
-            }
-            assert_eq!(store.len(), TOKEN_STORE_CAP);
+    fn evict_oldest_at_cap_drops_only_the_oldest_entry() {
+        // Pure test against a local HashMap — does NOT touch the global store
+        // (which is shared by parallel tests; mutating it here would race).
+        let mut store: HashMap<String, TokenEntry> = HashMap::new();
+        let now = Instant::now();
+        // Fill to capacity. Use staggered timestamps so we can prove which one
+        // gets evicted.
+        for i in 0..TOKEN_STORE_CAP {
+            store.insert(
+                format!("synthetic-{i}"),
+                TokenEntry {
+                    run_id: format!("run-{i}"),
+                    // The smaller `i` is, the older the entry — `synthetic-0`
+                    // should be evicted first.
+                    issued_at: now - Duration::from_millis((TOKEN_STORE_CAP - i) as u64),
+                },
+            );
         }
-        // Issuing another should evict the oldest, keeping size at the cap.
-        let _ = issue_token_inner("run-overflow".into());
-        let len = token_store().lock().len();
-        assert_eq!(len, TOKEN_STORE_CAP, "store should not exceed cap after issue");
-        // Cleanup.
-        token_store().lock().clear();
+        assert_eq!(store.len(), TOKEN_STORE_CAP);
+
+        evict_oldest_if_at_cap(&mut store);
+        assert_eq!(store.len(), TOKEN_STORE_CAP - 1);
+        assert!(!store.contains_key("synthetic-0"), "oldest entry should be evicted");
+        assert!(store.contains_key(&format!("synthetic-{}", TOKEN_STORE_CAP - 1)));
+    }
+
+    #[test]
+    fn evict_oldest_at_cap_is_noop_below_cap() {
+        let mut store: HashMap<String, TokenEntry> = HashMap::new();
+        store.insert(
+            "only".into(),
+            TokenEntry {
+                run_id: "r".into(),
+                issued_at: Instant::now(),
+            },
+        );
+        evict_oldest_if_at_cap(&mut store);
+        assert_eq!(store.len(), 1);
     }
 
     // ── Behavioral tests (Unix-only — bin_override uses /bin/sh) ──
