@@ -124,8 +124,15 @@ export default function App() {
   // for chronology with the rollout (it shipped one task earlier).
   useEffect(() => {
     setPipelineLifecycleEmitter((ev) => {
-      handleGuardrailsLifecycle(ev);
-      handleCapabilitiesLifecycle(ev);
+      // Each handler isolated — a synchronous throw in one must NOT swallow
+      // the other. Both drive disjoint settings.json keys, so failure of one
+      // doesn't invalidate the other.
+      try { handleGuardrailsLifecycle(ev); } catch (e) {
+        console.warn('[pipeline] guardrails lifecycle threw:', e);
+      }
+      try { handleCapabilitiesLifecycle(ev); } catch (e) {
+        console.warn('[pipeline] capabilities lifecycle threw:', e);
+      }
     });
     return () => setPipelineLifecycleEmitter(null);
   }, []);

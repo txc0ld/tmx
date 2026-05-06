@@ -97,10 +97,21 @@ export function defaultRoleCapabilities(role: PipelineRole): RoleCapabilities {
       };
 
     case 'builder':
+      // Spec §17.1: "project tree minus secrets/.git/node_modules/build dirs."
+      // Allow `**` and rely on the deny list — narrower allow would block real
+      // edits (package.json, Cargo.toml, config files at repo root, READMEs)
+      // and the first dep-bump would fail with a permission denial.
       return {
         fileWrites: {
-          allow: ['src/**', 'tests/**', 'test/**', '**/*.test.*', '**/*.spec.*'],
-          deny: [...UNIVERSAL_DENY_GLOBS, 'docs/**'],
+          allow: ['**'],
+          deny: [
+            ...UNIVERSAL_DENY_GLOBS,
+            '**/node_modules/**',
+            '**/target/**',
+            '**/dist/**',
+            '**/.tx-worktrees/**',
+            '**/.terminalx/**',
+          ],
         },
         shell: {
           allowPatterns: [...READ_ONLY_SHELL, ...BUILDER_BUILD_SHELL],

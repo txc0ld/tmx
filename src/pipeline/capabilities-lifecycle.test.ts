@@ -202,12 +202,17 @@ describe('defaultRoleCapabilities (spec §17.1 defaults)', () => {
     expect(caps.maxFileSize).toBe(256_000);
   });
 
-  it('builder: src/tests fileWrites, package-managers network, build-tool shell', () => {
+  it('builder: tree-wide fileWrites with build/secret denies, package-managers network, build-tool shell', () => {
     const caps = defaultRoleCapabilities('builder');
-    expect(caps.fileWrites.allow).toContain('src/**');
-    expect(caps.fileWrites.allow).toContain('tests/**');
-    expect(caps.fileWrites.deny).toContain('docs/**');
+    // Builder allows the whole tree and relies on the deny list — narrower
+    // allow would block legitimate edits (package.json, Cargo.toml, README,
+    // config files at repo root).
+    expect(caps.fileWrites.allow).toEqual(['**']);
     expect(caps.fileWrites.deny).toContain('**/*.env');
+    expect(caps.fileWrites.deny).toContain('**/.git/**');
+    expect(caps.fileWrites.deny).toContain('**/node_modules/**');
+    expect(caps.fileWrites.deny).toContain('**/target/**');
+    expect(caps.fileWrites.deny).toContain('**/dist/**');
     expect(caps.network).toBe('package-managers');
     expect(caps.shell.allowPatterns).toContain('pnpm *');
     expect(caps.shell.allowPatterns).toContain('cargo *');
