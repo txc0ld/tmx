@@ -116,7 +116,7 @@ export function RunnerTile({ tile }: RunnerTileProps) {
       containerRef.current,
       (data) => writeRef.current(data),
     );
-    requestAnimationFrame(() => fitAddon.fit());
+    const rafId = requestAnimationFrame(() => fitAddon.fit());
 
     termRef.current = terminal;
     fitRef.current = fitAddon;
@@ -124,6 +124,7 @@ export function RunnerTile({ tile }: RunnerTileProps) {
     terminal.onData(data => writeRef.current(data));
 
     return () => {
+      cancelAnimationFrame(rafId);
       detachKb();
       terminal.dispose();
       termRef.current = null;

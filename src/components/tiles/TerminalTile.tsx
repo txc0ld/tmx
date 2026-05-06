@@ -205,7 +205,7 @@ export function TerminalTile({ tile }: TerminalTileProps) {
       containerRef.current,
       (data) => writeWithHistory(data),
     );
-    requestAnimationFrame(() => {
+    const rafId = requestAnimationFrame(() => {
       fitAddon.fit();
       containerRef.current?.focus({ preventScroll: true });
     });
@@ -217,6 +217,7 @@ export function TerminalTile({ tile }: TerminalTileProps) {
     terminal.onData((data) => writeWithHistory(data));
 
     return () => {
+      cancelAnimationFrame(rafId);
       detachKb();
       terminal.dispose();
       termRef.current = null;
