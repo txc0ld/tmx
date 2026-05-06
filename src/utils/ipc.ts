@@ -412,6 +412,39 @@ export async function pipelineTelemetryLog(opts: {
   await invoke<void>('pipeline_telemetry_log', opts);
 }
 
+// ─── Pipeline verification step (Phase 2c-i) ──────────────────
+
+export interface VerificationStepResult {
+  status: 'pass' | 'fail';
+  kind: 'format' | 'lint' | 'typecheck' | 'test';
+  exit_code: number | null;
+  duration_ms: number;
+  output: string;
+  timed_out: boolean;
+}
+
+/**
+ * Run a single verification step (resolved by `verification-chain.ts`) inside
+ * the worktree dir. Spawn errors and timeouts come back as
+ * `{ status: 'fail', timed_out, output: '[...]' }` rather than rejecting — the
+ * controller hook loops over a `Step[]` and renders status uniformly.
+ */
+export async function pipelineRunVerificationStep(opts: {
+  worktreeDir: string;
+  command: string;
+  kind: 'format' | 'lint' | 'typecheck' | 'test';
+  timeoutSecs?: number;
+}): Promise<VerificationStepResult> {
+  return invoke<VerificationStepResult>('pipeline_run_verification_step', {
+    input: {
+      worktree_dir: opts.worktreeDir,
+      command: opts.command,
+      kind: opts.kind,
+      timeout_secs: opts.timeoutSecs ?? 600,
+    },
+  });
+}
+
 export interface OneshotResult {
   stdout: string;
   stderr: string;
