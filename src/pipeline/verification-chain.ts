@@ -52,6 +52,8 @@ function rustSteps(cargoToml: string): Step[] {
 }
 
 function pythonSteps(pyproject: string): Step[] {
+  // Spec §4.4 example uses `ruff check --select I` for format; we emit
+  // `ruff format --check` instead — the actual formatter, not import-sort.
   const out: Step[] = [];
   const hasRuff = /\bruff\b/.test(pyproject);
   const hasMypy = /\bmypy\b/.test(pyproject);
