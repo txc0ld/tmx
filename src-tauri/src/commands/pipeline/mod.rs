@@ -14,6 +14,7 @@ pub mod capabilities;
 pub mod guardrails;
 pub mod merger;
 pub mod preflight;
+pub mod skill_provenance;
 pub mod skills;
 pub mod telemetry;
 pub mod verification;

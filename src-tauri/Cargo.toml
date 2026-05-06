@@ -15,6 +15,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+sha2 = "0.10"
 
 [dependencies]
 # Tauri core
@@ -51,6 +52,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 shellexpand = "3"
 parking_lot = "0.12"
+sha2 = "0.10"
 
 # OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret
 # Service) for MCP tokens. `apple-native` + `windows-native` use the

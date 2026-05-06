@@ -46,6 +46,23 @@ fn install_skills_with_paths(bundle_dir: &Path, target_dir: &Path) -> InstallSki
             continue;
         }
 
+        // Verify the bundled SKILL.md hash matches what the build saw before
+        // we copy it into the user's skills dir. Per-skill skip on mismatch
+        // (don't fail the whole batch).
+        let source_skill_md = source_skill_dir.join("SKILL.md");
+        match std::fs::read(&source_skill_md) {
+            Ok(bytes) => {
+                if let Err(e) = super::skill_provenance::verify_skill(skill, &bytes) {
+                    errors.push(format!("verify {skill}: {e}"));
+                    continue;
+                }
+            }
+            Err(e) => {
+                errors.push(format!("read {skill}/SKILL.md: {e}"));
+                continue;
+            }
+        }
+
         match copy_dir_recursive(&source_skill_dir, &target_skill_dir) {
             Ok(()) => installed.push((*skill).to_string()),
             Err(e) => errors.push(format!("install {skill}: {e}")),
@@ -112,21 +129,26 @@ mod tests {
         assert!(!res.skills_dir.is_empty());
     }
 
+    /// Copy the real bundled `resources/skills/<name>/SKILL.md` into a temp
+    /// bundle dir. The install function now verifies content against
+    /// build-time hashes, so synthetic test content fails the check —
+    /// tests must seed with the real bytes.
+    fn seed_real_bundle(bundle: &Path) {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        for skill in BUNDLED_PIPELINE_SKILLS {
+            let src = manifest_dir.join("resources").join("skills").join(skill).join("SKILL.md");
+            let bundled_skill = bundle.join(skill);
+            fs::create_dir_all(&bundled_skill).unwrap();
+            fs::copy(&src, bundled_skill.join("SKILL.md")).unwrap();
+        }
+    }
+
     #[test]
     fn install_skills_installs_missing_skill_from_bundle() {
         let bundle = tempdir().unwrap();
         let target = tempdir().unwrap();
 
-        // Seed the full bundle so the happy-path install has no errors.
-        for skill in BUNDLED_PIPELINE_SKILLS {
-            let bundled_skill = bundle.path().join(skill);
-            fs::create_dir_all(&bundled_skill).unwrap();
-            fs::write(
-                bundled_skill.join("SKILL.md"),
-                format!("---\nname: {skill}\n---\n# test\n"),
-            )
-            .unwrap();
-        }
+        seed_real_bundle(bundle.path());
 
         let res = install_skills_with_paths(bundle.path(), target.path());
 
@@ -183,13 +205,36 @@ mod tests {
     fn install_skills_handles_partial_bundle() {
         let bundle = tempdir().unwrap();
         let target = tempdir().unwrap();
+        // Seed only one skill from the real bundle — the other should record
+        // a missing-bundle error.
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let src = manifest_dir.join("resources/skills/tx-pipeline-stage-handoff/SKILL.md");
         let bundled_skill = bundle.path().join("tx-pipeline-stage-handoff");
         fs::create_dir_all(&bundled_skill).unwrap();
-        fs::write(bundled_skill.join("SKILL.md"), "ok").unwrap();
+        fs::copy(&src, bundled_skill.join("SKILL.md")).unwrap();
 
         let res = install_skills_with_paths(bundle.path(), target.path());
 
         assert_eq!(res.installed, vec!["tx-pipeline-stage-handoff".to_string()]);
         assert_eq!(res.errors.len(), BUNDLED_PIPELINE_SKILLS.len() - 1);
+    }
+
+    #[test]
+    fn install_skills_refuses_tampered_bundle_content() {
+        let bundle = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        // Seed with content that does NOT match the build-time hash.
+        let bundled_skill = bundle.path().join("tx-pipeline-stage-handoff");
+        fs::create_dir_all(&bundled_skill).unwrap();
+        fs::write(bundled_skill.join("SKILL.md"), "definitely tampered content").unwrap();
+        // Other skill missing entirely (already covered above; we focus on tamper here).
+        let res = install_skills_with_paths(bundle.path(), target.path());
+
+        // Tampered skill should not have been installed.
+        assert!(!res.installed.iter().any(|s| s == "tx-pipeline-stage-handoff"));
+        // An error mentioning the hash mismatch should be present.
+        assert!(res.errors.iter().any(|e| e.contains("hash mismatch")), "expected hash-mismatch error in {:?}", res.errors);
+        // Target dir should not have the skill installed.
+        assert!(!target.path().join("tx-pipeline-stage-handoff/SKILL.md").exists());
     }
 }
