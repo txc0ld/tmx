@@ -104,7 +104,7 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
       containerRef.current,
       (data) => writeRef.current(data),
     );
-    requestAnimationFrame(() => {
+    const rafId = requestAnimationFrame(() => {
       fitAddon.fit();
       containerRef.current?.focus({ preventScroll: true });
     });
@@ -115,6 +115,7 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
     terminal.onData((data) => writeRef.current(data));
 
     return () => {
+      cancelAnimationFrame(rafId);
       detachKb();
       terminal.dispose();
       termRef.current = null;
