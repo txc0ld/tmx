@@ -48,8 +48,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           gitUrl: p.git_url,
           branch: p.branch,
         }));
-        set({ projects, active: projects[0].id });
-        useCanvasStore.getState().switchProject(projects[0].id);
+        // Pick the previously-active project if it's still on disk; otherwise
+        // fall back to the first. Use `setActive` so localStorage stays in
+        // sync — `mcpStore.getProjectId()` reads from there to load the right
+        // per-project connections, and a stale value bleeds tasks across
+        // projects.
+        const persisted = (() => {
+          try { return localStorage.getItem('tx-active-project') ?? ''; } catch { return ''; }
+        })();
+        const initialActive = projects.find(p => p.id === persisted)?.id ?? projects[0].id;
+        set({ projects });
+        get().setActive(initialActive);
       }
     } catch {
       // First run with no saved file — start empty; user adds their own via the + button.
@@ -68,12 +77,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const prevActive = get().active;
     const next = prev.filter(p => p.id !== id);
     const newActive = prevActive === id && next.length > 0 ? next[0].id : prevActive;
-    set({ projects: next, active: newActive });
+    set({ projects: next });
+    // Route through setActive so the localStorage `tx-active-project` key
+    // stays in sync with state — see `loadFromDisk` for the same rationale.
     if (prevActive === id && next.length > 0) {
-      useCanvasStore.getState().switchProject(newActive);
+      get().setActive(newActive);
     }
     deleteProjectFromStore(id).catch(() => {
-      set({ projects: prev, active: prevActive });
+      set({ projects: prev });
+      get().setActive(prevActive);
     });
   },
 
