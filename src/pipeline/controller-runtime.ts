@@ -98,7 +98,18 @@ function dispatchSentinel(
     case 'done': {
       const payload = ev.payload as PlanArtifact | BuildArtifact | ReviewVerdict;
       if (payload.stage === 'planner' && role === 'planner') {
-        dispatch(runId, { type: 'planner_done', plan: payload as PlanArtifact });
+        // Guard the unchecked JSON cast: planLineage depends on a real SHA.
+        // Missing/empty planCommitSha would silently append `undefined` and
+        // mask a planner that forgot to commit before emitting DONE.
+        const plan = payload as PlanArtifact;
+        if (typeof plan.planCommitSha !== 'string' || plan.planCommitSha.length === 0) {
+          dispatch(runId, {
+            type: 'planner_failed',
+            reason: 'planner sentinel missing planCommitSha — must commit before emitting DONE',
+          });
+          return;
+        }
+        dispatch(runId, { type: 'planner_done', plan });
         return;
       }
       if (payload.stage === 'builder' && role === 'builder') {

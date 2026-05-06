@@ -81,7 +81,7 @@ function createBuildingRun(runId = 'r1'): string {
   });
   usePipelineStore.getState().dispatch(id, { type: 'start' });
   usePipelineStore.getState().dispatch(id, { type: 'planner_done', plan: {
-    stage: 'planner', branch: BRANCH, specPath: 's', planPath: 'p', tasks: [], summary: '', commitSha: 'sha-ci',
+    stage: 'planner', branch: BRANCH, specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha-ci',
   }});
   usePipelineStore.getState().dispatch(id, { type: 'approve_plan' });
   return id;

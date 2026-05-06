@@ -44,7 +44,7 @@ describe('pipeline state machine', () => {
       type: 'planner_done',
       plan: {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
-        tasks: [], summary: 's', commitSha: 'sha-v1',
+        tasks: [], summary: 's', planCommitSha: 'sha-v1',
       },
     };
     const next = reducer(run, ev);
@@ -281,13 +281,13 @@ describe('pipeline state machine', () => {
     expect(run.planLineage).toEqual([]);
   });
 
-  it('planner_done appends plan.commitSha to planLineage', () => {
+  it('planner_done appends plan.planCommitSha to planLineage', () => {
     const run = makeRun({ state: 'planning' });
     const ev: PipelineEvent = {
       type: 'planner_done',
       plan: {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
-        tasks: [], summary: 's', commitSha: 'abc123',
+        tasks: [], summary: 's', planCommitSha: 'abc123',
       },
     };
     const next = reducer(run, ev);
@@ -325,7 +325,7 @@ describe('pipeline state machine', () => {
       type: 'planner_done',
       plan: {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
-        tasks: [], summary: 's', commitSha: 'sha-v1',
+        tasks: [], summary: 's', planCommitSha: 'sha-v1',
       },
     });
     expect(run.planLineage).toEqual(['sha-v1']);
@@ -339,7 +339,7 @@ describe('pipeline state machine', () => {
       type: 'planner_done',
       plan: {
         stage: 'planner', branch: 'feat/r1', specPath: 's-v2', planPath: 'p-v2',
-        tasks: [], summary: 's2', commitSha: 'sha-v2',
+        tasks: [], summary: 's2', planCommitSha: 'sha-v2',
       },
     });
     expect(run.planLineage).toEqual(['sha-v1', 'sha-v2']);

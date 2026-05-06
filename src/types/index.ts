@@ -281,7 +281,7 @@ export interface PlanArtifact {
    * Required: the planner role-prompt commits before emitting the sentinel.
    * Captured into `PipelineRun.planLineage` on `planner_done`.
    */
-  commitSha: string;
+  planCommitSha: string;
 }
 
 export interface BuildCommit {

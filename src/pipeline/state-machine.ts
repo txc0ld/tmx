@@ -92,7 +92,7 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
         ...run,
         state: 'awaiting_plan_approval',
         artifacts: { ...run.artifacts, plan: ev.plan },
-        planLineage: [...run.planLineage, ev.plan.commitSha],
+        planLineage: [...run.planLineage, ev.plan.planCommitSha],
       };
 
     case 'planner_failed':

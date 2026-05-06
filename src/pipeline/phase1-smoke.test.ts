@@ -44,7 +44,7 @@ describe('Phase 1 smoke: Hello World pipeline walks to done', () => {
       type: 'planner_done',
       plan: {
         stage: 'planner', branch: 'feat/r-smoke', specPath: 's', planPath: 'p',
-        tasks: [], summary: 's', commitSha: 'sha-smoke',
+        tasks: [], summary: 's', planCommitSha: 'sha-smoke',
       },
     });
     expect(stateOf()).toBe('awaiting_plan_approval');
@@ -94,7 +94,7 @@ describe('Phase 1 smoke: Hello World pipeline walks to done', () => {
 
     dispatch(runId, { type: 'start' });
     dispatch(runId, { type: 'planner_done', plan: {
-      stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', commitSha: 'sha-esc',
+      stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha-esc',
     }});
     dispatch(runId, { type: 'approve_plan' });
 
