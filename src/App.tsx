@@ -7,6 +7,7 @@ import { screenToCanvas } from '@/utils/layout';
 import { loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog } from '@/utils/ipc';
 import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter } from '@/stores/pipelineStore';
 import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
+import { handleCapabilitiesLifecycle } from '@/pipeline/capabilities-lifecycle';
 import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas';
 import { ProjectSidebar } from '@/components/sidebar/ProjectSidebar';
 import { TopBar } from '@/components/topbar/TopBar';
@@ -116,10 +117,16 @@ export default function App() {
     return () => setPipelineTelemetryEmitter(null);
   }, []);
 
-  // Phase 2c-ii.3: Install/uninstall the dangerous-git guardrails hook in
-  // the worktree's `.claude/settings.json` for the active run window.
+  // Phase 2c-ii.3 + 2c-ii.4: pipeline lifecycle emitter dispatches to BOTH
+  // the guardrails (PreToolUse hook) and the capabilities (permissions
+  // allow/deny per role) handlers. They operate on the same settings.json
+  // but on different keys so order doesn't matter; we run guardrails first
+  // for chronology with the rollout (it shipped one task earlier).
   useEffect(() => {
-    setPipelineLifecycleEmitter(handleGuardrailsLifecycle);
+    setPipelineLifecycleEmitter((ev) => {
+      handleGuardrailsLifecycle(ev);
+      handleCapabilitiesLifecycle(ev);
+    });
     return () => setPipelineLifecycleEmitter(null);
   }, []);
 

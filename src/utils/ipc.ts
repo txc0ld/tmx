@@ -420,6 +420,23 @@ export async function pipelineGuardrailsUninstall(worktreeDir: string): Promise<
   await invoke<void>('pipeline_guardrails_uninstall', { worktreeDir });
 }
 
+// ─── Pipeline capability scoping (Phase 2c-ii.4) ──────────────
+
+export async function pipelineCapabilitiesInstall(opts: {
+  worktreeDir: string;
+  role: string;
+  capabilities: import('@/types').RoleCapabilities;
+}): Promise<void> {
+  await invoke<void>('pipeline_capabilities_install', opts);
+}
+
+export async function pipelineCapabilitiesUninstall(opts: {
+  worktreeDir: string;
+  role: string;
+}): Promise<void> {
+  await invoke<void>('pipeline_capabilities_uninstall', opts);
+}
+
 // ─── Pipeline verification step (Phase 2c-i) ──────────────────
 
 export interface VerificationStepResult {
