@@ -1,7 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useThemeStore } from '@/stores/themeStore';
@@ -191,15 +190,12 @@ export function TerminalTile({ tile }: TerminalTileProps) {
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
 
-    let webglAddon: WebglAddon | null = null;
-    try {
-      webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => webglAddon?.dispose());
-      terminal.loadAddon(webglAddon);
-    } catch {
-      // WebGL not available
-      webglAddon = null;
-    }
+    // Note: @xterm/addon-webgl@0.19.0 is incompatible with @xterm/xterm@5.5.0.
+    // The addon's dispose hook reads `_terminal._core._store._isDisposed`,
+    // but xterm 5.5 reorganised `_core` and `_store` no longer exists on
+    // that path — every dispose throws `_store of undefined` and the tile
+    // crashes. Default canvas renderer is good enough for our scale; revisit
+    // when the addon catches up.
 
     terminal.open(containerRef.current);
     // Attach direct keyboard capture (bypasses xterm's broken textarea focus)
@@ -221,10 +217,6 @@ export function TerminalTile({ tile }: TerminalTileProps) {
     return () => {
       cancelAnimationFrame(rafId);
       detachKb();
-      // WebglAddon must be disposed BEFORE terminal — otherwise its render
-      // loop fires once more on a torn-down store and throws
-      // `_store._isDisposed` of undefined.
-      webglAddon?.dispose();
       terminal.dispose();
       termRef.current = null;
       fitRef.current = null;
