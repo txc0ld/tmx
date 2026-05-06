@@ -404,6 +404,14 @@ export async function pipelineInstallSkills(): Promise<InstallSkillsResult> {
   return invoke<InstallSkillsResult>('pipeline_install_skills');
 }
 
+export async function pipelineTelemetryLog(opts: {
+  projectDir: string;
+  runId: string;
+  line: string;
+}): Promise<void> {
+  await invoke<void>('pipeline_telemetry_log', opts);
+}
+
 export interface OneshotResult {
   stdout: string;
   stderr: string;
