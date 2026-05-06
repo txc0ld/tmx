@@ -8,6 +8,7 @@ import { usePty } from '@/hooks/usePty';
 import { agentSpawn, onAgentStatus, ptyWrite } from '@/utils/ipc';
 import { colors, fonts, spacing, typography, radius, agentColors, alpha } from '@/design/tokens';
 import { attachKeyboardCapture } from './xtermInput';
+import { cleanPtyOutput } from '@/utils/ansi';
 import type { AgentTile as AgentTileType } from '@/types';
 
 function isLightTheme(t: { bg: string }): boolean {
@@ -427,20 +428,6 @@ export function AgentTile({ tile }: AgentTileProps) {
 // Glows accent-colored when there's unread data available to pipe — so
 // users discover it. After piping, we track 'pipedUpTo' (byte offset)
 // per source so the button dims again until more output arrives.
-// Strip ANSI escape sequences, OSC/CSI sequences, and backspace/carriage-return
-// control artifacts — leaves only readable text for the agent.
-function cleanPtyOutput(raw: string): string {
-  return raw
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')   // CSI sequences (colors, cursor movement)
-    .replace(/\x1b\][^\x07]*\x07/g, '')       // OSC sequences (window title etc.)
-    .replace(/\x1b[()][0-9A-Z]/g, '')         // charset switches
-    .replace(/\x1b[=>]/g, '')                 // app/numeric mode
-    .replace(/\r\n/g, '\n')                   // normalize line endings
-    .replace(/\r/g, '')                       // strip bare CR
-    .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '') // other control chars (keep \t=09, \n=0A)
-    .replace(/\n{3,}/g, '\n\n');              // collapse excessive blank lines
-}
-
 function tailLines(text: string, maxLines: number): string {
   const lines = text.split('\n');
   return lines.length <= maxLines ? text : lines.slice(-maxLines).join('\n');

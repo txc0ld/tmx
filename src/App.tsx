@@ -4,7 +4,8 @@ import { useProjectStore } from '@/stores/projectStore';
 import { useTimelineStore } from '@/stores/timelineStore';
 import { colors } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
-import { loadWorkspace, pipelineInstallSkills } from '@/utils/ipc';
+import { loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog } from '@/utils/ipc';
+import { setPipelineTelemetryEmitter } from '@/stores/pipelineStore';
 import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas';
 import { ProjectSidebar } from '@/components/sidebar/ProjectSidebar';
 import { TopBar } from '@/components/topbar/TopBar';
@@ -100,6 +101,19 @@ export default function App() {
   // or the app re-renders at the root.
   useEffect(() => initMcpProjectSync(), []);
   useEffect(() => initUsageTracking(), []);
+
+  // Wire pipelineStore telemetry to the Rust JSONL writer at app boot.
+  // Tests leave this unset → telemetry is a no-op in jsdom.
+  useEffect(() => {
+    setPipelineTelemetryEmitter(ev => {
+      pipelineTelemetryLog({
+        projectDir: ev.projectId,
+        runId: ev.runId,
+        line: JSON.stringify(ev),
+      }).catch(err => console.warn('[pipeline] telemetry log failed:', err));
+    });
+    return () => setPipelineTelemetryEmitter(null);
+  }, []);
 
   // Auto-install pipeline skills (`tx-pipeline-stage-handoff`,
   // `tx-pipeline-reviewer`) into ~/.claude/skills/ on first mount.

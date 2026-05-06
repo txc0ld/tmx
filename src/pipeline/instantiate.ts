@@ -13,8 +13,8 @@ interface InstantiateOutput {
   roleToTileId: Partial<Record<PipelineRole, string>>;
 }
 
-function uid(prefix: string): string {
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+function uid(): string {
+  return crypto.randomUUID();
 }
 
 const ROLE_TITLES: Record<PipelineRole, string> = {
@@ -33,7 +33,7 @@ export function instantiatePipelineTemplate(
   const tiles: Tile[] = [];
 
   for (const spec of template.tiles) {
-    const id = uid(`tile-${spec.role}`);
+    const id = uid();
     roleToTileId[spec.role] = id;
 
     const base = {
@@ -65,8 +65,6 @@ export function instantiatePipelineTemplate(
       };
       tiles.push(tile);
     } else {
-      // Phase 1 doesn't materialize other tile types from PipelineTemplate; skip with warning.
-      // (Future templates may include non-agent helper tiles.)
       console.warn(`[pipeline] unsupported tile type in PipelineTemplate: ${spec.type}`);
     }
   }
@@ -77,7 +75,7 @@ export function instantiatePipelineTemplate(
     const toTile = roleToTileId[w.toRole];
     if (!fromTile || !toTile) continue;
     wires.push({
-      id: uid('wire'),
+      id: uid(),
       fromTile,
       fromPort: 'output',
       toTile,

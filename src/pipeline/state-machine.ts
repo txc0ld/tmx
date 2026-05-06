@@ -12,8 +12,19 @@ import type {
 const REVIEWER_REJECT_BUDGET = 3;
 const CI_FAIL_BUDGET = 3;
 
-const TERMINAL_STATES: ReadonlySet<PipelineState> = new Set(['done', 'failed', 'escalated']);
-const ACTIVE_STAGES: ReadonlySet<PipelineState> = new Set(['planning', 'building', 'reviewing', 'merging']);
+export const TERMINAL_STATES: ReadonlySet<PipelineState> = new Set(['done', 'failed', 'escalated']);
+
+/** Active in-flight stages — used for `clarification_received.resumeTo` and `question_raised` gating. */
+export const ACTIVE_STAGES: ReadonlySet<PipelineState> = new Set([
+  'planning',
+  'building',
+  'reviewing',
+  'merging',
+]);
+
+export function isTerminalState(state: PipelineState): boolean {
+  return TERMINAL_STATES.has(state);
+}
 
 export type PipelineEvent =
   | { type: 'start' }
@@ -59,7 +70,6 @@ export function initialRunState(input: InitialRunInputs): PipelineRun {
 }
 
 export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
-  // Abort and terminal-stickiness handled first
   if (ev.type === 'abort') {
     if (TERMINAL_STATES.has(run.state)) return run;
     return { ...run, state: 'failed', failureReason: ev.reason, failureClass: 'unknown', endedAt: Date.now() };
@@ -103,7 +113,6 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
           artifacts: { ...run.artifacts, reviews },
         };
       }
-      // reject
       const next = run.retryCounters.reviewerReject + 1;
       if (next > REVIEWER_REJECT_BUDGET) {
         return {
@@ -159,8 +168,12 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
       };
 
     case 'clarification_received':
-      if (run.state === 'awaiting_clarification') return { ...run, state: ev.resumeTo };
-      return run;
+      // Only resume from awaiting_clarification, and only into an active
+      // stage. Resuming to a terminal/awaiting state would silently end or
+      // corrupt the run.
+      if (run.state !== 'awaiting_clarification') return run;
+      if (!ACTIVE_STAGES.has(ev.resumeTo)) return run;
+      return { ...run, state: ev.resumeTo };
 
     case 'approve_merge':
       if (run.state === 'awaiting_merge_approval') return { ...run, state: 'merging' };
@@ -177,5 +190,12 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
     case 'merge_failed':
       if (run.state !== 'merging') return run;
       return { ...run, state: 'failed', failureReason: ev.reason, failureClass: 'unknown', endedAt: Date.now() };
+
+    default: {
+      // Compile-time exhaustiveness: adding a PipelineEvent variant without
+      // handling it here will trigger a TS error that points at this line.
+      const _exhaustive: never = ev;
+      return _exhaustive;
+    }
   }
 }
