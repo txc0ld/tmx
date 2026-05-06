@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type { PipelineRun } from '@/types';
-import { pipelineTelemetryLog } from '@/utils/ipc';
 import {
   reducer,
   initialRunState,
@@ -8,6 +7,26 @@ import {
   type PipelineEvent,
   type InitialRunInputs,
 } from '@/pipeline/state-machine';
+
+/**
+ * Telemetry emitter — registered at app boot via `setPipelineTelemetryEmitter`
+ * so this module stays free of IPC concerns. Tests leave it unset (no-op).
+ */
+export interface TelemetryEvent {
+  at: number;
+  event: 'state_change';
+  runId: string;
+  projectId: string;
+  from: string;
+  to: string;
+  trigger: string;
+}
+type TelemetryEmitter = (event: TelemetryEvent) => void;
+let telemetryEmitter: TelemetryEmitter | null = null;
+
+export function setPipelineTelemetryEmitter(fn: TelemetryEmitter | null): void {
+  telemetryEmitter = fn;
+}
 
 interface PipelineStoreShape {
   runs: Record<string, PipelineRun>;
@@ -38,42 +57,41 @@ export const usePipelineStore = create<PipelineStoreShape>((set) => ({
   },
 
   dispatch: (runId, ev) => {
-    let logLine: string | null = null;
-    let projectId: string | null = null;
+    let pendingTelemetry: TelemetryEvent | null = null;
     set(s => {
       const existing = s.runs[runId];
       if (!existing) return s;
       const next = reducer(existing, ev);
       if (next === existing) return s;
 
-      const stateChanged = existing.state !== next.state;
-      if (stateChanged) {
-        projectId = existing.projectId;
-        logLine = JSON.stringify({
+      if (existing.state !== next.state) {
+        pendingTelemetry = {
           at: Date.now(),
           event: 'state_change',
           runId,
+          projectId: existing.projectId,
           from: existing.state,
           to: next.state,
           trigger: ev.type,
-        });
+        };
       }
 
-      // activeRunIds membership only changes when a run crosses the
-      // terminal boundary; otherwise reuse the prior reference so
-      // subscribers selecting `activeRunIds` don't re-render needlessly.
+      // activeRunIds membership only changes when a run crosses the terminal
+      // boundary; otherwise reuse the prior reference so subscribers selecting
+      // `activeRunIds` don't re-render needlessly.
       const terminalBoundaryCrossed =
         isTerminalState(existing.state) !== isTerminalState(next.state);
       const runs = { ...s.runs, [runId]: next };
-      const activeRunIds = terminalBoundaryCrossed
-        ? deriveActive(runs)
-        : s.activeRunIds;
+      const activeRunIds = terminalBoundaryCrossed ? deriveActive(runs) : s.activeRunIds;
       return { runs, activeRunIds };
     });
 
-    if (logLine && projectId) {
-      pipelineTelemetryLog({ projectDir: projectId, runId, line: logLine })
-        .catch(err => console.warn('[pipeline] telemetry log failed:', err));
+    if (pendingTelemetry && telemetryEmitter) {
+      try {
+        telemetryEmitter(pendingTelemetry);
+      } catch (err) {
+        console.warn('[pipeline] telemetry emitter threw:', err);
+      }
     }
   },
 

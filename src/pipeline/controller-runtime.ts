@@ -1,62 +1,62 @@
 import { usePipelineStore } from '@/stores/pipelineStore';
-import { scanForSentinel, type SentinelEvent } from './sentinel-scanner';
-import type { PipelineRole, PlanArtifact, BuildArtifact, ReviewVerdict, QuestionArtifact } from '@/types';
+import { scanForSentinel } from './sentinel-scanner';
+import type {
+  PipelineRole,
+  PlanArtifact,
+  BuildArtifact,
+  ReviewVerdict,
+  QuestionArtifact,
+} from '@/types';
 
 const ptyBuffers = new Map<string, string>();
 const MAX_BUFFER = 64 * 1024;
 
-interface PtyChunkInput {
-  runId: string;
-  role: PipelineRole;
-  chunk: string;
-}
+type Dispatch = ReturnType<typeof usePipelineStore.getState>['dispatch'];
 
-interface OneshotInput {
+interface IngestRequest {
   runId: string;
   role: PipelineRole;
-  stdout: string;
-  exitCode: number | null;
+  raw: string;
+  /** Streaming source (PTY chunks) buffers across calls; one-shot doesn't. */
+  source: 'pty' | 'oneshot';
+  /** One-shot only: process exit code. Used to synthesize failure when no sentinel found. */
+  exitCode?: number | null;
 }
 
 /**
- * Public entry: feed a PTY output chunk for a run+role.
- * Accumulates and dispatches on complete sentinels.
+ * Single ingestion path for both streaming PTY chunks and one-shot stdout.
+ * For PTY, accumulates a per-(run, role) buffer across calls; for one-shot,
+ * scans the full stdout once and synthesizes a failure transition if no
+ * sentinel is found and the process exited nonzero.
  */
-export function ingestPtyChunk(input: PtyChunkInput): void {
+export function ingest(input: IngestRequest): void {
+  const dispatch = usePipelineStore.getState().dispatch;
   const key = `${input.runId}:${input.role}`;
-  let buf = (ptyBuffers.get(key) ?? '') + input.chunk;
 
-  while (true) {
-    const event = scanForSentinel(buf);
-    if (event === null) break;
-    dispatchSentinel(input.runId, input.role, event);
-    buf = buf.slice(event.consumedThrough);
-  }
-
-  if (buf.length > MAX_BUFFER) {
-    buf = buf.slice(buf.length - MAX_BUFFER);
-  }
-  ptyBuffers.set(key, buf);
-}
-
-/**
- * Public entry: feed a one-shot agent result. The full stdout is passed
- * once; we scan it for the terminal sentinel. If none is found and the
- * exit code is non-zero, we synthesize a `planner_failed`-style transition.
- */
-export function ingestOneshotResult(input: OneshotInput): void {
-  const event = scanForSentinel(input.stdout);
-  if (event !== null) {
-    dispatchSentinel(input.runId, input.role, event);
+  if (input.source === 'pty') {
+    let buf = (ptyBuffers.get(key) ?? '') + input.raw;
+    while (true) {
+      const event = scanForSentinel(buf);
+      if (event === null) break;
+      dispatchSentinel(input.runId, input.role, event, dispatch);
+      buf = buf.slice(event.consumedThrough);
+    }
+    if (buf.length > MAX_BUFFER) buf = buf.slice(buf.length - MAX_BUFFER);
+    ptyBuffers.set(key, buf);
     return;
   }
 
-  if (input.exitCode !== 0) {
-    const dispatch = usePipelineStore.getState().dispatch;
+  // One-shot: scan once; synthesize failure if no sentinel + nonzero exit.
+  const event = scanForSentinel(input.raw);
+  if (event !== null) {
+    dispatchSentinel(input.runId, input.role, event, dispatch);
+    return;
+  }
+  if (input.exitCode !== 0 && input.exitCode !== undefined && input.exitCode !== null) {
     if (input.role === 'planner') {
       dispatch(input.runId, {
         type: 'planner_failed',
-        reason: `agent exited ${input.exitCode} without sentinel; stdout: ${input.stdout.slice(0, 500)}`,
+        reason: `agent exited ${input.exitCode} without sentinel; stdout: ${input.raw.slice(0, 500)}`,
       });
     } else {
       dispatch(input.runId, {
@@ -67,62 +67,70 @@ export function ingestOneshotResult(input: OneshotInput): void {
   }
 }
 
-function dispatchSentinel(runId: string, role: PipelineRole, ev: SentinelEvent): void {
-  const dispatch = usePipelineStore.getState().dispatch;
-
-  switch (ev.kind) {
-    case 'done':
-      dispatchDone(runId, role, ev.payload, dispatch);
-      break;
-    case 'failed':
-      if (role === 'planner') {
-        dispatch(runId, { type: 'planner_failed', reason: ev.payload.reason });
-      } else {
-        dispatch(runId, { type: 'abort', reason: `${role}: ${ev.payload.reason}` });
-      }
-      break;
-    case 'question':
-      dispatch(runId, { type: 'question_raised', question: ev.payload as QuestionArtifact });
-      break;
-    case 'heartbeat':
-      break;
-    case 'parse_error':
-      if (role === 'planner') {
-        dispatch(runId, { type: 'planner_failed', reason: `malformed sentinel: ${ev.error}` });
-      } else {
-        dispatch(runId, { type: 'abort', reason: `malformed sentinel from ${role}: ${ev.error}` });
-      }
-      break;
-  }
+/** Convenience wrapper: ingest a streaming PTY chunk. */
+export function ingestPtyChunk(input: { runId: string; role: PipelineRole; chunk: string }): void {
+  ingest({ runId: input.runId, role: input.role, raw: input.chunk, source: 'pty' });
 }
 
-function dispatchDone(
+/** Convenience wrapper: ingest a one-shot agent result. */
+export function ingestOneshotResult(input: {
+  runId: string;
+  role: PipelineRole;
+  stdout: string;
+  exitCode: number | null;
+}): void {
+  ingest({
+    runId: input.runId,
+    role: input.role,
+    raw: input.stdout,
+    source: 'oneshot',
+    exitCode: input.exitCode,
+  });
+}
+
+function dispatchSentinel(
   runId: string,
   role: PipelineRole,
-  payload: PlanArtifact | BuildArtifact | ReviewVerdict,
-  dispatch: ReturnType<typeof usePipelineStore.getState>['dispatch'],
+  ev: ReturnType<typeof scanForSentinel> & object,
+  dispatch: Dispatch,
 ): void {
-  if (payload.stage === 'planner' && role === 'planner') {
-    dispatch(runId, { type: 'planner_done', plan: payload as PlanArtifact });
-    return;
-  }
-  if (payload.stage === 'builder' && role === 'builder') {
-    dispatch(runId, { type: 'builder_done', build: payload as BuildArtifact });
-    return;
-  }
-  if (payload.stage === 'reviewer' && (role === 'reviewer' || role === 'reviewer-codex')) {
-    dispatch(runId, { type: 'reviewer_done', verdict: payload as ReviewVerdict });
-    return;
-  }
-
-  // Role/stage mismatch — a hallucinating LLM emitted an artifact for the
-  // wrong stage. Abort instead of silently ignoring; otherwise the run
-  // hangs forever waiting for a sentinel that will never arrive correctly.
-  const reason = `role/stage mismatch: ${role} emitted ${payload.stage}`;
-  if (role === 'planner') {
-    dispatch(runId, { type: 'planner_failed', reason });
-  } else {
-    dispatch(runId, { type: 'abort', reason });
+  switch (ev.kind) {
+    case 'done': {
+      const payload = ev.payload as PlanArtifact | BuildArtifact | ReviewVerdict;
+      if (payload.stage === 'planner' && role === 'planner') {
+        dispatch(runId, { type: 'planner_done', plan: payload as PlanArtifact });
+        return;
+      }
+      if (payload.stage === 'builder' && role === 'builder') {
+        dispatch(runId, { type: 'builder_done', build: payload as BuildArtifact });
+        return;
+      }
+      if (payload.stage === 'reviewer' && (role === 'reviewer' || role === 'reviewer-codex')) {
+        dispatch(runId, { type: 'reviewer_done', verdict: payload as ReviewVerdict });
+        return;
+      }
+      // Role/stage mismatch — hallucinating LLM. Abort so the run doesn't hang.
+      const reason = `role/stage mismatch: ${role} emitted ${payload.stage}`;
+      dispatch(runId, role === 'planner'
+        ? { type: 'planner_failed', reason }
+        : { type: 'abort', reason });
+      return;
+    }
+    case 'failed':
+      dispatch(runId, role === 'planner'
+        ? { type: 'planner_failed', reason: ev.payload.reason }
+        : { type: 'abort', reason: `${role}: ${ev.payload.reason}` });
+      return;
+    case 'question':
+      dispatch(runId, { type: 'question_raised', question: ev.payload as QuestionArtifact });
+      return;
+    case 'heartbeat':
+      return;
+    case 'parse_error':
+      dispatch(runId, role === 'planner'
+        ? { type: 'planner_failed', reason: `malformed sentinel: ${ev.error}` }
+        : { type: 'abort', reason: `malformed sentinel from ${role}: ${ev.error}` });
+      return;
   }
 }
 
