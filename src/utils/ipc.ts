@@ -412,6 +412,14 @@ export async function pipelineTelemetryLog(opts: {
   await invoke<void>('pipeline_telemetry_log', opts);
 }
 
+export async function pipelineGuardrailsInstall(worktreeDir: string): Promise<void> {
+  await invoke<void>('pipeline_guardrails_install', { worktreeDir });
+}
+
+export async function pipelineGuardrailsUninstall(worktreeDir: string): Promise<void> {
+  await invoke<void>('pipeline_guardrails_uninstall', { worktreeDir });
+}
+
 // ─── Pipeline verification step (Phase 2c-i) ──────────────────
 
 export interface VerificationStepResult {

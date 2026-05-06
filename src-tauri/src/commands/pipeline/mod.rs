@@ -7,7 +7,9 @@
 //! - telemetry: pipeline_telemetry_log (JSONL append per run)
 //! - verification: pipeline_run_verification_step (CI hook executor)
 //! - merger: pipeline_merger_run + pipeline_merger_request_token (Phase 2c-ii)
+//! - guardrails: pipeline_guardrails_install / _uninstall (Phase 2c-ii.3)
 
+pub mod guardrails;
 pub mod merger;
 pub mod preflight;
 pub mod skills;
@@ -15,6 +17,7 @@ pub mod telemetry;
 pub mod verification;
 pub mod worktree;
 
+pub use guardrails::*;
 pub use merger::*;
 pub use preflight::*;
 pub use skills::*;

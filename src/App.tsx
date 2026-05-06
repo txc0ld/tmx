@@ -5,7 +5,8 @@ import { useTimelineStore } from '@/stores/timelineStore';
 import { colors } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
 import { loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog } from '@/utils/ipc';
-import { setPipelineTelemetryEmitter } from '@/stores/pipelineStore';
+import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter } from '@/stores/pipelineStore';
+import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
 import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas';
 import { ProjectSidebar } from '@/components/sidebar/ProjectSidebar';
 import { TopBar } from '@/components/topbar/TopBar';
@@ -113,6 +114,13 @@ export default function App() {
       }).catch(err => console.warn('[pipeline] telemetry log failed:', err));
     });
     return () => setPipelineTelemetryEmitter(null);
+  }, []);
+
+  // Phase 2c-ii.3: Install/uninstall the dangerous-git guardrails hook in
+  // the worktree's `.claude/settings.json` for the active run window.
+  useEffect(() => {
+    setPipelineLifecycleEmitter(handleGuardrailsLifecycle);
+    return () => setPipelineLifecycleEmitter(null);
   }, []);
 
   // Auto-install pipeline skills (`tx-pipeline-stage-handoff`,
