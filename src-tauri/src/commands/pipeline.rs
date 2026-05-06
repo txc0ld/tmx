@@ -526,6 +526,9 @@ pub async fn run_verification_step_inner(input: VerificationStepInput) -> Verifi
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
+    // Without kill_on_drop, a timed-out subprocess keeps running after
+    // tokio::time::timeout cancels the wait_with_output future.
+    cmd.kill_on_drop(true);
 
     let child = match cmd.spawn() {
         Ok(c) => c,

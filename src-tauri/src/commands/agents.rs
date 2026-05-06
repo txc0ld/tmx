@@ -244,6 +244,9 @@ pub async fn run_oneshot_inner(inv: OneshotInvocation) -> Result<OneshotResult, 
     if let Some(cwd) = &inv.cwd {
         cmd.current_dir(cwd);
     }
+    // Without kill_on_drop, a timed-out subprocess keeps running after
+    // tokio::time::timeout cancels the wait_with_output future.
+    cmd.kill_on_drop(true);
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn {bin}: {e}"))?;
 
