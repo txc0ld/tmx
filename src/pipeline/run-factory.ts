@@ -167,7 +167,15 @@ export function defaultRunFactoryDeps(opts: {
     try {
       const text = await readFileText(path);
       return text.length > 0 ? text : null;
-    } catch {
+    } catch (err) {
+      // ENOENT-shaped errors are expected (missing optional file). Anything
+      // else (permission denied, IPC validation, OS I/O) is a determinism
+      // hazard — silently omitting it lets two runs with different real
+      // content produce the same fingerprint. Log so the user can see it.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/no such file|not found|enoent/i.test(msg)) {
+        console.warn(`[run-factory] read failed for ${path}:`, msg);
+      }
       return null;
     }
   };
