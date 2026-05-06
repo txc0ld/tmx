@@ -315,7 +315,11 @@ pub async fn agent_run_oneshot(input: OneshotIpcInput) -> Result<OneshotResult, 
     run_oneshot_inner(inv).await
 }
 
-#[cfg(test)]
+// These tests use POSIX paths (/bin/echo, /bin/sh, /bin/cat) as stand-ins
+// for the agent CLIs, so the suite is Unix-only. Windows CI is covered by
+// the same module on Phase 2b's downstream e2e smoke (mocked at the TS
+// layer) and by phase 3's `agent_run_oneshot` integration paths.
+#[cfg(all(test, unix))]
 mod oneshot_tests {
     use super::*;
     use std::time::Duration;
