@@ -91,12 +91,14 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
 
+    let webglAddon: WebglAddon | null = null;
     try {
-      const webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => webglAddon.dispose());
+      webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => webglAddon?.dispose());
       terminal.loadAddon(webglAddon);
     } catch {
       // WebGL not available
+      webglAddon = null;
     }
 
     terminal.open(containerRef.current);
@@ -117,6 +119,10 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
     return () => {
       cancelAnimationFrame(rafId);
       detachKb();
+      // WebglAddon must be disposed BEFORE terminal — otherwise its render
+      // loop fires once more on a torn-down store and throws
+      // `_store._isDisposed` of undefined.
+      webglAddon?.dispose();
       terminal.dispose();
       termRef.current = null;
       fitRef.current = null;
