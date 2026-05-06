@@ -39,6 +39,7 @@ pub fn run() {
             commands::agents::agent_spawn,
             commands::agents::agent_kill,
             commands::agents::agent_list,
+            commands::agents::agent_run_oneshot,
             // Filesystem
             commands::filesystem::read_file_tree,
             commands::filesystem::read_file_text,
@@ -87,6 +88,7 @@ pub fn run() {
             // Pipeline (agentic-pipeline Phase 1)
             commands::pipeline::pipeline_install_skills,
             commands::pipeline::pipeline_preflight,
+            commands::pipeline::pipeline_telemetry_log,
             commands::pipeline::pipeline_worktree_create,
             commands::pipeline::pipeline_worktree_destroy,
         ])

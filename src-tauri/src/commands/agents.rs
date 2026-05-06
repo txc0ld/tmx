@@ -200,3 +200,187 @@ pub async fn agent_list(
     let agents = state.agent_registry.lock();
     Ok(agents.values().cloned().collect())
 }
+
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command as TokioCommand;
+use tokio::time::{timeout, Duration as TokioDuration};
+
+#[derive(Debug, Deserialize)]
+pub struct OneshotInvocation {
+    /// Internal: tests inject a known bin (e.g. /bin/echo). Production callers
+    /// don't set this; resolved from `agent` enum at the IPC boundary.
+    #[serde(skip)]
+    pub bin_override: Option<String>,
+
+    pub args: Vec<String>,
+    pub stdin: Option<String>,
+    pub timeout_secs: u64,
+    pub cwd: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OneshotResult {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    pub duration_ms: u64,
+}
+
+/// Pure-async core. Caller resolves the binary path; this just runs it.
+pub async fn run_oneshot_inner(inv: OneshotInvocation) -> Result<OneshotResult, String> {
+    let bin = inv
+        .bin_override
+        .clone()
+        .ok_or_else(|| "no binary specified".to_string())?;
+
+    let started = std::time::Instant::now();
+
+    let mut cmd = TokioCommand::new(&bin);
+    cmd.args(&inv.args);
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    if let Some(cwd) = &inv.cwd {
+        cmd.current_dir(cwd);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| format!("spawn {bin}: {e}"))?;
+
+    if let Some(input) = &inv.stdin {
+        if let Some(mut sin) = child.stdin.take() {
+            sin.write_all(input.as_bytes())
+                .await
+                .map_err(|e| format!("write stdin: {e}"))?;
+            // Drop sin to close stdin so the child finishes reading.
+        }
+    }
+
+    let wait = child.wait_with_output();
+    let result = timeout(TokioDuration::from_secs(inv.timeout_secs), wait).await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+
+    match result {
+        Ok(Ok(out)) => Ok(OneshotResult {
+            stdout: String::from_utf8_lossy(&out.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+            exit_code: out.status.code(),
+            timed_out: false,
+            duration_ms,
+        }),
+        Ok(Err(e)) => Err(format!("wait child: {e}")),
+        Err(_) => Ok(OneshotResult {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: None,
+            timed_out: true,
+            duration_ms,
+        }),
+    }
+}
+
+fn resolve_oneshot_bin(agent: &str) -> Result<String, String> {
+    match agent {
+        "claude" => Ok("claude".to_string()),
+        "codex" => Ok("codex".to_string()),
+        "gemini" => Ok("gemini".to_string()),
+        other => Err(format!("unsupported one-shot agent: {other}")),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OneshotIpcInput {
+    pub agent: String,
+    pub args: Vec<String>,
+    pub stdin: Option<String>,
+    #[serde(default = "default_oneshot_timeout")]
+    pub timeout_secs: u64,
+    pub cwd: Option<String>,
+}
+
+fn default_oneshot_timeout() -> u64 {
+    600
+}
+
+#[tauri::command]
+pub async fn agent_run_oneshot(input: OneshotIpcInput) -> Result<OneshotResult, String> {
+    let bin = resolve_oneshot_bin(&input.agent)?;
+    let inv = OneshotInvocation {
+        bin_override: Some(bin),
+        args: input.args,
+        stdin: input.stdin,
+        timeout_secs: input.timeout_secs,
+        cwd: input.cwd,
+    };
+    run_oneshot_inner(inv).await
+}
+
+// These tests use POSIX paths (/bin/echo, /bin/sh, /bin/cat) as stand-ins
+// for the agent CLIs, so the suite is Unix-only. Windows CI is covered by
+// the same module on Phase 2b's downstream e2e smoke (mocked at the TS
+// layer) and by phase 3's `agent_run_oneshot` integration paths.
+#[cfg(all(test, unix))]
+mod oneshot_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn run_oneshot_captures_stdout_and_exit_code() {
+        let res = run_oneshot_inner(OneshotInvocation {
+            bin_override: Some("/bin/echo".into()),
+            args: vec!["hello".into(), "world".into()],
+            stdin: None,
+            timeout_secs: 5,
+            cwd: None,
+        })
+        .await
+        .unwrap();
+        assert!(res.stdout.starts_with("hello world"));
+        assert_eq!(res.exit_code, Some(0));
+        assert!(!res.timed_out);
+    }
+
+    #[tokio::test]
+    async fn run_oneshot_captures_nonzero_exit() {
+        let res = run_oneshot_inner(OneshotInvocation {
+            bin_override: Some("/bin/sh".into()),
+            args: vec!["-c".into(), "exit 7".into()],
+            stdin: None,
+            timeout_secs: 5,
+            cwd: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(res.exit_code, Some(7));
+    }
+
+    #[tokio::test]
+    async fn run_oneshot_pipes_stdin() {
+        let res = run_oneshot_inner(OneshotInvocation {
+            bin_override: Some("/bin/cat".into()),
+            args: vec![],
+            stdin: Some("piped input".into()),
+            timeout_secs: 5,
+            cwd: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(res.stdout.trim(), "piped input");
+    }
+
+    #[tokio::test]
+    async fn run_oneshot_times_out_long_running() {
+        let started = std::time::Instant::now();
+        let res = run_oneshot_inner(OneshotInvocation {
+            bin_override: Some("/bin/sh".into()),
+            args: vec!["-c".into(), "sleep 30".into()],
+            stdin: None,
+            timeout_secs: 1,
+            cwd: None,
+        })
+        .await
+        .unwrap();
+        assert!(res.timed_out);
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+}

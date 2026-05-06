@@ -138,6 +138,16 @@ Multi-tile templates that lay down a wired set of agent + helper tiles + a `pipe
 
 **Skills installation** (`pipeline_install_skills`) bundles `tx-pipeline-stage-handoff` + `tx-pipeline-reviewer` SKILL.md files inside the app via Tauri `bundle.resources` (`src-tauri/resources/skills/**/*`). On first mount, `App.tsx` invokes the Rust command which resolves the bundle via `app.path().resource_dir()` and copies any missing skill into `~/.claude/skills/<name>/`. Existing skills are left alone (no auto-overwrite — Phase 3 ships an explicit upgrade UI). Per-skill copy errors are recorded in `errors: string[]` and surfaced as `console.warn` but never crash the app. Skill provenance signing (verifying the bundle hasn't been tampered with vs the TerminalX release key) lands in Phase 2c with the broader security work.
 
+**Sentinel scanner** (`src/pipeline/sentinel-scanner.ts`) — pure parser for the four sentinels (`<<<TX_STAGE_DONE>>>`, `<<<TX_STAGE_FAILED>>>`, `<<<TX_STAGE_QUESTION>>>`, `<<<TX_HEARTBEAT>>>`) emitted by agents per the `tx-pipeline-stage-handoff` skill. Strips ANSI codes, finds the first marker, extracts a balanced JSON object (string-aware so braces inside strings don't fool it), returns `null` on incomplete input so the caller can buffer more PTY chunks and retry.
+
+**Controller runtime** (`src/pipeline/controller-runtime.ts`) glues the scanner to `pipelineStore`. `ingestPtyChunk` accumulates per-PTY-id buffers (64KB cap with runaway-discard) and dispatches `PipelineEvent`s on every complete sentinel found. `ingestOneshotResult` is the headless analog for the Reviewer's `agent_run_oneshot` invocation. `parse_error` from the scanner becomes a `planner_failed` (planner role) or `abort` (other roles) so a misbehaving agent can never hang the run.
+
+**One-shot agent execution** (`agent_run_oneshot` Rust IPC) — wraps `tokio::process::Command` for the Reviewer stage. Spawns the agent CLI with `--print` / `exec`, pipes stdin, captures stdout/stderr/exit_code, honors a timeout (default 600s). No PTY allocation. Phase 2b uses this for the Reviewer; Phase 3 may extend to the custom-command escape hatch.
+
+**Telemetry JSONL** (`pipeline_telemetry_log` Rust IPC) — `pipelineStore.dispatch` fire-and-forgets one JSONL line to `<projectDir>/.terminalx/pipeline-telemetry/<runId>.jsonl` on every state transition. Schema: `{at, event, runId, from, to, trigger}`. Append-only via `OpenOptions::append(true)`. Rejects payload newlines (would break JSONL framing) and run_ids outside `[a-zA-Z0-9_-]+`.
+
+**Default template:** `Anthropic Trio` (`anthropicTrioTemplate()` in `src/pipeline/templates.ts`) — Opus Planner, Sonnet Builder, Opus Reviewer with the full skill-bindings list per spec §10. Phase 2b ships the template; Phase 2c authors the role prompts that consume it.
+
 ## Pass-Through Contracts
 
 ### Reading project files: use the Rust IPC, not the fs plugin
