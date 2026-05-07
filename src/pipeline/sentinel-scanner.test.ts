@@ -147,4 +147,15 @@ describe('scanForSentinel', () => {
       expect(ev2.payload.summary).toBe('two');
     }
   });
+
+  // Phase 3b.6: compaction-done sentinel.
+  it('finds TX_COMPACTION_DONE with summary payload', () => {
+    const buf = '<<<TX_COMPACTION_DONE>>>{"summary":"compacted: tasks 1-3 done; task 4 next"}\n';
+    const event = scanForSentinel(buf);
+    expect(event?.kind).toBe('compaction_done');
+    if (event?.kind === 'compaction_done') {
+      expect(event.payload.summary).toBe('compacted: tasks 1-3 done; task 4 next');
+    }
+    expect(event?.consumedThrough).toBeGreaterThan(0);
+  });
 });

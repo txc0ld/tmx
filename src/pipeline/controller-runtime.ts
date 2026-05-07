@@ -1,12 +1,21 @@
 import { usePipelineStore } from '@/stores/pipelineStore';
+import { useCanvasStore } from '@/stores/canvasStore';
 import { scanForSentinel } from './sentinel-scanner';
 import { notifyBuilderActivity, clearScratchpadState } from './scratchpad-watcher';
+import {
+  notifyBuilderBytes,
+  resetBuilderBytes,
+  handleCompactionDone,
+  clearCompactionState,
+} from './compaction-watcher';
 import type {
   PipelineRole,
   PlanArtifact,
   BuildArtifact,
   ReviewVerdict,
   QuestionArtifact,
+  Tile,
+  AgentTile,
 } from '@/types';
 
 const ptyBuffers = new Map<string, string>();
@@ -54,6 +63,15 @@ export function ingest(input: IngestRequest): void {
   }
 
   if (input.source === 'pty') {
+    // Phase 3b.6: track Builder bytes-since-last-sentinel and trip a
+    // compaction prompt when the threshold is crossed. Done BEFORE the
+    // scanner loop so a chunk that crosses the threshold while *also*
+    // delivering a sentinel still gets the prompt queued — the sentinel
+    // dispatch resets the counter immediately after.
+    if (input.role === 'builder' && input.raw.length > 0) {
+      maybeNotifyBuilderBytes(input.runId, input.raw.length);
+    }
+
     let buf = (ptyBuffers.get(key) ?? '') + input.raw;
     while (true) {
       const event = scanForSentinel(buf);
@@ -121,6 +139,43 @@ function maybeNotifyBuilder(runId: string, role: PipelineRole): void {
   void notifyBuilderActivity({ runId, role, worktreePath: run.worktreePath });
 }
 
+/**
+ * Resolve the Builder PTY id by walking the canvas-store tiles for the
+ * run. Mirrors `findActiveRolePtyId` in `App.tsx` but role-locked to
+ * builder. Returns `undefined` while the Builder tile hasn't spawned
+ * (e.g. between `approve_plan` and the first chunk arriving) — callers
+ * should skip the compaction prompt in that case.
+ */
+function findBuilderPtyId(runId: string): string | undefined {
+  const run = usePipelineStore.getState().runs[runId];
+  if (!run) return undefined;
+  const tileId = run.tiles.builder;
+  if (!tileId) return undefined;
+  const projectTiles = useCanvasStore.getState().tiles;
+  for (const list of Object.values(projectTiles)) {
+    const arr = list as Tile[] | undefined;
+    if (!arr) continue;
+    const found = arr.find(t => t.id === tileId);
+    if (found && found.type === 'agent') return (found as AgentTile).ptyId;
+  }
+  return undefined;
+}
+
+/**
+ * Phase 3b.6: feed cumulative Builder PTY bytes to the compaction
+ * watcher. Fire-and-forget; errors are logged inside the watcher.
+ * Skips when the Builder PTY hasn't been resolved yet — no prompt to
+ * fire against. Test-only injection happens through
+ * `compaction-watcher.notifyBuilderBytes` directly via vi.spyOn.
+ */
+function maybeNotifyBuilderBytes(runId: string, byteCount: number): void {
+  const run = usePipelineStore.getState().runs[runId];
+  if (!run || !run.worktreePath) return;
+  const ptyId = findBuilderPtyId(runId);
+  if (!ptyId) return;
+  void notifyBuilderBytes({ runId, ptyId, worktreePath: run.worktreePath, byteCount });
+}
+
 function dispatchSentinel(
   runId: string,
   role: PipelineRole,
@@ -131,6 +186,13 @@ function dispatchSentinel(
   // the scratchpad-watcher. Done before the dispatch so the watcher
   // sees the run *before* a terminal-state transition might tear it down.
   maybeNotifyBuilder(runId, role);
+
+  // Phase 3b.6: every regular Builder sentinel resets the
+  // bytes-since-last-sentinel counter. The compaction-done sentinel
+  // also resets, but via `handleCompactionDone` which clears pending too.
+  if (role === 'builder' && ev.kind !== 'compaction_done') {
+    resetBuilderBytes(runId);
+  }
 
   switch (ev.kind) {
     case 'done': {
@@ -189,6 +251,24 @@ function dispatchSentinel(
       // eslint-disable-next-line no-console
       console.info('[pipeline] subagent_failed:', { runId, role, payload: ev.payload });
       return;
+    case 'compaction_done': {
+      // Builder responded to the compaction prompt. Append the summary
+      // to the scratchpad and reset compaction bookkeeping. Fire-and-
+      // forget — the file-write IPC is async but a slow disk shouldn't
+      // block the sentinel-loop. Errors surface via console.warn from
+      // inside the handler. Telemetry variant lands in 3b.8.
+      const run = usePipelineStore.getState().runs[runId];
+      if (run && run.worktreePath) {
+        void handleCompactionDone({
+          runId,
+          summary: ev.payload.summary,
+          worktreePath: run.worktreePath,
+        });
+      }
+      // eslint-disable-next-line no-console
+      console.info('[pipeline] compaction_done:', { runId, role, summaryLen: ev.payload.summary?.length ?? 0 });
+      return;
+    }
     case 'parse_error':
       dispatch(runId, role === 'planner'
         ? { type: 'planner_failed', reason: `malformed sentinel: ${ev.error}` }
@@ -205,6 +285,8 @@ export function clearRunBuffers(runId: string): void {
   lastStdoutAt.delete(runId);
   // Phase 3b.2: drop scratchpad bookkeeping alongside other per-run state.
   clearScratchpadState(runId);
+  // Phase 3b.6: drop compaction bookkeeping (counter + pending flag).
+  clearCompactionState(runId);
 }
 
 /** Test helper — reset all internal buffers between vitest cases. */

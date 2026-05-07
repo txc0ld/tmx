@@ -7,6 +7,7 @@ import {
   clearRunBuffers,
 } from './controller-runtime';
 import * as scratchpadWatcher from './scratchpad-watcher';
+import * as compactionWatcher from './compaction-watcher';
 import { usePipelineStore } from '@/stores/pipelineStore';
 import type { RunFingerprint } from '@/types';
 
@@ -274,6 +275,70 @@ describe('controller runtime', () => {
         role: 'builder',
         worktreePath: '/tmp/wt-sa',
       }));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // Phase 3b.6: TX_COMPACTION_DONE → handler receives the summary; state machine unaffected.
+  it('Phase 3b.6: TX_COMPACTION_DONE routes to handleCompactionDone with summary + worktreePath', () => {
+    const handlerSpy = vi.spyOn(compactionWatcher, 'handleCompactionDone').mockResolvedValue();
+    try {
+      const runId = usePipelineStore.getState().createRun({
+        runId: 'r-cmp1', templateId: 't', projectId: 'p1',
+        worktreePath: '/tmp/wt-cmp', branch: 'feat/r1', fingerprint: FP,
+      });
+      usePipelineStore.getState().dispatch(runId, { type: 'start' });
+      usePipelineStore.getState().dispatch(runId, { type: 'planner_done', plan: {
+        stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha',
+      }});
+      usePipelineStore.getState().dispatch(runId, { type: 'approve_plan' });
+      expect(usePipelineStore.getState().runs[runId].state).toBe('building');
+
+      const sentinel = '<<<TX_COMPACTION_DONE>>>{"summary":"finished tasks 1-3, on task 4"}\n';
+      ingestPtyChunk({ runId, role: 'builder', chunk: sentinel });
+
+      expect(handlerSpy).toHaveBeenCalledTimes(1);
+      expect(handlerSpy).toHaveBeenCalledWith(expect.objectContaining({
+        runId,
+        summary: 'finished tasks 1-3, on task 4',
+        worktreePath: '/tmp/wt-cmp',
+      }));
+
+      // State machine unaffected — compaction is bookkeeping, not a transition.
+      expect(usePipelineStore.getState().runs[runId].state).toBe('building');
+    } finally {
+      handlerSpy.mockRestore();
+    }
+  });
+
+  it('Phase 3b.6: regular Builder DONE sentinel resets the byte counter', () => {
+    const resetSpy = vi.spyOn(compactionWatcher, 'resetBuilderBytes');
+    try {
+      const runId = usePipelineStore.getState().createRun({
+        runId: 'r-cmp2', templateId: 't', projectId: 'p1',
+        worktreePath: '/tmp/wt-cmp', branch: 'feat/r1', fingerprint: FP,
+      });
+      usePipelineStore.getState().dispatch(runId, { type: 'start' });
+      usePipelineStore.getState().dispatch(runId, { type: 'planner_done', plan: {
+        stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha',
+      }});
+      usePipelineStore.getState().dispatch(runId, { type: 'approve_plan' });
+
+      const sentinel = '<<<TX_STAGE_DONE>>>{"stage":"builder","branch":"b","headSha":"a","round":1,"commits":[],"filesChanged":[],"testsAdded":[],"ciStatus":"green"}\n';
+      ingestPtyChunk({ runId, role: 'builder', chunk: sentinel });
+
+      expect(resetSpy).toHaveBeenCalledWith(runId);
+    } finally {
+      resetSpy.mockRestore();
+    }
+  });
+
+  it('Phase 3b.6: clearRunBuffers also clears compaction bookkeeping', () => {
+    const spy = vi.spyOn(compactionWatcher, 'clearCompactionState');
+    try {
+      clearRunBuffers('r-cmp3');
+      expect(spy).toHaveBeenCalledWith('r-cmp3');
     } finally {
       spy.mockRestore();
     }

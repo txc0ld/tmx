@@ -14,6 +14,10 @@ export type SubagentFailedPayload = {
   suggestedFix: string;
 };
 
+export type CompactionDonePayload = {
+  summary: string;
+};
+
 export type SentinelEvent =
   | { kind: 'done'; payload: PlanArtifact | BuildArtifact | ReviewVerdict; consumedThrough: number }
   | { kind: 'failed'; payload: { reason: string; suggestedFix?: string }; consumedThrough: number }
@@ -21,6 +25,7 @@ export type SentinelEvent =
   | { kind: 'heartbeat'; payload: { progress: string; taskId?: string }; consumedThrough: number }
   | { kind: 'subagent_done'; payload: SubagentDonePayload; consumedThrough: number }
   | { kind: 'subagent_failed'; payload: SubagentFailedPayload; consumedThrough: number }
+  | { kind: 'compaction_done'; payload: CompactionDonePayload; consumedThrough: number }
   | { kind: 'parse_error'; raw: string; error: string; consumedThrough: number };
 
 const MARKERS = [
@@ -30,6 +35,7 @@ const MARKERS = [
   { marker: '<<<TX_HEARTBEAT>>>',      kind: 'heartbeat'        as const },
   { marker: '<<<TX_SUBAGENT_DONE>>>',  kind: 'subagent_done'    as const },
   { marker: '<<<TX_SUBAGENT_FAILED>>>', kind: 'subagent_failed' as const },
+  { marker: '<<<TX_COMPACTION_DONE>>>', kind: 'compaction_done' as const },
 ];
 
 type SentinelKind = (typeof MARKERS)[number]['kind'];
@@ -100,6 +106,8 @@ export function scanForSentinel(rawBuf: string): SentinelEvent | null {
       return { kind: 'subagent_done', payload: payload as SubagentDonePayload, consumedThrough };
     case 'subagent_failed':
       return { kind: 'subagent_failed', payload: payload as SubagentFailedPayload, consumedThrough };
+    case 'compaction_done':
+      return { kind: 'compaction_done', payload: payload as CompactionDonePayload, consumedThrough };
   }
 }
 
