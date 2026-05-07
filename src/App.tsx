@@ -4,17 +4,18 @@ import { useProjectStore } from '@/stores/projectStore';
 import { useTimelineStore } from '@/stores/timelineStore';
 import { colors } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
-import { httpFetch, loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite, secretsMask } from '@/utils/ipc';
+import { agentRunOneshot, httpFetch, loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite, secretsMask } from '@/utils/ipc';
 import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter, usePipelineStore } from '@/stores/pipelineStore';
 import { isTerminalState } from '@/pipeline/state-machine';
 import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
 import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capabilities-lifecycle';
 import { handleFailureBundleLifecycle } from '@/pipeline/failure-bundle-lifecycle';
+import { startRedTeamDispatcher } from '@/pipeline/red-team-dispatcher';
 import { startStuckDetector } from '@/pipeline/stuck-detector';
 import { startNotifier } from '@/pipeline/notifications';
 import { startWebhookNotifier } from '@/pipeline/webhook-notifier';
 import { sendNotification } from '@tauri-apps/plugin-notification';
-import { getLastStdoutAt } from '@/pipeline/controller-runtime';
+import { getLastStdoutAt, ingestOneshotResult } from '@/pipeline/controller-runtime';
 import { resumeFromClarification } from '@/pipeline/scratchpad-watcher';
 import type { AgentTile, PipelineRole, PipelineRun } from '@/types';
 import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas';
@@ -174,6 +175,51 @@ export default function App() {
       offFailureBundle();
       offScratchpadResume();
     };
+  }, []);
+
+  // Polish.1: red-team dispatcher. Closes the spawn-side gap from Phase
+  // 3c.6 — without this, complex runs reaching `awaiting_red_team` after
+  // Reviewer approval stall (the state-machine half is wired, but no
+  // agent fires). On entry, build a brief and run the red-team one-shot;
+  // pipe the captured stdout back through `ingestOneshotResult` so the
+  // existing controller-runtime parser dispatches `red_team_done` /
+  // `red_team_failed` from the embedded sentinel.
+  useEffect(() => {
+    const stop = startRedTeamDispatcher({
+      runRedTeam: async ({ runId, brief }) => {
+        const result = await agentRunOneshot({
+          agent: 'claude',
+          args: ['--print'],
+          stdin: brief,
+          timeoutSecs: 600,
+        });
+        ingestOneshotResult({
+          runId,
+          role: 'red-team',
+          stdout: result.stdout,
+          exitCode: result.exit_code,
+        });
+      },
+      buildBrief: async (runId) => {
+        const run = usePipelineStore.getState().runs[runId];
+        if (!run) return '';
+        // Phase 3d will flesh this out with the full skill text + diff +
+        // plan + spec context. For now, emit enough that the agent can
+        // self-locate the worktree and emit the sentinel per skill.
+        return [
+          `You are the Red Team for run ${runId}.`,
+          `Branch: ${run.branch}`,
+          `Base: ${run.baseBranch}`,
+          `Worktree: ${run.worktreePath}`,
+          '',
+          'Review the diff (git diff vs base) for adversarial patterns:',
+          'supply-chain risks, prompt-injection, secret exposure, race',
+          'conditions, edge cases. Emit <<<TX_REDTEAM_DONE>>> with the',
+          'JSON report per the tx-pipeline-red-team skill.',
+        ].join('\n');
+      },
+    });
+    return stop;
   }, []);
 
   // Stuck-detector: ticks at 250ms, probes silent runs at 5min, aborts at 8min.

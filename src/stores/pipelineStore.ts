@@ -214,6 +214,22 @@ export interface RedTeamFindingTelemetryEvent {
   line?: number;
 }
 
+/**
+ * Polish.1: red-team dispatcher fired the one-shot for this run. Counter-
+ * part to `red_team_finding` (which fires post-completion, once per
+ * finding). Together they let dashboards distinguish "we tried to run
+ * red-team" from "red-team produced findings" — useful when a run stalls
+ * mid-red-team and we need to know whether the spawn itself succeeded.
+ */
+export interface RedTeamInvokedTelemetryEvent {
+  at: number;
+  event: 'red_team_invoked';
+  runId: string;
+  projectId: string;
+  /** Hardcoded `opus` today; future-proofed for per-run provider overrides. */
+  provider: 'opus' | 'codex' | 'gemini';
+}
+
 export type TelemetryEvent =
   | StateChangeTelemetryEvent
   | LifecycleTelemetryEvent
@@ -226,7 +242,8 @@ export type TelemetryEvent =
   | ConfidenceUncertainEscalatedTelemetryEvent
   | DualReviewerDisagreementTelemetryEvent
   | TiebreakerInvokedTelemetryEvent
-  | RedTeamFindingTelemetryEvent;
+  | RedTeamFindingTelemetryEvent
+  | RedTeamInvokedTelemetryEvent;
 
 type TelemetryEmitter = (event: TelemetryEvent) => void;
 const telemetryListeners: Set<TelemetryEmitter> = new Set();
