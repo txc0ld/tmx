@@ -39,7 +39,7 @@ The CI hook (Phase 2c-i) watches your branch's HEAD and runs the verification ch
 When all plan tasks are done AND CI is green, emit:
 
 ```
-<<<TX_STAGE_DONE>>>{"stage":"builder","branch":"<branch>","headSha":"<sha>","round":1,"commits":[{"sha":"<sha>","subject":"<subject>","files":["<path>"]}],"filesChanged":["<path>"],"testsAdded":["<test name>"],"ciStatus":"green"}
+<<<TX_STAGE_DONE>>>{"stage":"builder","branch":"<branch>","headSha":"<sha>","round":1,"commits":[{"sha":"<sha>","subject":"<subject>","files":["<path>"]}],"filesChanged":["<path>"],"testsAdded":["<test name>"],"ciStatus":"green","confidence":"<verified|likely|uncertain>"}
 ```
 
 Field provenance — these are NOT optional:
@@ -50,6 +50,16 @@ Field provenance — these are NOT optional:
 - `ciStatus` ← `'green'` only after the watcher dispatches `ci_pass` for every step
 
 Fabricating any of these is the worst outcome — the Reviewer cross-checks against the actual repo.
+
+### Required field: `confidence`
+
+Every DONE sentinel includes a `confidence` field with one of three values — specifically: test coverage + verification chain status (`ciStatus: 'green'` is a precondition for `verified`).
+
+- `verified`: you have direct evidence — wrote the named tests, watched them fail then pass, ran the full verification chain locally, the CI watcher dispatched `ci_pass` for every step. The default expectation when you've done the work fully.
+- `likely`: you're inferring from secondary signals (CI passed but you didn't re-read every test, or you ran a subset). Acceptable for trivial obvious-correct fixes. Costs the controller a check — if your diff is non-trivial (≥5 files OR ≥3 commits), this triggers a synthetic clarification.
+- `uncertain`: your verification is too shallow to commit to a verdict. **Do not silently approve under uncertainty.** Either populate `uncertaintyDrivers: ["..."]` listing what you can't verify (e.g. "race condition tests are flaky"), or refusal-protocol with the missing context via `<<<TX_STAGE_FAILED>>>`.
+
+Misreporting confidence is the worst possible field. `verified` while wrong is the kind of bug that takes weeks to track down.
 
 If you cannot complete (test framework broken, dependency conflict, plan ambiguity that should have been caught upstream), emit:
 

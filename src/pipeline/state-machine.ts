@@ -48,15 +48,36 @@ function scaleBudgets(
 export const TERMINAL_STATES: ReadonlySet<PipelineState> = new Set(['done', 'failed', 'escalated']);
 
 /**
- * Active in-flight stages — used to gate `question_raised` (only fires from an
- * active stage) and to validate the `priorActiveState` we resume into when a
- * `clarification_received` event lands.
+ * Active in-flight stages — used to validate the `priorActiveState` we resume
+ * into when a `clarification_received` event lands (and historically to gate
+ * `question_raised`, but see `QUESTIONABLE_STATES` for the broader set that
+ * Phase 3c.3 unlocked).
  */
 export const ACTIVE_STAGES: ReadonlySet<PipelineState> = new Set([
   'planning',
   'building',
   'reviewing',
   'merging',
+]);
+
+/**
+ * States from which `question_raised` may fire. Phase 3c.3 added the
+ * post-stage holding states (`awaiting_plan_approval` /
+ * `awaiting_merge_approval`) so the controller can synthesize an
+ * uncertainty-driven question AFTER the role's normal transition. The
+ * resume target (`priorActiveState`) gets validated against this same set,
+ * so we can correctly land back on a holding state when the user
+ * acknowledges the question — at which point their natural next action
+ * (approve_plan / approve_merge) advances the run forward, instead of
+ * looping back into a stage that already finished its work.
+ */
+export const QUESTIONABLE_STATES: ReadonlySet<PipelineState> = new Set([
+  'planning',
+  'building',
+  'reviewing',
+  'merging',
+  'awaiting_plan_approval',
+  'awaiting_merge_approval',
 ]);
 
 export function isTerminalState(state: PipelineState): boolean {
@@ -268,11 +289,15 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
     }
 
     case 'question_raised':
-      if (!ACTIVE_STAGES.has(run.state)) return run;
+      // Phase 3c.3: questions may fire from active stages OR the post-stage
+      // holding states (awaiting_plan_approval / awaiting_merge_approval) so
+      // synthetic uncertainty escalations can land after the role's normal
+      // transition. See QUESTIONABLE_STATES.
+      if (!QUESTIONABLE_STATES.has(run.state)) return run;
       return {
         ...run,
         state: 'awaiting_clarification',
-        // Remember which active stage we left so `clarification_received`
+        // Remember which stage we left so `clarification_received`
         // resumes to the same place without the caller telling us.
         priorActiveState: run.state,
         artifacts: { ...run.artifacts, questions: [...run.artifacts.questions, ev.question] },
@@ -284,9 +309,10 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
       const resumeTo = run.priorActiveState;
       // Defensive: priorActiveState should always be set when we're in
       // awaiting_clarification (only path in is `question_raised`, which sets
-      // it). If it's missing or somehow not an active stage, fail the run
-      // rather than silently lose work.
-      if (!resumeTo || !ACTIVE_STAGES.has(resumeTo)) {
+      // it). If it's missing or not a valid resume target, fail the run
+      // rather than silently lose work. Resume targets match the same
+      // QUESTIONABLE_STATES set the question_raised path validated against.
+      if (!resumeTo || !QUESTIONABLE_STATES.has(resumeTo)) {
         return {
           ...run,
           state: 'failed',

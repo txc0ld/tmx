@@ -282,6 +282,16 @@ export interface PlanArtifact {
    * Captured into `PipelineRun.planLineage` on `planner_done`.
    */
   planCommitSha: string;
+  /**
+   * Phase 3c.2: required calibrated self-assessment.
+   *  - `verified`: the plan is grounded in spec/code the planner read directly.
+   *  - `likely`: inferred from secondary signals; acceptable for trivial work.
+   *  - `uncertain`: shallow read; populate `uncertaintyDrivers` and expect the
+   *    controller to escalate via a synthetic question (Phase 3c.3) when the
+   *    plan is non-trivial (≥3 tasks).
+   */
+  confidence: 'verified' | 'likely' | 'uncertain';
+  uncertaintyDrivers?: string[];
 }
 
 export interface BuildCommit {
@@ -300,6 +310,18 @@ export interface BuildArtifact {
   testsAdded: string[];
   ciStatus: 'green' | 'red' | 'unknown';
   notes?: string;
+  /**
+   * Phase 3c.2: required calibrated self-assessment.
+   *  - `verified`: tests added + run, verification chain green, `ciStatus`
+   *    confirmed via the watcher.
+   *  - `likely`: tests added but only inferred green (e.g. read CI badge,
+   *    didn't re-run locally). Acceptable for trivial obvious-correct fixes.
+   *  - `uncertain`: shallow verification; populate `uncertaintyDrivers`. The
+   *    controller escalates via a synthetic question (Phase 3c.3) when the
+   *    diff is non-trivial (≥5 files OR ≥3 commits).
+   */
+  confidence: 'verified' | 'likely' | 'uncertain';
+  uncertaintyDrivers?: string[];
 }
 
 export interface ReviewComment {
@@ -318,7 +340,16 @@ export interface ReviewVerdict {
   round: number;
   comments: ReviewComment[];
   summary: string;
-  confidence?: 'verified' | 'likely' | 'uncertain';
+  /**
+   * Phase 3c.2: required (was optional in 2c).
+   *  - `verified`: read the diff against the spec end-to-end.
+   *  - `likely`: inferred from commit subjects + filenames; acceptable for
+   *    trivial obvious-correct changes.
+   *  - `uncertain`: shallow read; populate `uncertaintyDrivers`. The
+   *    controller escalates via a synthetic question (Phase 3c.3) when the
+   *    underlying diff is non-trivial (≥5 files OR ≥3 commits).
+   */
+  confidence: 'verified' | 'likely' | 'uncertain';
   uncertaintyDrivers?: string[];
   diffChunksReviewed?: number;
 }

@@ -39,10 +39,20 @@ Given a feature request from the user (passed in via your initial message after 
 After committing, emit a single sentinel on its own line at column 0:
 
 ```
-<<<TX_STAGE_DONE>>>{"stage":"planner","branch":"<branch>","specPath":"<path>","planPath":"<path>","tasks":[{"id":"T1","summary":"...","files":["..."],"tests":["..."],"acceptance":"..."}],"summary":"<one-liner>","complexity":"<trivial|standard|complex>","planCommitSha":"<commit sha>"}
+<<<TX_STAGE_DONE>>>{"stage":"planner","branch":"<branch>","specPath":"<path>","planPath":"<path>","tasks":[{"id":"T1","summary":"...","files":["..."],"tests":["..."],"acceptance":"..."}],"summary":"<one-liner>","complexity":"<trivial|standard|complex>","planCommitSha":"<commit sha>","confidence":"<verified|likely|uncertain>"}
 ```
 
 The `planCommitSha` is the SHA of your `chore(plan)` commit — this binds the plan version to a specific commit, so re-plans (Phase 2c-i) generate `-v2.md` / `-v3.md` files without overwriting v1.
+
+### Required field: `confidence`
+
+Every DONE sentinel includes a `confidence` field with one of three values — specifically: how grounded the plan is in the spec + existing code.
+
+- `verified`: you have direct evidence (read the spec end-to-end, walked the relevant code paths, validated the task list against actual file structure). The default expectation when you've done the work fully.
+- `likely`: you're inferring from secondary signals (request phrasing, file names, prior knowledge of the project) without re-reading every primary source. Acceptable for trivial obvious-correct cases. Costs the controller a check — if your plan is non-trivial (≥3 tasks), this triggers a synthetic clarification.
+- `uncertain`: your read is too shallow to commit to a verdict. **Do not silently approve under uncertainty.** Either populate `uncertaintyDrivers: ["..."]` listing what you can't verify, or refusal-protocol with the missing context via `<<<TX_STAGE_FAILED>>>`.
+
+Misreporting confidence is the worst possible field. `verified` while wrong is the kind of bug that takes weeks to track down.
 
 ### Required field: `complexity`
 

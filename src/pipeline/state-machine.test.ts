@@ -53,6 +53,7 @@ describe('pipeline state machine', () => {
       plan: {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
         tasks: [], summary: 's', planCommitSha: 'sha-v1',
+        confidence: 'verified',
       },
     };
     const next = reducer(run, ev);
@@ -73,6 +74,7 @@ describe('pipeline state machine', () => {
       build: {
         stage: 'builder', branch: 'feat/r1', headSha: 'a', round: 1,
         commits: [], filesChanged: [], testsAdded: [], ciStatus: 'green',
+        confidence: 'verified',
       },
     };
     const next = reducer(run, ev);
@@ -87,6 +89,7 @@ describe('pipeline state machine', () => {
       verdict: {
         stage: 'reviewer', reviewer: 'opus', verdict: 'approve',
         round: 1, comments: [], summary: 'lgtm',
+        confidence: 'verified',
       },
     };
     expect(reducer(run, ev).state).toBe('awaiting_merge_approval');
@@ -99,6 +102,7 @@ describe('pipeline state machine', () => {
       verdict: {
         stage: 'reviewer', reviewer: 'opus', verdict: 'reject',
         round: 1, comments: [], summary: 'no',
+        confidence: 'verified',
       },
     };
     const next = reducer(run, ev);
@@ -116,6 +120,7 @@ describe('pipeline state machine', () => {
       verdict: {
         stage: 'reviewer', reviewer: 'opus', verdict: 'reject',
         round: 4, comments: [], summary: 'still no',
+        confidence: 'verified',
       },
     };
     expect(reducer(run, ev).state).toBe('escalated');
@@ -268,6 +273,7 @@ describe('pipeline state machine', () => {
       build: {
         stage: 'builder', branch: 'feat/r1', headSha: 'a', round: 1,
         commits: [], filesChanged: [], testsAdded: [], ciStatus: 'green',
+        confidence: 'verified',
       },
     };
     const next = reducer(run, ev);
@@ -285,6 +291,7 @@ describe('pipeline state machine', () => {
       verdict: {
         stage: 'reviewer', reviewer: 'opus', verdict: 'reject',
         round: 4, comments: [], summary: 'no',
+        confidence: 'verified',
       },
     };
     const next = reducer(run, ev);
@@ -308,6 +315,7 @@ describe('pipeline state machine', () => {
       plan: {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
         tasks: [], summary: 's', planCommitSha: 'abc123',
+        confidence: 'verified',
       },
     };
     const next = reducer(run, ev);
@@ -346,6 +354,7 @@ describe('pipeline state machine', () => {
       plan: {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
         tasks: [], summary: 's', planCommitSha: 'sha-v1',
+        confidence: 'verified',
       },
     });
     expect(run.planLineage).toEqual(['sha-v1']);
@@ -360,6 +369,7 @@ describe('pipeline state machine', () => {
       plan: {
         stage: 'planner', branch: 'feat/r1', specPath: 's-v2', planPath: 'p-v2',
         tasks: [], summary: 's2', planCommitSha: 'sha-v2',
+        confidence: 'verified',
       },
     });
     expect(run.planLineage).toEqual(['sha-v1', 'sha-v2']);
@@ -377,6 +387,7 @@ describe('pipeline state machine', () => {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
         tasks: [], summary: 's', planCommitSha: 'sha-trivial',
         complexity: 'trivial',
+        confidence: 'verified',
       },
     };
     const next = reducer(run, ev);
@@ -398,6 +409,7 @@ describe('pipeline state machine', () => {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
         tasks: [], summary: 's', planCommitSha: 'sha-std',
         complexity: 'standard',
+        confidence: 'verified',
       },
     };
     const next = reducer(run, ev);
@@ -417,6 +429,7 @@ describe('pipeline state machine', () => {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
         tasks: [], summary: 's', planCommitSha: 'sha-std-dual',
         complexity: 'standard',
+        confidence: 'verified',
       },
     };
     const next = reducer(run, ev);
@@ -432,6 +445,7 @@ describe('pipeline state machine', () => {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
         tasks: [], summary: 's', planCommitSha: 'sha-complex',
         complexity: 'complex',
+        confidence: 'verified',
       },
     };
     const next = reducer(run, ev);
@@ -450,7 +464,8 @@ describe('pipeline state machine', () => {
       plan: {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
         tasks: [], summary: 's', planCommitSha: 'sha-undef',
-        // complexity intentionally omitted
+        // complexity intentionally omitted,
+        confidence: 'verified',
       },
     };
     const next = reducer(run, ev);
@@ -471,6 +486,7 @@ describe('pipeline state machine', () => {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
         tasks: [], summary: 's', planCommitSha: 'sha-v1',
         complexity: 'trivial',
+        confidence: 'verified',
       },
     });
     expect(run.runMode).toBe('trivial');
@@ -493,6 +509,7 @@ describe('pipeline state machine', () => {
         stage: 'planner', branch: 'feat/r1', specPath: 's-v2', planPath: 'p-v2',
         tasks: [], summary: 's2', planCommitSha: 'sha-v2',
         complexity: 'complex',
+        confidence: 'verified',
       },
     });
     expect(run.runMode).toBe('complex');
@@ -517,6 +534,7 @@ describe('pipeline state machine', () => {
         verdict: {
           stage: 'reviewer', reviewer: 'opus', verdict: 'reject',
           round: i, comments: [], summary: `r${i}`,
+          confidence: 'verified',
         },
       });
       expect(run.state).toBe('building'); // still in retry — would have escalated at >3 with the legacy constant
@@ -529,6 +547,7 @@ describe('pipeline state machine', () => {
       verdict: {
         stage: 'reviewer', reviewer: 'opus', verdict: 'reject',
         round: 7, comments: [], summary: 'r7',
+        confidence: 'verified',
       },
     });
     expect(run.state).toBe('escalated');
@@ -579,6 +598,7 @@ describe('pipeline state machine', () => {
       build: {
         stage: 'builder', branch: 'b', headSha: 'h', round: 1,
         commits: [], filesChanged: [], testsAdded: [], ciStatus: 'green',
+        confidence: 'verified',
       },
     })).toBe(run);
   });

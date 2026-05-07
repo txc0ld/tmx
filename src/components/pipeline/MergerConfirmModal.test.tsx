@@ -48,6 +48,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
           filesChanged: ['a.ts', 'b.ts'],
           testsAdded: [],
           ciStatus: 'green',
+          confidence: 'verified',
         },
       ],
       reviews: [
@@ -67,6 +68,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
           round: 1,
           comments: [],
           summary: 'consensus reached',
+          confidence: 'verified',
         },
       ],
       ciResults: [],

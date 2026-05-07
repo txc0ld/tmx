@@ -197,6 +197,7 @@ describe('Phase 2c-iii smoke: clarification + stuck + webhook + failure-bundle',
       plan: {
         stage: 'planner', branch: BRANCH, specPath: 's', planPath: 'p',
         tasks: [], summary: '', planCommitSha: 'sha-1',
+        confidence: 'verified',
       },
     });
     store.dispatch(runId, { type: 'approve_plan' });
@@ -262,6 +263,7 @@ describe('Phase 2c-iii smoke: clarification + stuck + webhook + failure-bundle',
         plan: {
           stage: 'planner', branch: BRANCH, specPath: 's', planPath: 'p',
           tasks: [], summary: '', planCommitSha: 'sha-stuck',
+          confidence: 'verified',
         },
       });
       store.dispatch(runId, { type: 'approve_plan' });
@@ -331,6 +333,7 @@ describe('Phase 2c-iii smoke: clarification + stuck + webhook + failure-bundle',
         plan: {
           stage: 'planner', branch: BRANCH, specPath: 's', planPath: 'p',
           tasks: [], summary: '', planCommitSha: 'sha-wh',
+          confidence: 'verified',
         },
       });
       store.dispatch(runId, { type: 'approve_plan' });
@@ -413,6 +416,7 @@ describe('Phase 2c-iii smoke: clarification + stuck + webhook + failure-bundle',
       plan: {
         stage: 'planner', branch: BRANCH, specPath: 's', planPath: 'p',
         tasks: [], summary: '', planCommitSha: 'sha-bundle',
+        confidence: 'verified',
       },
     });
     store.dispatch(runId, { type: 'approve_plan' });

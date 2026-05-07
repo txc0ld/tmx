@@ -27,7 +27,7 @@ describe('Phase 2b: live-execution path end-to-end (mocked agents)', () => {
     // Mocked Planner emits a sentinel via PTY
     ingestPtyChunk({
       runId, role: 'planner',
-      chunk: 'Designing the plan...\n<<<TX_STAGE_DONE>>>{"stage":"planner","branch":"feat/r-2b-smoke","specPath":"docs/spec.md","planPath":"docs/plan.md","tasks":[{"id":"T1","summary":"add foo","files":["src/foo.ts"],"tests":["foo handles bar"],"acceptance":"foo returns expected"}],"summary":"Add a foo function","planCommitSha":"sha-2b-smoke"}\n',
+      chunk: 'Designing the plan...\n<<<TX_STAGE_DONE>>>{"stage":"planner","branch":"feat/r-2b-smoke","specPath":"docs/spec.md","planPath":"docs/plan.md","tasks":[{"id":"T1","summary":"add foo","files":["src/foo.ts"],"tests":["foo handles bar"],"acceptance":"foo returns expected"}],"summary":"Add a foo function","planCommitSha":"sha-2b-smoke","confidence":"verified"}\n',
     });
     expect(usePipelineStore.getState().runs[runId].state).toBe('awaiting_plan_approval');
 
@@ -37,7 +37,7 @@ describe('Phase 2b: live-execution path end-to-end (mocked agents)', () => {
     // Mocked Builder
     ingestPtyChunk({
       runId, role: 'builder',
-      chunk: 'Wrote test\nImplemented foo\n<<<TX_STAGE_DONE>>>{"stage":"builder","branch":"feat/r-2b-smoke","headSha":"abc123","round":1,"commits":[{"sha":"abc123","subject":"feat(foo): add","files":["src/foo.ts"]}],"filesChanged":["src/foo.ts","tests/foo.test.ts"],"testsAdded":["foo handles bar"],"ciStatus":"green"}\n',
+      chunk: 'Wrote test\nImplemented foo\n<<<TX_STAGE_DONE>>>{"stage":"builder","branch":"feat/r-2b-smoke","headSha":"abc123","round":1,"commits":[{"sha":"abc123","subject":"feat(foo): add","files":["src/foo.ts"]}],"filesChanged":["src/foo.ts","tests/foo.test.ts"],"testsAdded":["foo handles bar"],"ciStatus":"green","confidence":"verified"}\n',
     });
     expect(usePipelineStore.getState().runs[runId].state).toBe('reviewing');
 
@@ -63,12 +63,12 @@ describe('Phase 2b: live-execution path end-to-end (mocked agents)', () => {
     usePipelineStore.getState().dispatch(runId, { type: 'start' });
     ingestPtyChunk({
       runId, role: 'planner',
-      chunk: '<<<TX_STAGE_DONE>>>{"stage":"planner","branch":"b","specPath":"s","planPath":"p","tasks":[],"summary":"","planCommitSha":"sha-reject"}\n',
+      chunk: '<<<TX_STAGE_DONE>>>{"stage":"planner","branch":"b","specPath":"s","planPath":"p","tasks":[],"summary":"","planCommitSha":"sha-reject","confidence":"verified"}\n',
     });
     usePipelineStore.getState().dispatch(runId, { type: 'approve_plan' });
     ingestPtyChunk({
       runId, role: 'builder',
-      chunk: '<<<TX_STAGE_DONE>>>{"stage":"builder","branch":"b","headSha":"a","round":1,"commits":[],"filesChanged":[],"testsAdded":[],"ciStatus":"green"}\n',
+      chunk: '<<<TX_STAGE_DONE>>>{"stage":"builder","branch":"b","headSha":"a","round":1,"commits":[],"filesChanged":[],"testsAdded":[],"ciStatus":"green","confidence":"verified"}\n',
     });
 
     ingestOneshotResult({
@@ -116,7 +116,7 @@ describe('Phase 2b: live-execution path end-to-end (mocked agents)', () => {
     ingestPtyChunk({ runId, role: 'planner', chunk: '<<<TX_STAGE' });
     ingestPtyChunk({ runId, role: 'planner', chunk: '_DONE>>>{"stage":"plann' });
     ingestPtyChunk({ runId, role: 'planner', chunk: 'er","branch":"b","spec' });
-    ingestPtyChunk({ runId, role: 'planner', chunk: 'Path":"s","planPath":"p","tasks":[],"summary":"","planCommitSha":"sha-partial"}\n' });
+    ingestPtyChunk({ runId, role: 'planner', chunk: 'Path":"s","planPath":"p","tasks":[],"summary":"","planCommitSha":"sha-partial","confidence":"verified"}\n' });
 
     expect(usePipelineStore.getState().runs[runId].state).toBe('awaiting_plan_approval');
   });
