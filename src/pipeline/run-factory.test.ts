@@ -13,8 +13,14 @@ import {
 // (which use stub deps and never touch IPC) are unaffected.
 vi.mock('@/utils/ipc', () => ({
   readFileText: vi.fn(),
+  pipelineReadRolePrompt: vi.fn(),
+  pipelinePreflight: vi.fn(),
 }));
-import { readFileText } from '@/utils/ipc';
+import {
+  readFileText,
+  pipelineReadRolePrompt,
+  type PreflightResult,
+} from '@/utils/ipc';
 
 const stubDeps = (overrides: Partial<RunFactoryDeps> = {}): RunFactoryDeps => ({
   readSkillContent: async () => null,
@@ -165,6 +171,156 @@ describe('createRunFromTemplate', () => {
   });
 });
 
+function makePreflight(overrides: Partial<PreflightResult> = {}): PreflightResult {
+  return {
+    is_git_repo: true,
+    working_tree_clean: true,
+    main_branch: 'main',
+    claude_present: true,
+    codex_present: true,
+    gh_present: true,
+    gh_authenticated: true,
+    worktree_dir_writable: true,
+    signed_skills_ok: true,
+    capability_binaries_ok: true,
+    skill_cache_writable: true,
+    sensitive_paths_found: [],
+    errors: [],
+    ...overrides,
+  };
+}
+
+describe('createRunFromTemplate sensitive-paths gate (Phase 3a.3)', () => {
+  it('aborts when confirmSensitivePaths returns false — no run created', async () => {
+    const template = helloWorldTemplate();
+    const confirmSpy = vi.fn(async () => false);
+    const deps = stubDeps({
+      preflight: async () =>
+        makePreflight({ sensitive_paths_found: ['.env', 'id_rsa'] }),
+      confirmSensitivePaths: confirmSpy,
+    });
+
+    const result = await createRunFromTemplate({
+      runId: 'run-aborted',
+      template,
+      projectId: 'p',
+      worktreePath: '/wt',
+      branch: 'main',
+      terminalxVersion: '0.1.0',
+      projectDir: '/proj',
+      deps,
+    });
+
+    expect(result.aborted).toBe(true);
+    expect(result.runId).toBe('');
+    expect(confirmSpy).toHaveBeenCalledWith(['.env', 'id_rsa']);
+    // Run is NOT in the store.
+    expect(usePipelineStore.getState().runs['run-aborted']).toBeUndefined();
+  });
+
+  it('proceeds when confirmSensitivePaths returns true — run created', async () => {
+    const template = helloWorldTemplate();
+    const confirmSpy = vi.fn(async () => true);
+    const deps = stubDeps({
+      preflight: async () =>
+        makePreflight({ sensitive_paths_found: ['.env'] }),
+      confirmSensitivePaths: confirmSpy,
+    });
+
+    const result = await createRunFromTemplate({
+      runId: 'run-acked',
+      template,
+      projectId: 'p',
+      worktreePath: '/wt',
+      branch: 'main',
+      terminalxVersion: '0.1.0',
+      projectDir: '/proj',
+      deps,
+    });
+
+    expect(result.aborted).toBeUndefined();
+    expect(result.runId).toBe('run-acked');
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(usePipelineStore.getState().runs['run-acked']).toBeDefined();
+  });
+
+  it('skips the gate when sensitive_paths_found is empty (confirm not invoked)', async () => {
+    const template = helloWorldTemplate();
+    const confirmSpy = vi.fn(async () => false);
+    const deps = stubDeps({
+      preflight: async () =>
+        makePreflight({ sensitive_paths_found: [] }),
+      confirmSensitivePaths: confirmSpy,
+    });
+
+    const result = await createRunFromTemplate({
+      runId: 'run-clean',
+      template,
+      projectId: 'p',
+      worktreePath: '/wt',
+      branch: 'main',
+      terminalxVersion: '0.1.0',
+      projectDir: '/proj',
+      deps,
+    });
+
+    expect(result.aborted).toBeUndefined();
+    expect(result.runId).toBe('run-clean');
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(usePipelineStore.getState().runs['run-clean']).toBeDefined();
+  });
+
+  it('skips the gate entirely when preflight is omitted (legacy fixture compat)', async () => {
+    const template = helloWorldTemplate();
+    const confirmSpy = vi.fn(async () => false);
+    const deps = stubDeps({
+      // preflight omitted → gate is bypassed regardless of confirmSensitivePaths.
+      confirmSensitivePaths: confirmSpy,
+    });
+
+    const result = await createRunFromTemplate({
+      runId: 'run-no-preflight',
+      template,
+      projectId: 'p',
+      worktreePath: '/wt',
+      branch: 'main',
+      terminalxVersion: '0.1.0',
+      // projectDir intentionally omitted too.
+      deps,
+    });
+
+    expect(result.aborted).toBeUndefined();
+    expect(result.runId).toBe('run-no-preflight');
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('auto-proceeds when preflight is wired but confirmSensitivePaths is missing', async () => {
+    // Matches the defaultRunFactoryDeps shape: preflight is wired, but
+    // confirmSensitivePaths is undefined until the UI mounts the modal.
+    // The factory must not block run creation in that intermediate state.
+    const template = helloWorldTemplate();
+    const deps = stubDeps({
+      preflight: async () =>
+        makePreflight({ sensitive_paths_found: ['.env'] }),
+      // confirmSensitivePaths intentionally omitted.
+    });
+
+    const result = await createRunFromTemplate({
+      runId: 'run-auto',
+      template,
+      projectId: 'p',
+      worktreePath: '/wt',
+      branch: 'main',
+      terminalxVersion: '0.1.0',
+      projectDir: '/proj',
+      deps,
+    });
+
+    expect(result.aborted).toBeUndefined();
+    expect(result.runId).toBe('run-auto');
+  });
+});
+
 describe('defaultRunFactoryDeps', () => {
   it('readSkillContent returns null when readFileText throws (file not found)', async () => {
     vi.mocked(readFileText).mockRejectedValue(new Error('ENOENT'));
@@ -206,6 +362,8 @@ describe('defaultRunFactoryDeps', () => {
   });
 
   it('readRolePrompt and readRoleCapabilities return null in Phase 2c-i (not yet authored)', async () => {
+    // The IPC stub returns null when no body is authored; mirror that here.
+    vi.mocked(pipelineReadRolePrompt).mockResolvedValue(null);
     const deps = defaultRunFactoryDeps({ projectDir: '/proj', homeDir: '/home/u' });
     expect(await deps.readRolePrompt('planner')).toBeNull();
     expect(await deps.readRoleCapabilities('builder')).toBeNull();
