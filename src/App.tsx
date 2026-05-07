@@ -310,6 +310,19 @@ export default function App() {
         useCanvasStore.getState().exitFocusMode();
         useCanvasStore.getState().clearSelection();
       }
+      // Cmd/Ctrl+R — reload the webview (Tauri doesn't wire this by default)
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'r') {
+        e.preventDefault();
+        window.location.reload();
+      }
+      // Cmd/Ctrl+Shift+R — hard reload (bypasses Vite HMR module cache)
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'R' || e.key === 'r')) {
+        e.preventDefault();
+        // Append a no-op query param so Vite serves fresh modules.
+        const url = new URL(window.location.href);
+        url.searchParams.set('_r', String(Date.now()));
+        window.location.replace(url.toString());
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);

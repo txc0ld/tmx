@@ -1,7 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { useThemeStore } from '@/stores/themeStore';
 import { usePty } from '@/hooks/usePty';
@@ -91,20 +90,14 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
 
-    try {
-      const webglAddon = new WebglAddon();
-      webglAddon.onContextLoss(() => webglAddon.dispose());
-      terminal.loadAddon(webglAddon);
-    } catch {
-      // WebGL not available
-    }
+    // WebglAddon removed — see TerminalTile.tsx for the version-mismatch note.
 
     terminal.open(containerRef.current);
     const detachKb = attachKeyboardCapture(
       containerRef.current,
       (data) => writeRef.current(data),
     );
-    requestAnimationFrame(() => {
+    const rafId = requestAnimationFrame(() => {
       fitAddon.fit();
       containerRef.current?.focus({ preventScroll: true });
     });
@@ -115,6 +108,7 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
     terminal.onData((data) => writeRef.current(data));
 
     return () => {
+      cancelAnimationFrame(rafId);
       detachKb();
       terminal.dispose();
       termRef.current = null;
