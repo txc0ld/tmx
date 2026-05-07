@@ -33,6 +33,7 @@
 
 import { ptyWrite, readFileText, writeFileText, readFileMtime } from '@/utils/ipc';
 import { SCRATCHPAD_FILE } from './scratchpad-watcher';
+import { emitTelemetry, usePipelineStore } from '@/stores/pipelineStore';
 
 export const COMPACTION_THRESHOLD_BYTES = 200 * 1024;
 export const COMPACTION_SECTION_HEADER = '## Compaction summaries';
@@ -116,18 +117,41 @@ export async function notifyBuilderBytes(input: NotifyBytesInput): Promise<void>
   // a re-entrant notify (more PTY chunks in flight) can't double-fire.
   entry.pendingCompaction = true;
   state.set(input.runId, entry);
+  // Snapshot the byte count that tripped the threshold BEFORE awaiting
+  // the PTY write. Re-entrant `notifyBuilderBytes` calls keep mutating
+  // `entry.bytesSinceLastSentinel`, so reading it after the await would
+  // overcount. Telemetry should record what actually triggered the prompt.
+  const bytesAtTrip = entry.bytesSinceLastSentinel;
 
   try {
     await merged.writeToPty(input.ptyId, COMPACTION_PROMPT);
   } catch (err) {
     // Couldn't deliver the prompt — clear pending so the next chunk can
-    // retry. Log so a developer sees the issue; production telemetry
-    // lands in 3b.8.
+    // retry. Log so a developer sees the issue. No telemetry event on
+    // failure: the pending flag flips back to false and the next chunk
+    // re-enters this path; emitting on the eventual success keeps the
+    // JSONL one-line-per-trigger.
     entry.pendingCompaction = false;
     state.set(input.runId, entry);
     // eslint-disable-next-line no-console
     console.warn('[pipeline] compaction-watcher writeToPty failed:', err);
+    return;
   }
+
+  // Phase 3b.8: emit telemetry AFTER the prompt landed on the PTY so
+  // the JSONL log records exactly the deliveries the Builder will see.
+  // `projectId` is read from the run record — consistent with the
+  // controller-runtime pattern; the watcher otherwise has no project
+  // visibility. Best-effort: missing run = empty string (won't happen
+  // in production, defensive for tests).
+  const run = usePipelineStore.getState().runs[input.runId];
+  emitTelemetry({
+    at: merged.now(),
+    event: 'compaction_triggered',
+    runId: input.runId,
+    projectId: run?.projectId ?? '',
+    bytesAccumulated: bytesAtTrip,
+  });
 }
 
 /**
@@ -174,6 +198,19 @@ export async function handleCompactionDone(input: HandleCompactionDoneInput): Pr
     entry.pendingCompaction = false;
     entry.bytesSinceLastSentinel = 0;
   }
+
+  // Phase 3b.8: emit telemetry once the summary is durably appended to
+  // the scratchpad. `summaryLength` lets us monitor whether Builder
+  // honors the ≤500-token cap from the prompt (a sustained drift up
+  // means the prompt template needs tightening).
+  const run = usePipelineStore.getState().runs[input.runId];
+  emitTelemetry({
+    at: merged.now(),
+    event: 'compaction_completed',
+    runId: input.runId,
+    projectId: run?.projectId ?? '',
+    summaryLength: input.summary.length,
+  });
 }
 
 /** Wipe per-run state. Call on terminal state (via `clearRunBuffers`). */

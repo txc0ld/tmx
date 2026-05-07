@@ -8,7 +8,7 @@ import {
 } from './controller-runtime';
 import * as scratchpadWatcher from './scratchpad-watcher';
 import * as compactionWatcher from './compaction-watcher';
-import { usePipelineStore } from '@/stores/pipelineStore';
+import { usePipelineStore, setPipelineTelemetryEmitter, type TelemetryEvent } from '@/stores/pipelineStore';
 import type { RunFingerprint } from '@/types';
 
 const FP: RunFingerprint = {
@@ -331,6 +331,85 @@ describe('controller runtime', () => {
       expect(resetSpy).toHaveBeenCalledWith(runId);
     } finally {
       resetSpy.mockRestore();
+    }
+  });
+
+  // Phase 3b.8: sub-agent sentinels emit `subagent_completed` telemetry events
+  // (replacing the placeholder `console.info` from 3b.5). State machine
+  // unaffected — these tests only assert on the telemetry channel.
+  it('Phase 3b.8: TX_SUBAGENT_DONE emits subagent_completed with status: done + counts', () => {
+    const captured: TelemetryEvent[] = [];
+    const unsub = setPipelineTelemetryEmitter(ev => { captured.push(ev); });
+    try {
+      const runId = usePipelineStore.getState().createRun({
+        runId: 'r-tel-sa-done', templateId: 't', projectId: 'proj-X',
+        worktreePath: '/tmp/wt-sa', branch: 'feat/r1', fingerprint: FP,
+      });
+      usePipelineStore.getState().dispatch(runId, { type: 'start' });
+      usePipelineStore.getState().dispatch(runId, { type: 'planner_done', plan: {
+        stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha',
+      }});
+      usePipelineStore.getState().dispatch(runId, { type: 'approve_plan' });
+
+      // Drain the state-change events from setup so we can isolate the new emit.
+      const beforeCount = captured.length;
+
+      const sentinel = '<<<TX_SUBAGENT_DONE>>>{"filesEdited":["src/x.ts","src/y.ts"],"commitsCreated":["abc1234"],"summary":"refactored two modules"}\n';
+      ingestPtyChunk({ runId, role: 'builder', chunk: sentinel });
+
+      const newEvents = captured.slice(beforeCount);
+      const subagentEvent = newEvents.find(e => e.event === 'subagent_completed');
+      expect(subagentEvent).toBeDefined();
+      expect(subagentEvent).toMatchObject({
+        event: 'subagent_completed',
+        runId,
+        projectId: 'proj-X',
+        parentRole: 'builder',
+        status: 'done',
+        filesEditedCount: 2,
+        commitsCreatedCount: 1,
+        summary: 'refactored two modules',
+      });
+      // Sanity: failure-only fields are absent.
+      expect(subagentEvent).not.toHaveProperty('reason');
+    } finally {
+      unsub();
+    }
+  });
+
+  it('Phase 3b.8: TX_SUBAGENT_FAILED emits subagent_completed with status: failed + reason', () => {
+    const captured: TelemetryEvent[] = [];
+    const unsub = setPipelineTelemetryEmitter(ev => { captured.push(ev); });
+    try {
+      const runId = usePipelineStore.getState().createRun({
+        runId: 'r-tel-sa-fail', templateId: 't', projectId: 'proj-Y',
+        worktreePath: '/tmp/wt-sa', branch: 'feat/r1', fingerprint: FP,
+      });
+      usePipelineStore.getState().dispatch(runId, { type: 'start' });
+      usePipelineStore.getState().dispatch(runId, { type: 'planner_done', plan: {
+        stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha',
+      }});
+      usePipelineStore.getState().dispatch(runId, { type: 'approve_plan' });
+      const beforeCount = captured.length;
+
+      const sentinel = '<<<TX_SUBAGENT_FAILED>>>{"reason":"sub-agent crashed at task 3","suggestedFix":"reduce scope"}\n';
+      ingestPtyChunk({ runId, role: 'builder', chunk: sentinel });
+
+      const subagentEvent = captured.slice(beforeCount).find(e => e.event === 'subagent_completed');
+      expect(subagentEvent).toBeDefined();
+      expect(subagentEvent).toMatchObject({
+        event: 'subagent_completed',
+        runId,
+        projectId: 'proj-Y',
+        parentRole: 'builder',
+        status: 'failed',
+        reason: 'sub-agent crashed at task 3',
+      });
+      // Counts and summary are absent on the failure variant.
+      expect(subagentEvent).not.toHaveProperty('filesEditedCount');
+      expect(subagentEvent).not.toHaveProperty('commitsCreatedCount');
+    } finally {
+      unsub();
     }
   });
 

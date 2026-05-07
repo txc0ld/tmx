@@ -1,4 +1,4 @@
-import { usePipelineStore } from '@/stores/pipelineStore';
+import { usePipelineStore, emitTelemetry } from '@/stores/pipelineStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { scanForSentinel } from './sentinel-scanner';
 import { notifyBuilderActivity, clearScratchpadState } from './scratchpad-watcher';
@@ -238,25 +238,52 @@ function dispatchSentinel(
     case 'heartbeat':
       dispatch(runId, { type: 'heartbeat' });
       return;
-    case 'subagent_done':
+    case 'subagent_done': {
       // Sub-agent invocations live *within* a Builder task — they don't
-      // transition pipeline state. Phase 3b.8 wires a real telemetry
-      // variant; for now log so a developer tailing the console sees
-      // the sub-agent boundary. The Builder activity bookkeeping above
-      // (`maybeNotifyBuilder`) already kicked the scratchpad-watcher.
-      // eslint-disable-next-line no-console
-      console.info('[pipeline] subagent_done:', { runId, role, payload: ev.payload });
+      // transition pipeline state. Phase 3b.8: emit a `subagent_completed`
+      // telemetry event so the JSONL run log captures the sub-agent
+      // boundary. Builder activity bookkeeping above (`maybeNotifyBuilder`)
+      // already kicked the scratchpad-watcher.
+      //
+      // We don't ship `subagent_invoked` — the Builder calls
+      // `agent_run_oneshot` in-process so the controller never sees
+      // invocation. Phase 4 may add a Builder-emitted sentinel if we
+      // want latency tracking.
+      const run = usePipelineStore.getState().runs[runId];
+      emitTelemetry({
+        at: Date.now(),
+        event: 'subagent_completed',
+        runId,
+        projectId: run?.projectId ?? '',
+        parentRole: role,
+        status: 'done',
+        filesEditedCount: ev.payload.filesEdited.length,
+        commitsCreatedCount: ev.payload.commitsCreated.length,
+        summary: ev.payload.summary,
+      });
       return;
-    case 'subagent_failed':
-      // eslint-disable-next-line no-console
-      console.info('[pipeline] subagent_failed:', { runId, role, payload: ev.payload });
+    }
+    case 'subagent_failed': {
+      const run = usePipelineStore.getState().runs[runId];
+      emitTelemetry({
+        at: Date.now(),
+        event: 'subagent_completed',
+        runId,
+        projectId: run?.projectId ?? '',
+        parentRole: role,
+        status: 'failed',
+        reason: ev.payload.reason,
+      });
       return;
+    }
     case 'compaction_done': {
       // Builder responded to the compaction prompt. Append the summary
       // to the scratchpad and reset compaction bookkeeping. Fire-and-
       // forget — the file-write IPC is async but a slow disk shouldn't
       // block the sentinel-loop. Errors surface via console.warn from
-      // inside the handler. Telemetry variant lands in 3b.8.
+      // inside the handler. The `compaction_completed` telemetry event
+      // (Phase 3b.8) is emitted by `handleCompactionDone` itself so it
+      // lands AFTER the scratchpad write succeeds.
       const run = usePipelineStore.getState().runs[runId];
       if (run && run.worktreePath) {
         void handleCompactionDone({
@@ -265,8 +292,6 @@ function dispatchSentinel(
           worktreePath: run.worktreePath,
         });
       }
-      // eslint-disable-next-line no-console
-      console.info('[pipeline] compaction_done:', { runId, role, summaryLen: ev.payload.summary?.length ?? 0 });
       return;
     }
     case 'parse_error':

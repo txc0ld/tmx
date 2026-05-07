@@ -12,6 +12,12 @@ import {
   COMPACTION_SECTION_HEADER,
 } from './compaction-watcher';
 import { SCRATCHPAD_FILE } from './scratchpad-watcher';
+import {
+  setPipelineTelemetryEmitter,
+  usePipelineStore,
+  type TelemetryEvent,
+} from '@/stores/pipelineStore';
+import type { RunFingerprint } from '@/types';
 
 /**
  * Phase 3b.6: compaction-watcher unit tests. DI mirrors scratchpad-watcher
@@ -248,6 +254,129 @@ describe('compaction-watcher', () => {
     expect(_getBytesForTest('rB')).toBe(50_000);
     expect(rec.ptyWrites).toHaveLength(1); // still just rA's prompt
     expect(rec.ptyWrites[0].ptyId).toBe('ptyA');
+  });
+
+  // Phase 3b.8: telemetry events for compaction lifecycle. Both events read
+  // `projectId` from the store; we seed a run record so the lookup succeeds.
+  it('Phase 3b.8: tripping threshold emits compaction_triggered with bytesAccumulated + projectId', async () => {
+    const FP: RunFingerprint = {
+      templateId: 't', templateHash: 'h', skillHashes: {}, rolePromptHashes: {},
+      models: {}, capabilityManifests: {}, terminalxVersion: '0.1.0',
+    };
+    usePipelineStore.setState({ runs: {}, activeRunIds: [] });
+    const runId = usePipelineStore.getState().createRun({
+      runId: 'r-tel-trig', templateId: 't', projectId: 'proj-comp',
+      worktreePath: '/tmp/wt', branch: 'feat/r1', fingerprint: FP,
+    });
+
+    const captured: TelemetryEvent[] = [];
+    const unsub = setPipelineTelemetryEmitter(ev => { captured.push(ev); });
+    try {
+      const rec = makeRecorder();
+
+      // Sub-threshold — no event.
+      await notifyBuilderBytes({
+        runId, ptyId: 'pty', worktreePath: '/tmp/wt',
+        byteCount: 50_000, deps: rec.deps,
+      });
+      expect(captured.find(e => e.event === 'compaction_triggered')).toBeUndefined();
+
+      // Cross threshold — exactly one compaction_triggered event.
+      await notifyBuilderBytes({
+        runId, ptyId: 'pty', worktreePath: '/tmp/wt',
+        byteCount: COMPACTION_THRESHOLD_BYTES,
+        deps: rec.deps,
+      });
+
+      const trig = captured.find(e => e.event === 'compaction_triggered');
+      expect(trig).toBeDefined();
+      expect(trig).toMatchObject({
+        event: 'compaction_triggered',
+        runId,
+        projectId: 'proj-comp',
+      });
+      // bytesAccumulated must reflect the cumulative count that tripped the
+      // threshold (>= COMPACTION_THRESHOLD_BYTES).
+      const bytes = (trig as { bytesAccumulated: number }).bytesAccumulated;
+      expect(bytes).toBeGreaterThanOrEqual(COMPACTION_THRESHOLD_BYTES);
+      expect(bytes).toBe(50_000 + COMPACTION_THRESHOLD_BYTES);
+    } finally {
+      unsub();
+    }
+  });
+
+  it('Phase 3b.8: handleCompactionDone emits compaction_completed with summaryLength', async () => {
+    const FP: RunFingerprint = {
+      templateId: 't', templateHash: 'h', skillHashes: {}, rolePromptHashes: {},
+      models: {}, capabilityManifests: {}, terminalxVersion: '0.1.0',
+    };
+    usePipelineStore.setState({ runs: {}, activeRunIds: [] });
+    const runId = usePipelineStore.getState().createRun({
+      runId: 'r-tel-done', templateId: 't', projectId: 'proj-comp-done',
+      worktreePath: '/tmp/wt', branch: 'feat/r1', fingerprint: FP,
+    });
+
+    const captured: TelemetryEvent[] = [];
+    const unsub = setPipelineTelemetryEmitter(ev => { captured.push(ev); });
+    try {
+      const rec = makeRecorder();
+      rec.setScratchpad(null);
+
+      const summary = 'Made it through tasks 1-3; on task 4 next.';
+      await handleCompactionDone({
+        runId, summary,
+        worktreePath: '/tmp/wt', deps: rec.deps,
+      });
+
+      const done = captured.find(e => e.event === 'compaction_completed');
+      expect(done).toBeDefined();
+      expect(done).toMatchObject({
+        event: 'compaction_completed',
+        runId,
+        projectId: 'proj-comp-done',
+        summaryLength: summary.length,
+      });
+    } finally {
+      unsub();
+    }
+  });
+
+  it('Phase 3b.8: failed PTY write does NOT emit compaction_triggered', async () => {
+    // If the prompt never reaches the Builder, telemetry must not record a
+    // delivery. Pending flag flips back to false so the next chunk re-tries
+    // and emits on success.
+    const FP: RunFingerprint = {
+      templateId: 't', templateHash: 'h', skillHashes: {}, rolePromptHashes: {},
+      models: {}, capabilityManifests: {}, terminalxVersion: '0.1.0',
+    };
+    usePipelineStore.setState({ runs: {}, activeRunIds: [] });
+    const runId = usePipelineStore.getState().createRun({
+      runId: 'r-tel-fail', templateId: 't', projectId: 'proj-fail',
+      worktreePath: '/tmp/wt', branch: 'feat/r1', fingerprint: FP,
+    });
+
+    const captured: TelemetryEvent[] = [];
+    const unsub = setPipelineTelemetryEmitter(ev => { captured.push(ev); });
+    try {
+      const deps = {
+        writeToPty: async (_id: string, _data: string) => { throw new Error('pty closed'); },
+        readScratchpad: async (_p: string) => null,
+        writeScratchpad: async (_path: string, _contents: string) => {},
+        refreshMtime: async (_p: string) => {},
+        now: () => 1,
+      };
+
+      await notifyBuilderBytes({
+        runId, ptyId: 'pty', worktreePath: '/tmp/wt',
+        byteCount: COMPACTION_THRESHOLD_BYTES + 1,
+        deps,
+      });
+
+      expect(captured.find(e => e.event === 'compaction_triggered')).toBeUndefined();
+      expect(_isPendingForTest(runId)).toBe(false);
+    } finally {
+      unsub();
+    }
   });
 
   it('writeToPty failure clears pending so the next chunk can retry', async () => {
