@@ -640,10 +640,27 @@ export interface OneshotResult {
   duration_ms: number;
 }
 
+/**
+ * Phase 3b.4: extended one-shot surface for sub-agent delegation.
+ *
+ * `systemPrompt` is prepended to `stdin` with a `"\n\n---\n\n"` separator on
+ * the Rust side, so the agent's first turn receives ONE input stream:
+ *   `<systemPrompt>\n\n---\n\n<stdin>`
+ * Provider-agnostic — works the same on claude/codex/gemini because none of
+ * them parse the stdin format. (claude exposes `--system-prompt` and
+ * `--append-system-prompt`, but codex/gemini don't, so the stdin-prefix
+ * approach is the only option that works uniformly.)
+ *
+ * `workingFiles` is the list of file globs the sub-agent declares it'll
+ * touch. It's recorded for audit but NOT enforced at the FS layer this
+ * phase — the tx-pipeline-subagent skill carries the constraint behaviorally.
+ */
 export async function agentRunOneshot(opts: {
   agent: 'claude' | 'codex' | 'gemini';
   args: string[];
   stdin?: string;
+  systemPrompt?: string;
+  workingFiles?: string[];
   timeoutSecs?: number;
   cwd?: string;
 }): Promise<OneshotResult> {
@@ -652,6 +669,8 @@ export async function agentRunOneshot(opts: {
       agent: opts.agent,
       args: opts.args,
       stdin: opts.stdin ?? null,
+      system_prompt: opts.systemPrompt ?? null,
+      working_files: opts.workingFiles ?? [],
       timeout_secs: opts.timeoutSecs ?? 600,
       cwd: opts.cwd ?? null,
     },

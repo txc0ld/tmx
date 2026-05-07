@@ -205,6 +205,15 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command as TokioCommand;
 use tokio::time::{timeout, Duration as TokioDuration};
 
+/// Phase 3b.4 — separator between the system prompt brief and the user-facing
+/// stdin payload. The agent's first turn receives ONE input stream:
+///   `<system_prompt>\n\n---\n\n<stdin>`
+/// and treats the prefix as initial context (skill content + acceptance
+/// criterion + working file globs). Provider-agnostic — works the same on
+/// claude/codex/gemini one-shot invocations because none of them parse the
+/// stdin format; they all just hand it to the model as the first message.
+pub const BRIEF_SEPARATOR: &str = "\n\n---\n\n";
+
 #[derive(Debug, Deserialize)]
 pub struct OneshotInvocation {
     /// Internal: tests inject a known bin (e.g. /bin/echo). Production callers
@@ -214,6 +223,20 @@ pub struct OneshotInvocation {
 
     pub args: Vec<String>,
     pub stdin: Option<String>,
+    /// Phase 3b.4: prepended to stdin (with `BRIEF_SEPARATOR`) so the agent's
+    /// first turn receives the brief as initial context. None = no prefix.
+    /// Investigated `claude --system-prompt` / `--append-system-prompt`: those
+    /// flags exist on Claude but neither codex nor gemini have an equivalent,
+    /// so the stdin-prefix approach is the only provider-agnostic option.
+    pub system_prompt: Option<String>,
+    /// Phase 3b.4: file globs the sub-agent declares it'll touch. Recorded for
+    /// audit but NOT enforced at the FS layer this phase — the
+    /// tx-pipeline-subagent skill's behavioral contract is the constraint. FS
+    /// enforcement (e.g. via `.claude/settings.json` permissions) is deferred
+    /// to a post-3b hardening pass if dogfooding shows sub-agents escaping
+    /// their brief.
+    #[serde(default)]
+    pub working_files: Vec<String>,
     pub timeout_secs: u64,
     pub cwd: Option<String>,
 }
@@ -250,13 +273,33 @@ pub async fn run_oneshot_inner(inv: OneshotInvocation) -> Result<OneshotResult, 
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn {bin}: {e}"))?;
 
-    if let Some(input) = &inv.stdin {
+    // Compose the actual stdin: optional system_prompt prefix + separator +
+    // user stdin. If no system_prompt is set, behavior is identical to before.
+    // Phase 3b.4.
+    let composed_stdin: Option<String> = match (&inv.system_prompt, &inv.stdin) {
+        (None, None) => None,
+        (None, Some(s)) => Some(s.clone()),
+        (Some(prefix), None) => Some(prefix.clone()),
+        (Some(prefix), Some(s)) => Some(format!("{prefix}{BRIEF_SEPARATOR}{s}")),
+    };
+
+    if let Some(input) = composed_stdin {
         if let Some(mut sin) = child.stdin.take() {
             sin.write_all(input.as_bytes())
                 .await
                 .map_err(|e| format!("write stdin: {e}"))?;
             // Drop sin to close stdin so the child finishes reading.
         }
+    }
+
+    // working_files is informational only this phase. Log it (debug) so a run
+    // can be reconstructed from telemetry if needed. The skill enforces the
+    // constraint behaviorally.
+    if !inv.working_files.is_empty() {
+        eprintln!(
+            "agent_run_oneshot: working_files declared (non-enforced): {:?}",
+            inv.working_files
+        );
     }
 
     let wait = child.wait_with_output();
@@ -296,6 +339,13 @@ pub struct OneshotIpcInput {
     pub agent: String,
     pub args: Vec<String>,
     pub stdin: Option<String>,
+    /// Phase 3b.4: prepended to stdin with `BRIEF_SEPARATOR` so the spawned
+    /// agent receives `<system_prompt>\n\n---\n\n<stdin>` as its first input.
+    pub system_prompt: Option<String>,
+    /// Phase 3b.4: file globs the sub-agent declares it'll touch. Logged for
+    /// audit; NOT enforced at the FS layer this phase.
+    #[serde(default)]
+    pub working_files: Vec<String>,
     #[serde(default = "default_oneshot_timeout")]
     pub timeout_secs: u64,
     pub cwd: Option<String>,
@@ -312,6 +362,8 @@ pub async fn agent_run_oneshot(input: OneshotIpcInput) -> Result<OneshotResult, 
         bin_override: Some(bin),
         args: input.args,
         stdin: input.stdin,
+        system_prompt: input.system_prompt,
+        working_files: input.working_files,
         timeout_secs: input.timeout_secs,
         cwd: input.cwd,
     };
@@ -333,6 +385,8 @@ mod oneshot_tests {
             bin_override: Some("/bin/echo".into()),
             args: vec!["hello".into(), "world".into()],
             stdin: None,
+            system_prompt: None,
+            working_files: vec![],
             timeout_secs: 5,
             cwd: None,
         })
@@ -349,6 +403,8 @@ mod oneshot_tests {
             bin_override: Some("/bin/sh".into()),
             args: vec!["-c".into(), "exit 7".into()],
             stdin: None,
+            system_prompt: None,
+            working_files: vec![],
             timeout_secs: 5,
             cwd: None,
         })
@@ -363,6 +419,8 @@ mod oneshot_tests {
             bin_override: Some("/bin/cat".into()),
             args: vec![],
             stdin: Some("piped input".into()),
+            system_prompt: None,
+            working_files: vec![],
             timeout_secs: 5,
             cwd: None,
         })
@@ -378,6 +436,113 @@ mod oneshot_tests {
             bin_override: Some("/bin/sh".into()),
             args: vec!["-c".into(), "sleep 30".into()],
             stdin: None,
+            system_prompt: None,
+            working_files: vec![],
+            timeout_secs: 1,
+            cwd: None,
+        })
+        .await
+        .unwrap();
+        assert!(res.timed_out);
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Phase 3b.4 — system_prompt + working_files extensions
+    // ─────────────────────────────────────────────────────────────────
+
+    /// 3b.4 #1 — `system_prompt` is prepended to `stdin` with the
+    /// BRIEF_SEPARATOR; /bin/cat echoes the composed buffer back so we can
+    /// assert on the exact framing.
+    #[tokio::test]
+    async fn run_oneshot_prepends_system_prompt_to_stdin() {
+        let res = run_oneshot_inner(OneshotInvocation {
+            bin_override: Some("/bin/cat".into()),
+            args: vec![],
+            stdin: Some("hello".into()),
+            system_prompt: Some("you are a sub-agent".into()),
+            working_files: vec![],
+            timeout_secs: 5,
+            cwd: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(res.stdout, "you are a sub-agent\n\n---\n\nhello");
+        assert_eq!(res.exit_code, Some(0));
+    }
+
+    /// 3b.4 #2 — system_prompt with no stdin sends just the prompt (no
+    /// trailing separator) so the agent doesn't receive a dangling delimiter.
+    #[tokio::test]
+    async fn run_oneshot_system_prompt_alone_no_separator() {
+        let res = run_oneshot_inner(OneshotInvocation {
+            bin_override: Some("/bin/cat".into()),
+            args: vec![],
+            stdin: None,
+            system_prompt: Some("brief only".into()),
+            working_files: vec![],
+            timeout_secs: 5,
+            cwd: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(res.stdout, "brief only");
+    }
+
+    /// 3b.4 #3 — `working_files` is informational only this phase. The
+    /// subprocess runs identically whether the field is empty or populated;
+    /// the field exists so the IPC surface is forward-compatible with future
+    /// FS-layer enforcement.
+    #[tokio::test]
+    async fn run_oneshot_working_files_does_not_alter_execution() {
+        let res = run_oneshot_inner(OneshotInvocation {
+            bin_override: Some("/bin/echo".into()),
+            args: vec!["ok".into()],
+            stdin: None,
+            system_prompt: None,
+            working_files: vec!["src/auth/**".into(), "src/lib.rs".into()],
+            timeout_secs: 5,
+            cwd: None,
+        })
+        .await
+        .unwrap();
+        assert!(res.stdout.starts_with("ok"));
+        assert_eq!(res.exit_code, Some(0));
+        assert!(!res.timed_out);
+    }
+
+    /// 3b.4 #4 — when `system_prompt` is None the stdin pipeline is
+    /// byte-for-byte identical to pre-3b.4 behavior (no separator injected).
+    #[tokio::test]
+    async fn run_oneshot_no_system_prompt_preserves_stdin_exactly() {
+        let res = run_oneshot_inner(OneshotInvocation {
+            bin_override: Some("/bin/cat".into()),
+            args: vec![],
+            stdin: Some("just stdin".into()),
+            system_prompt: None,
+            working_files: vec![],
+            timeout_secs: 5,
+            cwd: None,
+        })
+        .await
+        .unwrap();
+        // No trailing newline added by /bin/cat; exact preservation of the
+        // raw stdin bytes.
+        assert_eq!(res.stdout, "just stdin");
+    }
+
+    /// 3b.4 #5 — `kill_on_drop(true)` from Phase 2c-i.2 is preserved through
+    /// the 3b.4 changes: a long-running subprocess is reaped within the
+    /// timeout window even after the new composed-stdin path runs.
+    #[tokio::test]
+    async fn run_oneshot_kill_on_drop_preserved_with_system_prompt() {
+        let started = std::time::Instant::now();
+        let res = run_oneshot_inner(OneshotInvocation {
+            bin_override: Some("/bin/sh".into()),
+            args: vec!["-c".into(), "sleep 30".into()],
+            stdin: Some("ignored".into()),
+            system_prompt: Some("prefix".into()),
+            working_files: vec!["x".into()],
             timeout_secs: 1,
             cwd: None,
         })
