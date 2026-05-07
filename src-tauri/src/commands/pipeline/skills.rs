@@ -35,8 +35,12 @@ fn skills_dir() -> PathBuf {
     PathBuf::from(".claude").join("skills")
 }
 
-pub(super) const BUNDLED_PIPELINE_SKILLS: &[&str] =
-    &["tx-pipeline-stage-handoff", "tx-pipeline-reviewer"];
+pub(super) const BUNDLED_PIPELINE_SKILLS: &[&str] = &[
+    "tx-pipeline-stage-handoff",
+    "tx-pipeline-reviewer",
+    "tx-pipeline-builder-scratchpad",
+    "tx-pipeline-subagent",
+];
 
 /// Pure helper exposed for testing. Real `install_skills_inner` calls this with
 /// the resolved bundle dir + the user's `~/.claude/skills/` dir.

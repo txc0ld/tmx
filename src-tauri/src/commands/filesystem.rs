@@ -177,6 +177,48 @@ pub async fn get_file_size(path: String) -> Result<u64, String> {
     Ok(metadata.len())
 }
 
+/// Return the last-modified time of a file in milliseconds since UNIX
+/// epoch, or `None` when the file is missing. Used by the pipeline
+/// scratchpad-watcher to detect Builder stagnation on
+/// `<worktree>/.tx-builder-notes.md` (Phase 3b.2). Path-scope checked
+/// so callers can't probe arbitrary system files.
+#[tauri::command]
+pub async fn read_file_mtime(path: String) -> Result<Option<u64>, String> {
+    if path.contains('\0') {
+        return Err("Invalid path".to_string());
+    }
+    let raw = PathBuf::from(shellexpand::tilde(&path).to_string());
+    // canonicalize fails when the file doesn't exist — that's an expected
+    // case for the scratchpad watcher (Builder hasn't written yet). Map
+    // NotFound to Ok(None) and treat any other error as a hard failure.
+    let canonical_raw = match raw.canonicalize() {
+        Ok(p) => p,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("Path error: {}", e)),
+    };
+    let canonical = strip_verbatim_prefix(&canonical_raw);
+    if !is_path_allowed(&canonical) {
+        return Err("Path is outside the allowed roots".to_string());
+    }
+    let metadata = match fs::metadata(&canonical) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("Stat error: {}", e)),
+    };
+    if metadata.is_dir() {
+        return Err("Path is a directory".to_string());
+    }
+    let modified = metadata
+        .modified()
+        .map_err(|e| format!("mtime unavailable: {}", e))?;
+    let ms = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("mtime before epoch: {}", e))?
+        .as_millis();
+    // Clamp to u64 — mtime in ms fits in u64 for ~584 million years.
+    Ok(Some(ms as u64))
+}
+
 /// Read a file as UTF-8 text, validated against the same allowed-roots
 /// list as `read_file_tree`. Used by EditorTile and DiffTile so users can
 /// open any file under their home directory (the Tauri fs plugin scope is
@@ -372,5 +414,44 @@ mod tests {
         assert!(!is_path_allowed(&PathBuf::from("/sys/class/net")));
         assert!(!is_path_allowed(&PathBuf::from("/dev/null")));
         assert!(!is_path_allowed(&PathBuf::from("/root/.ssh/id_rsa")));
+    }
+
+    /// Phase 3b.2: scratchpad-watcher relies on `read_file_mtime` to
+    /// decide whether the Builder has updated `.tx-builder-notes.md`.
+    /// Missing files MUST resolve to `Ok(None)` (not Err) so the watcher
+    /// can distinguish "Builder hasn't written yet" from a real error.
+    #[tokio::test]
+    async fn read_file_mtime_returns_none_for_missing_file() {
+        // Pick a path inside an allowed root that definitely doesn't exist.
+        let tmp = std::env::temp_dir().join(format!(
+            "tx-test-mtime-missing-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        ));
+        // Sanity check — allowed-root probe.
+        assert!(is_path_allowed(&tmp), "temp_dir must be inside allowed roots");
+        let result = read_file_mtime(tmp.to_string_lossy().to_string()).await;
+        assert!(matches!(result, Ok(None)), "missing file must be Ok(None), got {:?}", result);
+    }
+
+    /// Phase 3b.2: when the file exists, mtime is returned in ms-since-epoch.
+    #[tokio::test]
+    async fn read_file_mtime_returns_some_for_existing_file() {
+        let tmp_file = std::env::temp_dir().join(format!(
+            "tx-test-mtime-present-{}-{}.txt",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        ));
+        std::fs::write(&tmp_file, b"hello scratchpad").expect("write tmp file");
+        let result = read_file_mtime(tmp_file.to_string_lossy().to_string()).await;
+        let _ = std::fs::remove_file(&tmp_file);
+        let mtime = result.expect("read_file_mtime ok").expect("file exists, mtime should be Some");
+        // Sanity: should be roughly "now" in ms — pick a wide bound.
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_millis() as u64;
+        assert!(mtime > 0);
+        assert!(mtime <= now_ms + 5_000, "mtime {} unexpectedly far in future (now {})", mtime, now_ms);
     }
 }

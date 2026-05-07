@@ -73,11 +73,74 @@ export interface MergerTelemetryEvent {
   detail?: string;
 }
 
+/**
+ * Sub-agent completion outcome. (Phase 3b.8)
+ *
+ * Fired when the controller parses `<<<TX_SUBAGENT_DONE>>>` or
+ * `<<<TX_SUBAGENT_FAILED>>>` from the parent role's PTY. Sub-agent
+ * INVOCATION isn't observable to the controller — the parent role calls
+ * `agent_run_oneshot` in-process — so we only ship `subagent_completed`.
+ * If invocation-time telemetry becomes useful (latency tracking),
+ * Phase 4 can add a Builder-emitted `<<<TX_SUBAGENT_INVOKED>>>` sentinel.
+ */
+export interface SubagentCompletedTelemetryEvent {
+  at: number;
+  event: 'subagent_completed';
+  runId: string;
+  projectId: string;
+  /** Role that emitted the sentinel — `'builder'` for now; future-proofed. */
+  parentRole: PipelineRole;
+  status: 'done' | 'failed';
+  /** On status: 'done' — count of files the sub-agent reported editing. */
+  filesEditedCount?: number;
+  /** On status: 'done' — count of commits the sub-agent reported creating. */
+  commitsCreatedCount?: number;
+  /** On status: 'done' — short summary string from the sentinel payload. */
+  summary?: string;
+  /** On status: 'failed' — failure reason from the sentinel payload. */
+  reason?: string;
+}
+
+/**
+ * Compaction prompt fired by the controller. (Phase 3b.8)
+ *
+ * Emitted when `compaction-watcher.notifyBuilderBytes` writes the
+ * compaction prompt to the Builder PTY (cumulative bytes since last
+ * sentinel ≥ `COMPACTION_THRESHOLD_BYTES`).
+ */
+export interface CompactionTriggeredTelemetryEvent {
+  at: number;
+  event: 'compaction_triggered';
+  runId: string;
+  projectId: string;
+  /** Cumulative Builder bytes since the last sentinel that tripped the threshold. */
+  bytesAccumulated: number;
+}
+
+/**
+ * Compaction summary received from Builder. (Phase 3b.8)
+ *
+ * Emitted when `handleCompactionDone` finishes appending the summary to
+ * the scratchpad. Records the summary length so we can monitor whether
+ * Builder is honoring the ≤500-token cap from the prompt.
+ */
+export interface CompactionCompletedTelemetryEvent {
+  at: number;
+  event: 'compaction_completed';
+  runId: string;
+  projectId: string;
+  /** Character count of the summary appended to the scratchpad. */
+  summaryLength: number;
+}
+
 export type TelemetryEvent =
   | StateChangeTelemetryEvent
   | LifecycleTelemetryEvent
   | MergerTelemetryEvent
-  | ClarificationTelemetryEvent;
+  | ClarificationTelemetryEvent
+  | SubagentCompletedTelemetryEvent
+  | CompactionTriggeredTelemetryEvent
+  | CompactionCompletedTelemetryEvent;
 
 type TelemetryEmitter = (event: TelemetryEvent) => void;
 const telemetryListeners: Set<TelemetryEmitter> = new Set();

@@ -46,6 +46,7 @@ pub fn run() {
             commands::filesystem::read_file_text,
             commands::filesystem::write_file_text,
             commands::filesystem::get_file_size,
+            commands::filesystem::read_file_mtime,
             commands::filesystem::watch_directory,
             commands::filesystem::unwatch_directory,
             // Workspace persistence

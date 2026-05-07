@@ -98,4 +98,64 @@ describe('scanForSentinel', () => {
     const event = scanForSentinel(buf);
     expect(event?.kind).toBe('done');
   });
+
+  // Phase 3b.5: sub-agent sentinels emitted by tx-pipeline-subagent.
+  it('finds TX_SUBAGENT_DONE with files/commits/summary payload', () => {
+    const buf = 'sub-agent log...\n<<<TX_SUBAGENT_DONE>>>{"filesEdited":["src/foo.ts","src/bar.ts"],"commitsCreated":["abc1234"],"summary":"refactored helper"}\n';
+    const event = scanForSentinel(buf);
+    expect(event?.kind).toBe('subagent_done');
+    if (event?.kind === 'subagent_done') {
+      expect(event.payload.filesEdited).toEqual(['src/foo.ts', 'src/bar.ts']);
+      expect(event.payload.commitsCreated).toEqual(['abc1234']);
+      expect(event.payload.summary).toBe('refactored helper');
+    }
+    expect(event?.consumedThrough).toBeGreaterThan(0);
+  });
+
+  it('finds TX_SUBAGENT_FAILED with reason + suggestedFix', () => {
+    const buf = '<<<TX_SUBAGENT_FAILED>>>{"reason":"could not locate file","suggestedFix":"pass an absolute path"}\n';
+    const event = scanForSentinel(buf);
+    expect(event?.kind).toBe('subagent_failed');
+    if (event?.kind === 'subagent_failed') {
+      expect(event.payload.reason).toBe('could not locate file');
+      expect(event.payload.suggestedFix).toBe('pass an absolute path');
+    }
+  });
+
+  it('returns parse_error on malformed JSON after TX_SUBAGENT_DONE', () => {
+    const buf = '<<<TX_SUBAGENT_DONE>>>{not json at all}\n';
+    const event = scanForSentinel(buf);
+    expect(event?.kind).toBe('parse_error');
+  });
+
+  it('scans multiple sub-agent sentinels in one chunk sequentially', () => {
+    const first  = '<<<TX_SUBAGENT_DONE>>>{"filesEdited":["a.ts"],"commitsCreated":["c1"],"summary":"one"}';
+    const second = '<<<TX_SUBAGENT_DONE>>>{"filesEdited":["b.ts"],"commitsCreated":["c2"],"summary":"two"}';
+    const buf = `${first}\n${second}\n`;
+
+    const ev1 = scanForSentinel(buf);
+    expect(ev1?.kind).toBe('subagent_done');
+    if (ev1?.kind === 'subagent_done') {
+      expect(ev1.payload.summary).toBe('one');
+    }
+
+    // Caller trims past consumedThrough and rescans — same path the controller takes.
+    const tail = buf.slice(ev1!.consumedThrough);
+    const ev2 = scanForSentinel(tail);
+    expect(ev2?.kind).toBe('subagent_done');
+    if (ev2?.kind === 'subagent_done') {
+      expect(ev2.payload.summary).toBe('two');
+    }
+  });
+
+  // Phase 3b.6: compaction-done sentinel.
+  it('finds TX_COMPACTION_DONE with summary payload', () => {
+    const buf = '<<<TX_COMPACTION_DONE>>>{"summary":"compacted: tasks 1-3 done; task 4 next"}\n';
+    const event = scanForSentinel(buf);
+    expect(event?.kind).toBe('compaction_done');
+    if (event?.kind === 'compaction_done') {
+      expect(event.payload.summary).toBe('compacted: tasks 1-3 done; task 4 next');
+    }
+    expect(event?.consumedThrough).toBeGreaterThan(0);
+  });
 });
