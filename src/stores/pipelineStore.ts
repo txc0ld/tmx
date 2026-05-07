@@ -133,6 +133,87 @@ export interface CompactionCompletedTelemetryEvent {
   summaryLength: number;
 }
 
+/**
+ * Trust telemetry — Phase 3c.7. Five variants surface the trust-related
+ * decisions the run made so dashboards can aggregate them independently
+ * of the noisier `state_change` stream.
+ *
+ * Emission sites:
+ *  - `complexity_routed` — pipelineStore.dispatch wrapper, when a
+ *    `planner_done` transition lands and the run was re-stamped with
+ *    a complexity mode + routing flags (see state-machine.ts §planner_done).
+ *  - `confidence_uncertain_escalated` — controller-runtime's
+ *    `maybeEscalateUncertainty` after it dispatches the synthetic
+ *    `question_raised`.
+ *  - `dual_reviewer_disagreement` — pipelineStore.dispatch wrapper, on
+ *    the `awaiting_dual_reviewer → awaiting_tiebreaker` transition pair.
+ *  - `tiebreaker_invoked` — dual-reviewer-dispatcher when it spawns the
+ *    third (gemini) reviewer on `awaiting_tiebreaker` entry.
+ *  - `red_team_finding` — controller-runtime's `redteam_done` case, fired
+ *    once per finding so dashboards can aggregate by severity / category
+ *    without re-parsing the report. 0 findings → no events.
+ */
+export interface ComplexityRoutedTelemetryEvent {
+  at: number;
+  event: 'complexity_routed';
+  runId: string;
+  projectId: string;
+  complexity: 'trivial' | 'standard' | 'complex';
+  autoApprovePlan: boolean;
+  useDualReviewer: boolean;
+  runRedTeam: boolean;
+}
+
+export interface ConfidenceUncertainEscalatedTelemetryEvent {
+  at: number;
+  event: 'confidence_uncertain_escalated';
+  runId: string;
+  projectId: string;
+  role: PipelineRole;
+  /** Builder/Reviewer-derived metric; absent for Planner. */
+  filesChanged?: number;
+  /** Builder/Reviewer-derived metric; absent for Planner. */
+  commits?: number;
+  /** Planner-only — task count from the plan. */
+  tasks?: number;
+  uncertaintyDrivers?: string[];
+}
+
+export interface DualReviewerDisagreementTelemetryEvent {
+  at: number;
+  event: 'dual_reviewer_disagreement';
+  runId: string;
+  projectId: string;
+  opusVerdict: 'approve' | 'reject';
+  codexVerdict: 'approve' | 'reject';
+}
+
+export interface TiebreakerInvokedTelemetryEvent {
+  at: number;
+  event: 'tiebreaker_invoked';
+  runId: string;
+  projectId: string;
+  /** Hardcoded `gemini` today; future-proofed for other tiebreaker providers. */
+  provider: 'gemini' | 'opus' | 'codex';
+}
+
+export interface RedTeamFindingTelemetryEvent {
+  at: number;
+  event: 'red_team_finding';
+  runId: string;
+  projectId: string;
+  severity: 'blocker' | 'concern' | 'nit';
+  category:
+    | 'supply-chain'
+    | 'prompt-injection'
+    | 'secret-exposure'
+    | 'race-condition'
+    | 'edge-case'
+    | 'other';
+  file?: string;
+  line?: number;
+}
+
 export type TelemetryEvent =
   | StateChangeTelemetryEvent
   | LifecycleTelemetryEvent
@@ -140,7 +221,12 @@ export type TelemetryEvent =
   | ClarificationTelemetryEvent
   | SubagentCompletedTelemetryEvent
   | CompactionTriggeredTelemetryEvent
-  | CompactionCompletedTelemetryEvent;
+  | CompactionCompletedTelemetryEvent
+  | ComplexityRoutedTelemetryEvent
+  | ConfidenceUncertainEscalatedTelemetryEvent
+  | DualReviewerDisagreementTelemetryEvent
+  | TiebreakerInvokedTelemetryEvent
+  | RedTeamFindingTelemetryEvent;
 
 type TelemetryEmitter = (event: TelemetryEvent) => void;
 const telemetryListeners: Set<TelemetryEmitter> = new Set();
@@ -249,6 +335,15 @@ export const usePipelineStore = create<PipelineStoreShape>((set) => ({
   dispatch: (runId, ev) => {
     let pendingTelemetry: StateChangeTelemetryEvent | null = null;
     let pendingLifecycle: LifecycleEvent | null = null;
+    /**
+     * Phase 3c.7: trust-telemetry events that are derived from the
+     * (existing, next) pair and emitted *after* the state-change event
+     * (so the JSONL stream's ordering remains causal — state_change
+     * first, then any augmenting trust events). Keep this list small;
+     * deeper analysis belongs in the role-specific modules
+     * (controller-runtime, dual-reviewer-dispatcher).
+     */
+    const pendingTrust: TelemetryEvent[] = [];
     set(s => {
       const existing = s.runs[runId];
       if (!existing) return s;
@@ -273,6 +368,55 @@ export const usePipelineStore = create<PipelineStoreShape>((set) => ({
           to: next.state,
           trigger: ev.type,
         };
+
+        // Phase 3c.7: dual-reviewer disagreement. Detect transition into
+        // awaiting_tiebreaker — by construction the reducer only routes
+        // there from awaiting_dual_reviewer when the two verdicts disagree.
+        // We pull the verdicts from `next.artifacts.reviews` (most-recent
+        // opus + codex) since the reducer just appended them.
+        if (
+          existing.state === 'awaiting_dual_reviewer' &&
+          next.state === 'awaiting_tiebreaker'
+        ) {
+          const reviews = next.artifacts.reviews;
+          let opusV: 'approve' | 'reject' | undefined;
+          let codexV: 'approve' | 'reject' | undefined;
+          for (let i = reviews.length - 1; i >= 0; i--) {
+            const r = reviews[i];
+            if (!opusV && r.reviewer === 'opus') opusV = r.verdict;
+            else if (!codexV && r.reviewer === 'codex') codexV = r.verdict;
+            if (opusV && codexV) break;
+          }
+          if (opusV && codexV) {
+            pendingTrust.push({
+              at: Date.now(),
+              event: 'dual_reviewer_disagreement',
+              runId,
+              projectId: existing.projectId,
+              opusVerdict: opusV,
+              codexVerdict: codexV,
+            });
+          }
+        }
+      }
+
+      // Phase 3c.7: complexity_routed fires on planner_done regardless of
+      // whether the state changed — the reducer always re-stamps
+      // runMode/autoApprovePlan/useDualReviewer/runRedTeam on planner_done,
+      // and `next !== existing` is already guaranteed above (we early-
+      // returned on no-op). Test-friendly: fires after the state-change
+      // event is queued so dashboards see them in order.
+      if (ev.type === 'planner_done') {
+        pendingTrust.push({
+          at: Date.now(),
+          event: 'complexity_routed',
+          runId,
+          projectId: existing.projectId,
+          complexity: next.runMode,
+          autoApprovePlan: next.autoApprovePlan,
+          useDualReviewer: next.useDualReviewer,
+          runRedTeam: next.runRedTeam,
+        });
       }
 
       // activeRunIds membership only changes when a run crosses the terminal
@@ -288,6 +432,13 @@ export const usePipelineStore = create<PipelineStoreShape>((set) => ({
     if (pendingTelemetry) {
       for (const fn of telemetryListeners) {
         try { fn(pendingTelemetry); } catch (err) {
+          console.warn('[pipeline] telemetry listener threw:', err);
+        }
+      }
+    }
+    for (const trustEv of pendingTrust) {
+      for (const fn of telemetryListeners) {
+        try { fn(trustEv); } catch (err) {
           console.warn('[pipeline] telemetry listener threw:', err);
         }
       }

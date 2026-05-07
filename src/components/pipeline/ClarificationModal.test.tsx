@@ -38,7 +38,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     baseBranch: 'main',
     state: 'awaiting_clarification',
     priorActiveState: 'building',
-    artifacts: { builds: [], reviews: [], ciResults: [], questions: [makeQuestion()] },
+    artifacts: { builds: [], reviews: [], ciResults: [], questions: [makeQuestion()], redTeamReports: [] },
     retryCounters: { reviewerReject: 0, ciFail: 0 },
     startedAt: 1,
     escalationLog: [],
@@ -53,6 +53,13 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
       terminalxVersion: '0.1.0',
     },
     planLineage: [],
+    runMode: 'standard',
+    autoApprovePlan: false,
+    useDualReviewer: false,
+    runRedTeam: false,
+    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    templateDualReviewer: false,
     ...overrides,
   };
 }
@@ -279,6 +286,7 @@ describe('ClarificationModal', () => {
         reviews: [],
         ciResults: [],
         questions: [makeQuestion({ stage: 'reviewer', options: undefined })],
+        redTeamReports: [],
       },
       tiles: {}, // no reviewer tile (one-shot CLI invocation)
     });

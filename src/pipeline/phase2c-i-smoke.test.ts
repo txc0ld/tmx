@@ -132,6 +132,7 @@ async function createBuildingRun(opts: {
       tasks: [],
       summary: '',
       planCommitSha: opts.planCommitSha ?? 'sha-plan-v1',
+      confidence: 'verified',
     },
   });
   store.dispatch(runId, { type: 'approve_plan' });
@@ -333,6 +334,7 @@ describe('Phase 2c-i smoke: factory → CI hook → escalation → re-plan', () 
         planPath: v2Path,
         tasks: [], summary: '',
         planCommitSha: 'sha-plan-v2',
+        confidence: 'verified',
       },
     });
     run = usePipelineStore.getState().runs[runId];
@@ -374,6 +376,7 @@ describe('Phase 2c-i smoke: factory → CI hook → escalation → re-plan', () 
       build: {
         stage: 'builder', branch: BRANCH, headSha: 'sha-happy',
         round: 1, commits: [], filesChanged: [], testsAdded: [], ciStatus: 'green',
+        confidence: 'verified',
       },
     });
     run = usePipelineStore.getState().runs[runId];

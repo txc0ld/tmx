@@ -121,13 +121,20 @@ function seedRun(runId: string, overrides: Partial<PipelineRun> = {}): PipelineR
     branch: BRANCH,
     baseBranch: 'main',
     state: 'idle',
-    artifacts: { builds: [], reviews: [], ciResults: [], questions: [] },
+    artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
     retryCounters: { reviewerReject: 0, ciFail: 0 },
     startedAt: Date.now(),
     escalationLog: [],
     tiles: {},
     fingerprint: FP,
     planLineage: [],
+    runMode: 'standard',
+    autoApprovePlan: false,
+    useDualReviewer: false,
+    runRedTeam: false,
+    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    templateDualReviewer: false,
     ...overrides,
   };
   usePipelineStore.setState((s) => ({
@@ -190,6 +197,7 @@ describe('Phase 2c-iii smoke: clarification + stuck + webhook + failure-bundle',
       plan: {
         stage: 'planner', branch: BRANCH, specPath: 's', planPath: 'p',
         tasks: [], summary: '', planCommitSha: 'sha-1',
+        confidence: 'verified',
       },
     });
     store.dispatch(runId, { type: 'approve_plan' });
@@ -255,6 +263,7 @@ describe('Phase 2c-iii smoke: clarification + stuck + webhook + failure-bundle',
         plan: {
           stage: 'planner', branch: BRANCH, specPath: 's', planPath: 'p',
           tasks: [], summary: '', planCommitSha: 'sha-stuck',
+          confidence: 'verified',
         },
       });
       store.dispatch(runId, { type: 'approve_plan' });
@@ -324,6 +333,7 @@ describe('Phase 2c-iii smoke: clarification + stuck + webhook + failure-bundle',
         plan: {
           stage: 'planner', branch: BRANCH, specPath: 's', planPath: 'p',
           tasks: [], summary: '', planCommitSha: 'sha-wh',
+          confidence: 'verified',
         },
       });
       store.dispatch(runId, { type: 'approve_plan' });
@@ -406,6 +416,7 @@ describe('Phase 2c-iii smoke: clarification + stuck + webhook + failure-bundle',
       plan: {
         stage: 'planner', branch: BRANCH, specPath: 's', planPath: 'p',
         tasks: [], summary: '', planCommitSha: 'sha-bundle',
+        confidence: 'verified',
       },
     });
     store.dispatch(runId, { type: 'approve_plan' });

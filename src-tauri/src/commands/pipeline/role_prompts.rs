@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use tauri::Manager;
 
-const ALLOWED_ROLES: &[&str] = &["planner", "builder", "reviewer", "reviewer-codex"];
+const ALLOWED_ROLES: &[&str] = &["planner", "builder", "reviewer", "reviewer-codex", "red-team"];
 
 fn role_prompt_path(app: &tauri::AppHandle, role: &str) -> Result<PathBuf, String> {
     if !ALLOWED_ROLES.contains(&role) {
@@ -57,12 +57,13 @@ mod tests {
 
     #[test]
     fn allowed_roles_match_pipeline_role_union() {
-        // PipelineRole TS union: 'planner' | 'builder' | 'reviewer' | 'reviewer-codex' | 'controller'.
+        // PipelineRole TS union: 'planner' | 'builder' | 'reviewer' | 'reviewer-codex' | 'red-team' | 'controller'.
         // Controller has no agent process so no role prompt — exclude it here.
         assert!(ALLOWED_ROLES.contains(&"planner"));
         assert!(ALLOWED_ROLES.contains(&"builder"));
         assert!(ALLOWED_ROLES.contains(&"reviewer"));
         assert!(ALLOWED_ROLES.contains(&"reviewer-codex"));
+        assert!(ALLOWED_ROLES.contains(&"red-team"));
         assert!(!ALLOWED_ROLES.contains(&"controller"));
     }
 }

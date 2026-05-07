@@ -122,7 +122,7 @@ The controller subscribes to per-tool token-usage events emitted by `agent_spawn
 
 ---
 
-## A4. Plan complexity gate (right-size the automation)
+## A4. Plan complexity gate (right-size the automation) — *shipped 3c.1*
 
 **Missing.** The Anthropic Trio is overkill for a 3-line CSS fix. Running a 4-stage ceremony with worktree, dual reviewer, merger UI, etc. for trivial changes will train users to never use the pipeline.
 
@@ -184,7 +184,7 @@ Skill enforcement: the `tx-pipeline-stage-handoff` skill is amended with **rule 
 
 ---
 
-## A6. Adversarial / red-team pass (optional, on for `complex`)
+## A6. Adversarial / red-team pass (optional, on for `complex`) — *shipped 3c.6*
 
 **Missing.** The reviewer is cooperative-adversarial — it tries to find bugs in good faith. It does not specifically *try to break* the diff (input fuzzing, edge-case generation, "what if a malicious user does X").
 
@@ -222,7 +222,7 @@ Findings are merged into the Reviewer's verdict at reconciliation: any `severity
 
 ---
 
-## A7. Confidence scores and uncertainty-driven escalation
+## A7. Confidence scores and uncertainty-driven escalation — *shipped 3c.2 (required confidence) + 3c.3 (uncertainty escalation)*
 
 **Missing.** Reviewer outputs binary `approve` / `reject`. A reviewer that's 51% confident on approve looks identical to one that's 99% confident.
 
@@ -318,7 +318,7 @@ export interface PipelineRun {
 
 ---
 
-## A9. Diff-aware reviewer chunking
+## A9. Diff-aware reviewer chunking — *shipped 3c.5*
 
 **Missing.** A 4000-line diff exceeds even Opus's effective review attention. The spec assumes one Reviewer pass over the full diff.
 
@@ -597,7 +597,7 @@ Constraints:
 
 ---
 
-## A19. Tiebreaker for dual-reviewer disagreement
+## A19. Tiebreaker for dual-reviewer disagreement — *shipped 3c.4*
 
 **Missing.** §7.3 dual-reviewer disagreement always escalates to user. This breaks the "minimal human intervention" promise on the very signal that should be automatable.
 

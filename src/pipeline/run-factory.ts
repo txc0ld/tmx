@@ -106,6 +106,7 @@ const PROMPTED_ROLES: readonly PipelineRole[] = [
   'builder',
   'reviewer',
   'reviewer-codex',
+  'red-team',
 ];
 
 /**
@@ -216,6 +217,12 @@ export async function createRunFromTemplate(
     branch: input.branch,
     baseBranch: input.baseBranch,
     fingerprint,
+    // Capture template-derived complexity-gate baselines (Phase 3c.1).
+    // The state-machine re-stamps from these on every planner_done and
+    // never reads template config at dispatch time, so per-run behavior
+    // stays deterministic even if the user edits the template later.
+    templateRetryBudget: template.pipeline.retryBudget,
+    templateDualReviewer: template.pipeline.dualReviewer,
   });
 
   return { runId, fingerprint };

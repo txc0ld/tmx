@@ -210,7 +210,7 @@ export interface UsageTile extends TileBase {
 // ─── Pipeline (Phase 1 foundation) ─────────────────────────────────
 
 export type PipelineRole =
-  | 'planner' | 'builder' | 'reviewer' | 'reviewer-codex' | 'controller';
+  | 'planner' | 'builder' | 'reviewer' | 'reviewer-codex' | 'red-team' | 'controller';
 
 export type PipelineState =
   | 'idle'
@@ -218,6 +218,9 @@ export type PipelineState =
   | 'awaiting_plan_approval'
   | 'building'
   | 'reviewing'
+  | 'awaiting_dual_reviewer'
+  | 'awaiting_tiebreaker'
+  | 'awaiting_red_team'
   | 'awaiting_clarification'
   | 'awaiting_merge_approval'
   | 'merging'
@@ -231,6 +234,7 @@ export type FailureClass =
   | 'builder_loop'
   | 'reviewer_irreconcilable'
   | 'reviewer_disagreement_unresolved'
+  | 'red_team_blocker'
   | 'budget_exceeded'
   | 'stage_unresponsive'
   | 'subagent_failed'
@@ -282,6 +286,16 @@ export interface PlanArtifact {
    * Captured into `PipelineRun.planLineage` on `planner_done`.
    */
   planCommitSha: string;
+  /**
+   * Phase 3c.2: required calibrated self-assessment.
+   *  - `verified`: the plan is grounded in spec/code the planner read directly.
+   *  - `likely`: inferred from secondary signals; acceptable for trivial work.
+   *  - `uncertain`: shallow read; populate `uncertaintyDrivers` and expect the
+   *    controller to escalate via a synthetic question (Phase 3c.3) when the
+   *    plan is non-trivial (≥3 tasks).
+   */
+  confidence: 'verified' | 'likely' | 'uncertain';
+  uncertaintyDrivers?: string[];
 }
 
 export interface BuildCommit {
@@ -300,6 +314,18 @@ export interface BuildArtifact {
   testsAdded: string[];
   ciStatus: 'green' | 'red' | 'unknown';
   notes?: string;
+  /**
+   * Phase 3c.2: required calibrated self-assessment.
+   *  - `verified`: tests added + run, verification chain green, `ciStatus`
+   *    confirmed via the watcher.
+   *  - `likely`: tests added but only inferred green (e.g. read CI badge,
+   *    didn't re-run locally). Acceptable for trivial obvious-correct fixes.
+   *  - `uncertain`: shallow verification; populate `uncertaintyDrivers`. The
+   *    controller escalates via a synthetic question (Phase 3c.3) when the
+   *    diff is non-trivial (≥5 files OR ≥3 commits).
+   */
+  confidence: 'verified' | 'likely' | 'uncertain';
+  uncertaintyDrivers?: string[];
 }
 
 export interface ReviewComment {
@@ -318,7 +344,16 @@ export interface ReviewVerdict {
   round: number;
   comments: ReviewComment[];
   summary: string;
-  confidence?: 'verified' | 'likely' | 'uncertain';
+  /**
+   * Phase 3c.2: required (was optional in 2c).
+   *  - `verified`: read the diff against the spec end-to-end.
+   *  - `likely`: inferred from commit subjects + filenames; acceptable for
+   *    trivial obvious-correct changes.
+   *  - `uncertain`: shallow read; populate `uncertaintyDrivers`. The
+   *    controller escalates via a synthetic question (Phase 3c.3) when the
+   *    underlying diff is non-trivial (≥5 files OR ≥3 commits).
+   */
+  confidence: 'verified' | 'likely' | 'uncertain';
   uncertaintyDrivers?: string[];
   diffChunksReviewed?: number;
 }
@@ -345,6 +380,30 @@ export interface QuestionArtifact {
   blocking: true;
 }
 
+/**
+ * Phase 3c.6: red-team finding categories. Mirrors ReviewComment.severity
+ * (`blocker | concern | nit`) so the merger modal can render both with
+ * a consistent severity legend. `blocker` halts the run; `concern` is
+ * surfaced but doesn't block; `nit` is advisory.
+ */
+export interface RedTeamFinding {
+  severity: 'blocker' | 'concern' | 'nit';
+  category: 'supply-chain' | 'prompt-injection' | 'secret-exposure' | 'race-condition' | 'edge-case' | 'other';
+  description: string;
+  /** Optional citation — the file the issue manifests in. */
+  file?: string;
+  line?: number;
+}
+
+export interface RedTeamReport {
+  stage: 'red-team';
+  findings: RedTeamFinding[];
+  summary: string;
+  /** Same calibrated self-assessment field as Reviewer/Builder/Planner. */
+  confidence: 'verified' | 'likely' | 'uncertain';
+  uncertaintyDrivers?: string[];
+}
+
 export interface EscalationEntry {
   at: number;
   reason: string;
@@ -359,6 +418,14 @@ export interface PipelineRunArtifacts {
   reviews: ReviewVerdict[];
   ciResults: CIResult[];
   questions: QuestionArtifact[];
+  /**
+   * Phase 3c.6: red-team reports. Empty unless the run is `complex` and
+   * the Reviewer approved at least once (the red-team only fires after
+   * approval). `concern`-severity findings live here for the merger modal
+   * to render; `blocker`-severity findings transition the run to `failed`
+   * with `failureClass: 'red_team_blocker'`.
+   */
+  redTeamReports: RedTeamReport[];
 }
 
 export interface PipelineRun {
@@ -401,6 +468,57 @@ export interface PipelineRun {
    * `awaiting_clarification`.
    */
   priorActiveState?: PipelineState;
+  /**
+   * Plan complexity gate (Phase 3c.1). Stamped at `planner_done` from
+   * `plan.complexity` (defaulting to `'standard'` when the planner omits
+   * the field). Drives downstream routing — auto-approve, dual-reviewer,
+   * red-team pass, retry budget scaling. Re-stamped when a re-plan lands
+   * a new `planner_done`.
+   *
+   * Required (not optional) so a missing-field bug surfaces at compile
+   * time. `initialRunState` seeds it to `'standard'` so brand-new runs
+   * have sane defaults until the planner reports.
+   */
+  runMode: 'trivial' | 'standard' | 'complex';
+  /**
+   * True when the run skipped (or should skip) the `awaiting_plan_approval`
+   * gate because the plan was self-classified `trivial`. The reducer for
+   * `planner_done` transitions straight to `'building'` in that case;
+   * this flag remains `true` for the rest of the run as an audit trail.
+   */
+  autoApprovePlan: boolean;
+  /**
+   * True when the run should fan out to two reviewers (Opus + Codex)
+   * after the build. Set by `complex` complexity OR by template's
+   * `dualReviewer` flag. Consumed by Phase 3c.4.
+   */
+  useDualReviewer: boolean;
+  /**
+   * True when the run should run a post-reviewer-approval red-team pass.
+   * Set by `complex` complexity. Consumed by Phase 3c.6.
+   */
+  runRedTeam: boolean;
+  /**
+   * Per-run retry budgets, derived from `templateRetryBudget` plus a
+   * complexity scaling factor (trivial = halved, standard = unchanged,
+   * complex = doubled). The reducer reads these instead of the legacy
+   * hardcoded `REVIEWER_REJECT_BUDGET` / `CI_FAIL_BUDGET` constants.
+   */
+  effectiveRetryBudgets: { reviewerReject: number; ciFail: number };
+  /**
+   * The template's structural retry budget — captured at run creation and
+   * never mutated after. Used as the baseline that `planner_done` rescales
+   * against the current `runMode`. Stored on the run (rather than re-read
+   * from the template at dispatch time) so the reducer stays pure and
+   * replans behave deterministically regardless of template edits.
+   */
+  templateRetryBudget: { reviewerReject: number; ciFail: number };
+  /**
+   * The template's `dualReviewer` flag — captured at run creation. The run's
+   * effective `useDualReviewer` is `runMode === 'complex' || templateDualReviewer`,
+   * re-evaluated on each `planner_done`.
+   */
+  templateDualReviewer: boolean;
 }
 
 export interface PipelineControllerTile extends TileBase {

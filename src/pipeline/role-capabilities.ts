@@ -124,6 +124,9 @@ export function defaultRoleCapabilities(role: PipelineRole): RoleCapabilities {
 
     case 'reviewer':
     case 'reviewer-codex':
+    case 'red-team':
+      // Red-team is also read-only — its only output is the
+      // `RedTeamReport` sentinel. Same capability profile as the reviewers.
       return {
         // Read-only: empty allow + deny ** means no write or edit can match.
         fileWrites: {

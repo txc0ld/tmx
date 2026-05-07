@@ -45,6 +45,7 @@ describe('Phase 1 smoke: Hello World pipeline walks to done', () => {
       plan: {
         stage: 'planner', branch: 'feat/r-smoke', specPath: 's', planPath: 'p',
         tasks: [], summary: 's', planCommitSha: 'sha-smoke',
+        confidence: 'verified',
       },
     });
     expect(stateOf()).toBe('awaiting_plan_approval');
@@ -57,6 +58,7 @@ describe('Phase 1 smoke: Hello World pipeline walks to done', () => {
       build: {
         stage: 'builder', branch: 'feat/r-smoke', headSha: 'a', round: 1,
         commits: [], filesChanged: [], testsAdded: [], ciStatus: 'green',
+        confidence: 'verified',
       },
     });
     expect(stateOf()).toBe('reviewing');
@@ -66,6 +68,7 @@ describe('Phase 1 smoke: Hello World pipeline walks to done', () => {
       verdict: {
         stage: 'reviewer', reviewer: 'opus', verdict: 'approve',
         round: 1, comments: [], summary: 'lgtm',
+        confidence: 'verified',
       },
     });
     expect(stateOf()).toBe('awaiting_merge_approval');
@@ -95,6 +98,7 @@ describe('Phase 1 smoke: Hello World pipeline walks to done', () => {
     dispatch(runId, { type: 'start' });
     dispatch(runId, { type: 'planner_done', plan: {
       stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha-esc',
+      confidence: 'verified',
     }});
     dispatch(runId, { type: 'approve_plan' });
 
@@ -102,10 +106,12 @@ describe('Phase 1 smoke: Hello World pipeline walks to done', () => {
       dispatch(runId, { type: 'builder_done', build: {
         stage: 'builder', branch: 'b', headSha: 'a', round,
         commits: [], filesChanged: [], testsAdded: [], ciStatus: 'green',
+        confidence: 'verified',
       }});
       dispatch(runId, { type: 'reviewer_done', verdict: {
         stage: 'reviewer', reviewer: 'opus', verdict: 'reject',
         round, comments: [], summary: 'no',
+        confidence: 'verified',
       }});
     }
 

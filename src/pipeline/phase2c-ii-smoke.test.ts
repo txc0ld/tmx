@@ -121,6 +121,7 @@ function driveToAwaitingMergeApproval(runId: string): void {
       tasks: [],
       summary: '',
       planCommitSha: 'sha-plan-v1',
+      confidence: 'verified',
     },
   });
   store.dispatch(runId, { type: 'approve_plan' });
@@ -135,6 +136,7 @@ function driveToAwaitingMergeApproval(runId: string): void {
       filesChanged: [],
       testsAdded: [],
       ciStatus: 'green',
+      confidence: 'verified',
     },
   });
   store.dispatch(runId, {
@@ -146,6 +148,7 @@ function driveToAwaitingMergeApproval(runId: string): void {
       round: 1,
       comments: [],
       summary: 'looks good',
+      confidence: 'verified',
     },
   });
 }
@@ -405,6 +408,7 @@ describe('Phase 2c-ii smoke: lifecycle + merger + telemetry', () => {
         tasks: [],
         summary: '',
         planCommitSha: 'sha-plan-v1',
+        confidence: 'verified',
       },
     });
     store.dispatch(runId, { type: 'approve_plan' });

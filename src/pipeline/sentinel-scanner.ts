@@ -1,4 +1,4 @@
-import type { PlanArtifact, BuildArtifact, ReviewVerdict, QuestionArtifact } from '@/types';
+import type { PlanArtifact, BuildArtifact, ReviewVerdict, QuestionArtifact, RedTeamReport } from '@/types';
 
 export { stripAnsi } from '@/utils/ansi';
 import { stripAnsi } from '@/utils/ansi';
@@ -26,6 +26,8 @@ export type SentinelEvent =
   | { kind: 'subagent_done'; payload: SubagentDonePayload; consumedThrough: number }
   | { kind: 'subagent_failed'; payload: SubagentFailedPayload; consumedThrough: number }
   | { kind: 'compaction_done'; payload: CompactionDonePayload; consumedThrough: number }
+  | { kind: 'redteam_done'; payload: RedTeamReport; consumedThrough: number }
+  | { kind: 'redteam_failed'; payload: { reason: string; suggestedFix?: string }; consumedThrough: number }
   | { kind: 'parse_error'; raw: string; error: string; consumedThrough: number };
 
 const MARKERS = [
@@ -36,6 +38,8 @@ const MARKERS = [
   { marker: '<<<TX_SUBAGENT_DONE>>>',  kind: 'subagent_done'    as const },
   { marker: '<<<TX_SUBAGENT_FAILED>>>', kind: 'subagent_failed' as const },
   { marker: '<<<TX_COMPACTION_DONE>>>', kind: 'compaction_done' as const },
+  { marker: '<<<TX_REDTEAM_DONE>>>',   kind: 'redteam_done'     as const },
+  { marker: '<<<TX_REDTEAM_FAILED>>>', kind: 'redteam_failed'   as const },
 ];
 
 type SentinelKind = (typeof MARKERS)[number]['kind'];
@@ -108,6 +112,10 @@ export function scanForSentinel(rawBuf: string): SentinelEvent | null {
       return { kind: 'subagent_failed', payload: payload as SubagentFailedPayload, consumedThrough };
     case 'compaction_done':
       return { kind: 'compaction_done', payload: payload as CompactionDonePayload, consumedThrough };
+    case 'redteam_done':
+      return { kind: 'redteam_done', payload: payload as RedTeamReport, consumedThrough };
+    case 'redteam_failed':
+      return { kind: 'redteam_failed', payload: payload as { reason: string; suggestedFix?: string }, consumedThrough };
   }
 }
 

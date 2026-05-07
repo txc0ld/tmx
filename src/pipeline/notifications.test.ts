@@ -66,6 +66,7 @@ function createAwaitingPlanApprovalRun(runId: string): void {
   store.dispatch(runId, { type: 'planner_done', plan: {
     stage: 'planner', branch: `feat/${runId}`, specPath: 's', planPath: 'p',
     tasks: [], summary: 'sum', planCommitSha: 'sha',
+    confidence: 'verified',
   }});
 }
 
