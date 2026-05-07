@@ -3,6 +3,15 @@ import type { PlanArtifact, BuildArtifact, ReviewVerdict, QuestionArtifact, RedT
 export { stripAnsi } from '@/utils/ansi';
 import { stripAnsi } from '@/utils/ansi';
 
+export type SubagentInvokedPayload = {
+  /** PlanTask.id from the brief, when delegating per a specific task. */
+  taskId?: string;
+  /** ≤120-char one-liner from the brief, for telemetry/audit. */
+  briefSummary?: string;
+  /** File globs the sub-agent declares it'll touch. */
+  workingFiles: string[];
+};
+
 export type SubagentDonePayload = {
   filesEdited: string[];
   commitsCreated: string[];
@@ -23,6 +32,7 @@ export type SentinelEvent =
   | { kind: 'failed'; payload: { reason: string; suggestedFix?: string }; consumedThrough: number }
   | { kind: 'question'; payload: QuestionArtifact; consumedThrough: number }
   | { kind: 'heartbeat'; payload: { progress: string; taskId?: string }; consumedThrough: number }
+  | { kind: 'subagent_invoked'; payload: SubagentInvokedPayload; consumedThrough: number }
   | { kind: 'subagent_done'; payload: SubagentDonePayload; consumedThrough: number }
   | { kind: 'subagent_failed'; payload: SubagentFailedPayload; consumedThrough: number }
   | { kind: 'compaction_done'; payload: CompactionDonePayload; consumedThrough: number }
@@ -35,6 +45,7 @@ const MARKERS = [
   { marker: '<<<TX_STAGE_FAILED>>>',   kind: 'failed'           as const },
   { marker: '<<<TX_STAGE_QUESTION>>>', kind: 'question'         as const },
   { marker: '<<<TX_HEARTBEAT>>>',      kind: 'heartbeat'        as const },
+  { marker: '<<<TX_SUBAGENT_INVOKED>>>', kind: 'subagent_invoked' as const },
   { marker: '<<<TX_SUBAGENT_DONE>>>',  kind: 'subagent_done'    as const },
   { marker: '<<<TX_SUBAGENT_FAILED>>>', kind: 'subagent_failed' as const },
   { marker: '<<<TX_COMPACTION_DONE>>>', kind: 'compaction_done' as const },
@@ -106,6 +117,8 @@ export function scanForSentinel(rawBuf: string): SentinelEvent | null {
       return { kind: 'question', payload: payload as QuestionArtifact, consumedThrough };
     case 'heartbeat':
       return { kind: 'heartbeat', payload: payload as { progress: string; taskId?: string }, consumedThrough };
+    case 'subagent_invoked':
+      return { kind: 'subagent_invoked', payload: payload as SubagentInvokedPayload, consumedThrough };
     case 'subagent_done':
       return { kind: 'subagent_done', payload: payload as SubagentDonePayload, consumedThrough };
     case 'subagent_failed':

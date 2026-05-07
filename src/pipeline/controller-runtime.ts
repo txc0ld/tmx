@@ -377,17 +377,32 @@ function dispatchSentinel(
     case 'heartbeat':
       dispatch(runId, { type: 'heartbeat' });
       return;
+    case 'subagent_invoked': {
+      // Polish.2 (closes the 3b.8 deferral): Builder emits this sentinel
+      // BEFORE calling agent_run_oneshot for a sub-agent, so the controller
+      // can record the invocation boundary for latency tracking and audit.
+      // No state transition — sub-agent lives within the Builder task.
+      const run = usePipelineStore.getState().runs[runId];
+      emitTelemetry({
+        at: Date.now(),
+        event: 'subagent_invoked',
+        runId,
+        projectId: run?.projectId ?? '',
+        parentRole: role,
+        taskId: ev.payload.taskId,
+        briefSummary: ev.payload.briefSummary,
+        workingFilesCount: ev.payload.workingFiles?.length ?? 0,
+      });
+      return;
+    }
     case 'subagent_done': {
       // Sub-agent invocations live *within* a Builder task — they don't
-      // transition pipeline state. Phase 3b.8: emit a `subagent_completed`
-      // telemetry event so the JSONL run log captures the sub-agent
-      // boundary. Builder activity bookkeeping above (`maybeNotifyBuilder`)
-      // already kicked the scratchpad-watcher.
-      //
-      // We don't ship `subagent_invoked` — the Builder calls
-      // `agent_run_oneshot` in-process so the controller never sees
-      // invocation. Phase 4 may add a Builder-emitted sentinel if we
-      // want latency tracking.
+      // transition pipeline state. Emit a `subagent_completed` telemetry
+      // event so the JSONL run log captures the sub-agent boundary.
+      // Builder activity bookkeeping above (`maybeNotifyBuilder`) already
+      // kicked the scratchpad-watcher. The matching `subagent_invoked`
+      // event lands separately (above) when the Builder emits the
+      // pre-invocation sentinel per the tx-pipeline-subagent skill.
       const run = usePipelineStore.getState().runs[runId];
       emitTelemetry({
         at: Date.now(),

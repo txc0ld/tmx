@@ -23,7 +23,15 @@ If any of the three is false, do the work yourself.
 
 ## How to delegate
 
-Invoke `agent_run_oneshot` with a system prompt of this skill content + a bounded brief:
+**Before** you invoke `agent_run_oneshot`, emit a single line at column 0 announcing the invocation:
+
+```
+<<<TX_SUBAGENT_INVOKED>>>{"taskId":"T<n>","briefSummary":"<≤120 chars from PlanTask.summary>","workingFiles":["src/auth/**","tests/auth/**"]}
+```
+
+This pre-invocation sentinel lets the Controller record the invocation boundary in telemetry — invoked-at timestamp pairs with the eventual sub-agent completed-at to give us latency visibility, and the workingFiles allowlist is audit-able if the sub-agent later edits files outside its declared scope. The fields are all optional except `workingFiles`; emit what you can resolve from the brief.
+
+Then invoke `agent_run_oneshot` with a system prompt of this skill content + a bounded brief:
 
 ```
 You are a sub-agent delegated by the TerminalX pipeline Builder. You execute exactly one task and return.
