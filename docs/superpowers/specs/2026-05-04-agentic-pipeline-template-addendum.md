@@ -33,7 +33,7 @@ The remaining items (A1, A3, A4, A6, A7, A8, A9, A11, A13, A15, A16, A17, A18, A
 
 ---
 
-## A1. Context engineering as a first-class concern
+## A1. Context engineering as a first-class concern — *shipped 3b.1 (scratchpad skill) + 3b.2 (enforcement) + 3b.3 (sub-agent skill) + 3b.4 (oneshot extensions) + 3b.6 (compaction)*
 
 **Missing.** The base spec assumes each agent process has unbounded context. Builder runs of 40+ tasks across 60+ files will saturate Claude's context window before completion; the spec has no compaction, sub-agent, or scratchpad strategy.
 
@@ -350,7 +350,7 @@ Chunking is recorded in the verdict and telemetry: `{event: 'review_chunked', ch
 
 ---
 
-## A11. Project-level constitution: `INVARIANTS.md`
+## A11. Project-level constitution: `INVARIANTS.md` — *shipped 3b.7 (INVARIANTS.md grounding)*
 
 **Missing.** Reviewer's "constitutional carve-outs" are TerminalX-defined globals. Each project has its own immutable invariants ("All money values are stored as integer cents," "No `Date.now()` outside `lib/clock/`," "No SQL string concatenation"). Currently, encoding these requires editing the reviewer skill, which is global.
 
