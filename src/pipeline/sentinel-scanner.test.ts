@@ -99,6 +99,29 @@ describe('scanForSentinel', () => {
     expect(event?.kind).toBe('done');
   });
 
+  // Polish.2: invocation-boundary sentinel emitted before agent_run_oneshot.
+  it('finds TX_SUBAGENT_INVOKED with taskId/briefSummary/workingFiles payload', () => {
+    const buf = 'about to delegate...\n<<<TX_SUBAGENT_INVOKED>>>{"taskId":"T7","briefSummary":"refactor auth helper","workingFiles":["src/auth/**","tests/auth/**"]}\n';
+    const event = scanForSentinel(buf);
+    expect(event?.kind).toBe('subagent_invoked');
+    if (event?.kind === 'subagent_invoked') {
+      expect(event.payload.taskId).toBe('T7');
+      expect(event.payload.briefSummary).toBe('refactor auth helper');
+      expect(event.payload.workingFiles).toEqual(['src/auth/**', 'tests/auth/**']);
+    }
+  });
+
+  it('TX_SUBAGENT_INVOKED with only workingFiles is valid', () => {
+    const buf = '<<<TX_SUBAGENT_INVOKED>>>{"workingFiles":["src/foo/**"]}\n';
+    const event = scanForSentinel(buf);
+    expect(event?.kind).toBe('subagent_invoked');
+    if (event?.kind === 'subagent_invoked') {
+      expect(event.payload.taskId).toBeUndefined();
+      expect(event.payload.briefSummary).toBeUndefined();
+      expect(event.payload.workingFiles).toEqual(['src/foo/**']);
+    }
+  });
+
   // Phase 3b.5: sub-agent sentinels emitted by tx-pipeline-subagent.
   it('finds TX_SUBAGENT_DONE with files/commits/summary payload', () => {
     const buf = 'sub-agent log...\n<<<TX_SUBAGENT_DONE>>>{"filesEdited":["src/foo.ts","src/bar.ts"],"commitsCreated":["abc1234"],"summary":"refactored helper"}\n';

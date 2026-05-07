@@ -74,14 +74,35 @@ export interface MergerTelemetryEvent {
 }
 
 /**
+ * Sub-agent invocation boundary. (Polish.2 — closes Phase 3b.8 deferral.)
+ *
+ * Fired when the controller parses `<<<TX_SUBAGENT_INVOKED>>>` — the
+ * parent role (Builder) emits this BEFORE calling `agent_run_oneshot`
+ * for a sub-agent, so the controller observes the invocation boundary.
+ * Pairs with `subagent_completed` for latency tracking via
+ * `(invoked.at, completed.at)`.
+ */
+export interface SubagentInvokedTelemetryEvent {
+  at: number;
+  event: 'subagent_invoked';
+  runId: string;
+  projectId: string;
+  /** Role that emitted the sentinel — `'builder'` for now; future-proofed. */
+  parentRole: PipelineRole;
+  /** PlanTask.id from the brief, when delegating per a specific task. */
+  taskId?: string;
+  /** ≤120-char one-liner from the brief, for telemetry/audit. */
+  briefSummary?: string;
+  /** Number of file globs in the sub-agent's working_files allowlist. */
+  workingFilesCount: number;
+}
+
+/**
  * Sub-agent completion outcome. (Phase 3b.8)
  *
  * Fired when the controller parses `<<<TX_SUBAGENT_DONE>>>` or
- * `<<<TX_SUBAGENT_FAILED>>>` from the parent role's PTY. Sub-agent
- * INVOCATION isn't observable to the controller — the parent role calls
- * `agent_run_oneshot` in-process — so we only ship `subagent_completed`.
- * If invocation-time telemetry becomes useful (latency tracking),
- * Phase 4 can add a Builder-emitted `<<<TX_SUBAGENT_INVOKED>>>` sentinel.
+ * `<<<TX_SUBAGENT_FAILED>>>` from the parent role's PTY. Pairs with
+ * `subagent_invoked` (above) for latency tracking.
  */
 export interface SubagentCompletedTelemetryEvent {
   at: number;
@@ -214,11 +235,28 @@ export interface RedTeamFindingTelemetryEvent {
   line?: number;
 }
 
+/**
+ * Polish.1: red-team dispatcher fired the one-shot for this run. Counter-
+ * part to `red_team_finding` (which fires post-completion, once per
+ * finding). Together they let dashboards distinguish "we tried to run
+ * red-team" from "red-team produced findings" — useful when a run stalls
+ * mid-red-team and we need to know whether the spawn itself succeeded.
+ */
+export interface RedTeamInvokedTelemetryEvent {
+  at: number;
+  event: 'red_team_invoked';
+  runId: string;
+  projectId: string;
+  /** Hardcoded `opus` today; future-proofed for per-run provider overrides. */
+  provider: 'opus' | 'codex' | 'gemini';
+}
+
 export type TelemetryEvent =
   | StateChangeTelemetryEvent
   | LifecycleTelemetryEvent
   | MergerTelemetryEvent
   | ClarificationTelemetryEvent
+  | SubagentInvokedTelemetryEvent
   | SubagentCompletedTelemetryEvent
   | CompactionTriggeredTelemetryEvent
   | CompactionCompletedTelemetryEvent
@@ -226,7 +264,8 @@ export type TelemetryEvent =
   | ConfidenceUncertainEscalatedTelemetryEvent
   | DualReviewerDisagreementTelemetryEvent
   | TiebreakerInvokedTelemetryEvent
-  | RedTeamFindingTelemetryEvent;
+  | RedTeamFindingTelemetryEvent
+  | RedTeamInvokedTelemetryEvent;
 
 type TelemetryEmitter = (event: TelemetryEvent) => void;
 const telemetryListeners: Set<TelemetryEmitter> = new Set();

@@ -292,15 +292,12 @@ pub async fn run_oneshot_inner(inv: OneshotInvocation) -> Result<OneshotResult, 
         }
     }
 
-    // working_files is informational only this phase. Log it (debug) so a run
-    // can be reconstructed from telemetry if needed. The skill enforces the
-    // constraint behaviorally.
-    if !inv.working_files.is_empty() {
-        eprintln!(
-            "agent_run_oneshot: working_files declared (non-enforced): {:?}",
-            inv.working_files
-        );
-    }
+    // working_files is informational only this phase — the skill enforces
+    // scope behaviorally. Polish.2 added the `subagent_invoked` telemetry
+    // event which captures `workingFilesCount` from the Builder's
+    // pre-invocation sentinel, so the data is reconstructable from the run
+    // log without a stderr leak. (Was: eprintln on every invocation.)
+    let _ = &inv.working_files;
 
     let wait = child.wait_with_output();
     let result = timeout(TokioDuration::from_secs(inv.timeout_secs), wait).await;

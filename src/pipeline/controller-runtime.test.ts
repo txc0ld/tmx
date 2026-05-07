@@ -426,6 +426,81 @@ describe('controller runtime', () => {
     }
   });
 
+  // Polish.2: Builder emits TX_SUBAGENT_INVOKED before the agent_run_oneshot
+  // call. Telemetry records the invocation boundary; pairs with subagent_completed
+  // to support latency tracking via (invoked.at, completed.at).
+  it('Polish.2: TX_SUBAGENT_INVOKED emits subagent_invoked with payload fields', () => {
+    const captured: TelemetryEvent[] = [];
+    const unsub = setPipelineTelemetryEmitter(ev => { captured.push(ev); });
+    try {
+      const runId = usePipelineStore.getState().createRun({
+        runId: 'r-tel-sa-inv', templateId: 't', projectId: 'proj-Z',
+        worktreePath: '/tmp/wt-sa', branch: 'feat/r1', fingerprint: FP,
+      });
+      usePipelineStore.getState().dispatch(runId, { type: 'start' });
+      usePipelineStore.getState().dispatch(runId, { type: 'planner_done', plan: {
+        stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha',
+        confidence: 'verified',
+      }});
+      usePipelineStore.getState().dispatch(runId, { type: 'approve_plan' });
+      const beforeCount = captured.length;
+
+      const sentinel = '<<<TX_SUBAGENT_INVOKED>>>{"taskId":"T7","briefSummary":"refactor auth helper","workingFiles":["src/auth/**","tests/auth/**"]}\n';
+      ingestPtyChunk({ runId, role: 'builder', chunk: sentinel });
+
+      const newEvents = captured.slice(beforeCount);
+      const event = newEvents.find(e => e.event === 'subagent_invoked');
+      expect(event).toBeDefined();
+      expect(event).toMatchObject({
+        event: 'subagent_invoked',
+        runId,
+        projectId: 'proj-Z',
+        parentRole: 'builder',
+        taskId: 'T7',
+        briefSummary: 'refactor auth helper',
+        workingFilesCount: 2,
+      });
+      // No state transition — sub-agent invocation lives within the Builder task.
+      expect(usePipelineStore.getState().runs[runId].state).toBe('building');
+    } finally {
+      unsub();
+    }
+  });
+
+  it('Polish.2: TX_SUBAGENT_INVOKED with workingFiles only sets workingFilesCount', () => {
+    const captured: TelemetryEvent[] = [];
+    const unsub = setPipelineTelemetryEmitter(ev => { captured.push(ev); });
+    try {
+      const runId = usePipelineStore.getState().createRun({
+        runId: 'r-tel-sa-inv2', templateId: 't', projectId: 'proj-Z2',
+        worktreePath: '/tmp/wt-sa', branch: 'feat/r1', fingerprint: FP,
+      });
+      usePipelineStore.getState().dispatch(runId, { type: 'start' });
+      usePipelineStore.getState().dispatch(runId, { type: 'planner_done', plan: {
+        stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha',
+        confidence: 'verified',
+      }});
+      usePipelineStore.getState().dispatch(runId, { type: 'approve_plan' });
+      const beforeCount = captured.length;
+
+      const sentinel = '<<<TX_SUBAGENT_INVOKED>>>{"workingFiles":["src/foo/**"]}\n';
+      ingestPtyChunk({ runId, role: 'builder', chunk: sentinel });
+
+      const event = captured.slice(beforeCount).find(e => e.event === 'subagent_invoked');
+      expect(event).toBeDefined();
+      expect(event).toMatchObject({
+        event: 'subagent_invoked',
+        workingFilesCount: 1,
+      });
+      // Optional fields not in payload should not be on the event.
+      const ev = event as Extract<TelemetryEvent, { event: 'subagent_invoked' }>;
+      expect(ev.taskId).toBeUndefined();
+      expect(ev.briefSummary).toBeUndefined();
+    } finally {
+      unsub();
+    }
+  });
+
   it('Phase 3b.6: clearRunBuffers also clears compaction bookkeeping', () => {
     const spy = vi.spyOn(compactionWatcher, 'clearCompactionState');
     try {
