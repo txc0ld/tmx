@@ -10,6 +10,8 @@ import { isTerminalState } from '@/pipeline/state-machine';
 import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
 import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capabilities-lifecycle';
 import { startStuckDetector } from '@/pipeline/stuck-detector';
+import { startNotifier } from '@/pipeline/notifications';
+import { sendNotification } from '@tauri-apps/plugin-notification';
 import { getLastStdoutAt } from '@/pipeline/controller-runtime';
 import type { AgentTile, PipelineRole, PipelineRun } from '@/types';
 import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas';
@@ -181,6 +183,20 @@ export default function App() {
       probeAgent: async (_runId, ptyId) => { await ptyWrite(ptyId, 'Are you stuck?\n'); },
       abortRun: (runId, reason) => usePipelineStore.getState().dispatch(runId, { type: 'abort', reason }),
       now: () => Date.now(),
+    });
+    return stop;
+  }, []);
+
+  // Phase 2c-iii.3: OS notification + cadence reminders on awaiting_* gates.
+  // Title contains run id (and project name when resolvable); body contains
+  // the gate state + a 1-line summary. Cumulative re-cadence (15min/1hr/4hr/
+  // daily) until the run leaves the awaiting_ state.
+  useEffect(() => {
+    const stop = startNotifier({
+      send: ({ title, body }) => sendNotification({ title, body }),
+      now: () => Date.now(),
+      getProjectName: (projectId) =>
+        useProjectStore.getState().projects.find(p => p.id === projectId)?.name,
     });
     return stop;
   }, []);
