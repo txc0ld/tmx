@@ -19,7 +19,109 @@ pub struct PreflightResult {
     pub signed_skills_ok: bool,
     pub capability_binaries_ok: bool,
     pub skill_cache_writable: bool,
+    // 2c-iii.6 addition: project-relative paths matching the sensitive-file
+    // pattern set (.env, *.pem, id_rsa, etc.). Capped at 50 entries.
+    pub sensitive_paths_found: Vec<String>,
     pub errors: Vec<String>,
+}
+
+/// Filename patterns considered "sensitive" for pipeline pre-flight.
+/// Matched against the file's name component only (not full path).
+const SENSITIVE_EXACT_NAMES: &[&str] = &[".env", "aws-credentials"];
+const SENSITIVE_PREFIX_PATTERNS: &[&str] =
+    &[".env.", "id_rsa", "id_ed25519", "secrets.", "gcp-key"];
+const SENSITIVE_SUFFIX_PATTERNS: &[&str] =
+    &[".pem", ".key", ".kdbx", ".p12", ".pfx", ".ovpn"];
+
+/// Directory names that are never recursed into during the sensitive-path scan.
+const SCAN_SKIP_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".tx-worktrees",
+    ".terminalx",
+    ".next",
+    ".cache",
+];
+
+const SENSITIVE_SCAN_MAX_DEPTH: usize = 4;
+const SENSITIVE_SCAN_MAX_RESULTS: usize = 50;
+
+/// Return true if the given (lowercased) filename matches any sensitive
+/// pattern. Filename-only — callers should pass `entry.file_name()`.
+fn matches_sensitive(name: &str) -> bool {
+    if SENSITIVE_EXACT_NAMES.iter().any(|n| *n == name) {
+        return true;
+    }
+    if SENSITIVE_PREFIX_PATTERNS.iter().any(|p| name.starts_with(p)) {
+        return true;
+    }
+    if SENSITIVE_SUFFIX_PATTERNS.iter().any(|s| name.ends_with(s)) {
+        return true;
+    }
+    false
+}
+
+/// Walk `project_dir` up to depth `SENSITIVE_SCAN_MAX_DEPTH`, skipping
+/// `SCAN_SKIP_DIRS`, and return relative paths whose filename matches the
+/// sensitive pattern set. Output is capped at `SENSITIVE_SCAN_MAX_RESULTS`.
+fn scan_sensitive_paths(project_dir: &Path) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut stack: Vec<(PathBuf, usize)> = vec![(project_dir.to_path_buf(), 0)];
+
+    while let Some((dir, depth)) = stack.pop() {
+        if results.len() >= SENSITIVE_SCAN_MAX_RESULTS {
+            break;
+        }
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(rd) => rd,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            if results.len() >= SENSITIVE_SCAN_MAX_RESULTS {
+                break;
+            }
+            let file_type = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+            // Skip symlinks entirely — they could escape project_dir.
+            if file_type.is_symlink() {
+                continue;
+            }
+            let name_os = entry.file_name();
+            let name = match name_os.to_str() {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            let path = entry.path();
+            if file_type.is_dir() {
+                if SCAN_SKIP_DIRS.iter().any(|s| *s == name.as_str()) {
+                    continue;
+                }
+                if depth + 1 <= SENSITIVE_SCAN_MAX_DEPTH {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            if matches_sensitive(&name) {
+                let rel = path
+                    .strip_prefix(project_dir)
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or(path.clone());
+                if let Some(s) = rel.to_str() {
+                    results.push(s.to_string());
+                }
+            }
+        }
+    }
+
+    results
 }
 
 fn cmd_present(bin: &str) -> bool {
@@ -208,6 +310,8 @@ fn run_preflight_inner(project_dir: &Path, home_dir: Option<&Path>) -> Preflight
         }
     };
 
+    let sensitive_paths_found = scan_sensitive_paths(project_dir);
+
     PreflightResult {
         is_git_repo,
         working_tree_clean,
@@ -220,6 +324,7 @@ fn run_preflight_inner(project_dir: &Path, home_dir: Option<&Path>) -> Preflight
         signed_skills_ok,
         capability_binaries_ok,
         skill_cache_writable,
+        sensitive_paths_found,
         errors,
     }
 }
@@ -417,5 +522,118 @@ mod tests {
         // capability_binaries_ok depends on PATH; just check it's a bool
         // (compile-time guarantee — the assertion exists for documentation).
         let _ = result.capability_binaries_ok;
+    }
+
+    // ─── 2c-iii.6 sensitive-path scan ─────────────────────────────
+
+    #[test]
+    fn sensitive_scan_empty_project_returns_empty() {
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        // Only a benign file present.
+        fs::write(dir.path().join("README.md"), "hi").unwrap();
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        assert!(
+            result.sensitive_paths_found.is_empty(),
+            "expected no matches, got {:?}",
+            result.sensitive_paths_found
+        );
+    }
+
+    #[test]
+    fn sensitive_scan_flags_dotenv_at_root() {
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        fs::write(dir.path().join(".env"), "SECRET=1").unwrap();
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        assert_eq!(result.sensitive_paths_found, vec![".env".to_string()]);
+    }
+
+    #[test]
+    fn sensitive_scan_flags_pem_idrsa_secrets() {
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        fs::write(dir.path().join("server.pem"), "x").unwrap();
+        fs::write(dir.path().join("id_rsa"), "x").unwrap();
+        fs::write(dir.path().join("secrets.toml"), "x").unwrap();
+        // Decoy that should NOT match.
+        fs::write(dir.path().join("README.md"), "x").unwrap();
+
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        let mut found = result.sensitive_paths_found.clone();
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                "id_rsa".to_string(),
+                "secrets.toml".to_string(),
+                "server.pem".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn sensitive_scan_skips_node_modules() {
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        let nm = dir.path().join("node_modules/some-package");
+        fs::create_dir_all(&nm).unwrap();
+        fs::write(nm.join("cert.pem"), "x").unwrap();
+        // Same pattern at root SHOULD be reported.
+        fs::write(dir.path().join("real.pem"), "x").unwrap();
+
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        assert_eq!(result.sensitive_paths_found, vec!["real.pem".to_string()]);
+    }
+
+    #[test]
+    fn sensitive_scan_caps_results_at_50() {
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        for i in 0..60 {
+            fs::write(dir.path().join(format!("k{i}.pem")), "x").unwrap();
+        }
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        assert_eq!(
+            result.sensitive_paths_found.len(),
+            SENSITIVE_SCAN_MAX_RESULTS,
+            "should cap at {}, got {}",
+            SENSITIVE_SCAN_MAX_RESULTS,
+            result.sensitive_paths_found.len()
+        );
+    }
+
+    #[test]
+    fn sensitive_scan_walks_subdirectories() {
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        let sub = dir.path().join("config");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("secrets.yaml"), "x").unwrap();
+
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        // Path separator differs on Windows; normalize for the assertion.
+        let normalized: Vec<String> = result
+            .sensitive_paths_found
+            .iter()
+            .map(|p| p.replace('\\', "/"))
+            .collect();
+        assert_eq!(normalized, vec!["config/secrets.yaml".to_string()]);
+    }
+
+    #[test]
+    fn sensitive_scan_does_not_match_unrelated_dotfiles() {
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        fs::write(dir.path().join(".gitignore"), "x").unwrap();
+        fs::write(dir.path().join(".prettierrc"), "x").unwrap();
+        // A real match alongside the decoys to prove the scan still works.
+        fs::write(dir.path().join(".env.local"), "x").unwrap();
+
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        assert_eq!(
+            result.sensitive_paths_found,
+            vec![".env.local".to_string()]
+        );
     }
 }

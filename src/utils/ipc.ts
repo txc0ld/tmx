@@ -362,6 +362,9 @@ export interface PreflightResult {
   signed_skills_ok: boolean;
   capability_binaries_ok: boolean;
   skill_cache_writable: boolean;
+  // 2c-iii.6: project-relative paths matching the sensitive-file pattern
+  // set (.env, *.pem, id_rsa, etc.). Capped at 50 entries server-side.
+  sensitive_paths_found: string[];
   errors: string[];
 }
 
