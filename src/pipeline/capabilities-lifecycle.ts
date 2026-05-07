@@ -47,7 +47,7 @@ function truncErr(err: unknown): string {
  * during that state. Returns null for non-active states (terminal,
  * awaiting_*, idle) — those mean "no role currently scoped".
  */
-function activeRoleForState(state: PipelineState): PipelineRole | null {
+export function activeRoleForState(state: PipelineState): PipelineRole | null {
   switch (state) {
     case 'planning':
       return 'planner';

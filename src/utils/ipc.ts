@@ -362,6 +362,9 @@ export interface PreflightResult {
   signed_skills_ok: boolean;
   capability_binaries_ok: boolean;
   skill_cache_writable: boolean;
+  // 2c-iii.6: project-relative paths matching the sensitive-file pattern
+  // set (.env, *.pem, id_rsa, etc.). Capped at 50 entries server-side.
+  sensitive_paths_found: string[];
   errors: string[];
 }
 
@@ -408,6 +411,15 @@ export async function pipelineInstallSkills(): Promise<InstallSkillsResult> {
   return invoke<InstallSkillsResult>('pipeline_install_skills');
 }
 
+/**
+ * Read a bundled role-prompt (`planner` / `builder` / `reviewer` /
+ * `reviewer-codex`). Returns null if the file is missing or empty —
+ * the run factory treats that as "not yet authored" and skips hashing.
+ */
+export async function pipelineReadRolePrompt(role: string): Promise<string | null> {
+  return invoke<string | null>('pipeline_read_role_prompt', { role });
+}
+
 export async function pipelineTelemetryLog(opts: {
   projectDir: string;
   runId: string;
@@ -416,12 +428,70 @@ export async function pipelineTelemetryLog(opts: {
   await invoke<void>('pipeline_telemetry_log', opts);
 }
 
+/**
+ * Mask detected secrets in arbitrary text. Returns the same string with
+ * known-prefix tokens (`sk-…`, `ghp_…`, `xoxb-…`, `AKIA…`, `AIza…`,
+ * `ya29.…`, `glpat-…`) replaced by `<MASKED:hash6>`, PEM blocks replaced
+ * by `<MASKED:PEM>`, and high-entropy values in `KEY=…` / `"key": …`
+ * shapes replaced by `<MASKED:hash6>`. Pure-hex (git SHAs, lock-file
+ * checksums) and `sha\d+-…` lock-file integrity hashes are deliberately
+ * NOT masked.
+ *
+ * The pipeline telemetry path applies masking server-side automatically;
+ * call this for failure-bundle / webhook payloads where the frontend
+ * controls the wire format.
+ */
+export async function secretsMask(input: string): Promise<string> {
+  return invoke<string>('secrets_mask', { input });
+}
+
 export async function pipelineGuardrailsInstall(worktreeDir: string): Promise<void> {
   await invoke<void>('pipeline_guardrails_install', { worktreeDir });
 }
 
 export async function pipelineGuardrailsUninstall(worktreeDir: string): Promise<void> {
   await invoke<void>('pipeline_guardrails_uninstall', { worktreeDir });
+}
+
+// ─── Pipeline failure-bundle generator (Phase 2c-iii.7) ─────────
+
+export interface FailureBundleResult {
+  bundle_path: string;
+  size_bytes: number;
+  entries: string[];
+}
+
+/**
+ * Generate `<projectDir>/.terminalx/failure-bundles/<runId>.tar.gz` with
+ * telemetry, artifacts, preflight, git status/diff, and tool versions.
+ * Every text artifact is masked through `secretsMask` server-side before
+ * tar-archiving — frontend callers don't have to pre-mask, but doing so
+ * is harmless because `mask_secrets` is idempotent.
+ */
+export async function pipelineFailureBundleGenerate(opts: {
+  runId: string;
+  projectDir: string;
+  branch: string;
+  baseBranch: string;
+  artifactsJson: string;
+  preflightJson: string;
+  terminalxVersion: string;
+  claudeVersion?: string;
+  codexVersion?: string;
+}): Promise<FailureBundleResult> {
+  return invoke<FailureBundleResult>('pipeline_failure_bundle_generate', {
+    input: {
+      project_dir: opts.projectDir,
+      run_id: opts.runId,
+      branch: opts.branch,
+      base_branch: opts.baseBranch,
+      artifacts_json: opts.artifactsJson,
+      preflight_json: opts.preflightJson,
+      terminalx_version: opts.terminalxVersion,
+      claude_version: opts.claudeVersion ?? null,
+      codex_version: opts.codexVersion ?? null,
+    },
+  });
 }
 
 // ─── Pipeline capability scoping (Phase 2c-ii.4) ──────────────

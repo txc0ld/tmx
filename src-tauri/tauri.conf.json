@@ -48,7 +48,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/skills/**/*"
+      "resources/skills/**/*",
+      "resources/role-prompts/**/*"
     ],
     "windows": {
       "wix": {

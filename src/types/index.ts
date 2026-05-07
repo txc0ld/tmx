@@ -367,6 +367,14 @@ export interface PipelineRun {
   projectId: string;
   worktreePath: string;
   branch: string;
+  /**
+   * The fork point the run merges back into (typically `main` / `master` /
+   * `develop`). Set at run creation from `git symbolic-ref refs/remotes/origin/HEAD`
+   * (preflight already resolves this) or from a template override.
+   * The merger modal renders the right `gh pr create --base` flag and the
+   * failure bundle takes its `git diff <baseBranch>..HEAD` from this.
+   */
+  baseBranch: string;
   state: PipelineState;
   artifacts: PipelineRunArtifacts;
   retryCounters: { reviewerReject: number; ciFail: number };
@@ -386,6 +394,13 @@ export interface PipelineRun {
    * rather than as silent empty arrays at runtime.
    */
   planLineage: string[];
+  /**
+   * The active stage we left when a `question_raised` event fires. Captured
+   * on `question_raised`, consumed (and cleared) on `clarification_received`
+   * so the run resumes to the same stage. Undefined except while in
+   * `awaiting_clarification`.
+   */
+  priorActiveState?: PipelineState;
 }
 
 export interface PipelineControllerTile extends TileBase {
@@ -406,6 +421,15 @@ export interface Project {
   cwd: string;
   gitUrl?: string;
   branch?: string;
+  /**
+   * Optional outbound webhook URL. When set, pipeline runs in this project
+   * POST a notification on every transition into an `awaiting_*` gate.
+   * Production wiring (App.tsx) only honors `https://` URLs — `http://`
+   * and other schemes are rejected at the deps boundary. UI for editing
+   * this lands in Phase 3; the field exists now so the delivery
+   * infrastructure (see `src/pipeline/webhook-notifier.ts`) is wired.
+   */
+  webhookUrl?: string;
 }
 
 // ─── Wiring ───────────────────────────────────────────────────────────

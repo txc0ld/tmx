@@ -90,27 +90,9 @@ fn validate_projects(projects: &[Project]) -> Result<(), String> {
 }
 
 async fn atomic_write(path: &std::path::Path, contents: &str) -> Result<(), String> {
-    let tmp = path.with_extension("tmp");
-    tokio::fs::write(&tmp, contents).await.map_err(|e| format!("Write error: {}", e))?;
-    match tokio::fs::rename(&tmp, path).await {
-        Ok(()) => Ok(()),
-        Err(first_err) => {
-            if path.exists() {
-                if let Err(remove_err) = tokio::fs::remove_file(path).await {
-                    let _ = tokio::fs::remove_file(&tmp).await;
-                    return Err(format!("Rename error: {}; cleanup failed: {}", first_err, remove_err));
-                }
-                if let Err(rename_err) = tokio::fs::rename(&tmp, path).await {
-                    let _ = tokio::fs::remove_file(&tmp).await;
-                    return Err(format!("Rename error: {}", rename_err));
-                }
-                Ok(())
-            } else {
-                let _ = tokio::fs::remove_file(&tmp).await;
-                Err(format!("Rename error: {}", first_err))
-            }
-        }
-    }
+    crate::util::fs_atomic::atomic_write_async(path, contents.as_bytes())
+        .await
+        .map_err(|e| format!("Write error: {}", e))
 }
 
 #[tauri::command]

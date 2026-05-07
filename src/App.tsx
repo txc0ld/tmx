@@ -4,10 +4,18 @@ import { useProjectStore } from '@/stores/projectStore';
 import { useTimelineStore } from '@/stores/timelineStore';
 import { colors } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
-import { loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog } from '@/utils/ipc';
-import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter } from '@/stores/pipelineStore';
+import { httpFetch, loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite, secretsMask } from '@/utils/ipc';
+import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter, usePipelineStore } from '@/stores/pipelineStore';
+import { isTerminalState } from '@/pipeline/state-machine';
 import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
-import { handleCapabilitiesLifecycle } from '@/pipeline/capabilities-lifecycle';
+import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capabilities-lifecycle';
+import { handleFailureBundleLifecycle } from '@/pipeline/failure-bundle-lifecycle';
+import { startStuckDetector } from '@/pipeline/stuck-detector';
+import { startNotifier } from '@/pipeline/notifications';
+import { startWebhookNotifier } from '@/pipeline/webhook-notifier';
+import { sendNotification } from '@tauri-apps/plugin-notification';
+import { getLastStdoutAt } from '@/pipeline/controller-runtime';
+import type { AgentTile, PipelineRole, PipelineRun } from '@/types';
 import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas';
 import { ProjectSidebar } from '@/components/sidebar/ProjectSidebar';
 import { TopBar } from '@/components/topbar/TopBar';
@@ -62,6 +70,28 @@ function buildTileDefaults(type: TileType): Record<string, unknown> {
   }
 }
 
+/**
+ * Resolve the PTY id of the role currently active for a run (planner during
+ * `planning`, builder during `building`, reviewer during `reviewing`).
+ * Returns undefined for runs in awaiting/terminal states or when the role's
+ * tile has no PTY (one-shot reviewers, unspawned tiles). Mirrors the
+ * canvas-store lookup pattern in ClarificationModal::findAgentTile.
+ */
+function findActiveRolePtyId(run: PipelineRun): string | undefined {
+  const role: PipelineRole | null = activeRoleForState(run.state);
+  if (!role) return undefined;
+  const tileId = run.tiles[role];
+  if (!tileId) return undefined;
+  const projectTiles = useCanvasStore.getState().tiles;
+  for (const list of Object.values(projectTiles)) {
+    const arr = list as Tile[] | undefined;
+    if (!arr) continue;
+    const found = arr.find(t => t.id === tileId);
+    if (found && found.type === 'agent') return (found as AgentTile).ptyId;
+  }
+  return undefined;
+}
+
 function spawnTileAtCenter(type: TileType, overrides: Record<string, unknown> = {}): void {
   const state = useCanvasStore.getState();
   const pid = state.activeProject;
@@ -107,34 +137,90 @@ export default function App() {
   // Wire pipelineStore telemetry to the Rust JSONL writer at app boot.
   // Tests leave this unset → telemetry is a no-op in jsdom.
   useEffect(() => {
-    setPipelineTelemetryEmitter(ev => {
+    return setPipelineTelemetryEmitter(ev => {
       pipelineTelemetryLog({
         projectDir: ev.projectId,
         runId: ev.runId,
         line: JSON.stringify(ev),
       }).catch(err => console.warn('[pipeline] telemetry log failed:', err));
     });
-    return () => setPipelineTelemetryEmitter(null);
   }, []);
 
-  // Phase 2c-ii.3 + 2c-ii.4: pipeline lifecycle emitter dispatches to BOTH
-  // the guardrails (PreToolUse hook) and the capabilities (permissions
-  // allow/deny per role) handlers. They operate on the same settings.json
-  // but on different keys so order doesn't matter; we run guardrails first
-  // for chronology with the rollout (it shipped one task earlier).
+  // Pipeline lifecycle handlers — registered as independent listeners
+  // (the store fans out to all of them with try/catch isolation per
+  // listener). Each handler operates on a disjoint slice of state:
+  // - guardrails (Phase 2c-ii.3): worktree's `.claude/settings.json`
+  //   `hooks.PreToolUse` entries
+  // - capabilities (Phase 2c-ii.4): same file's `permissions.*` keys
+  // - failure-bundle (Phase 2c-iii.7): writes a tar.gz on terminal failure
   useEffect(() => {
-    setPipelineLifecycleEmitter((ev) => {
-      // Each handler isolated — a synchronous throw in one must NOT swallow
-      // the other. Both drive disjoint settings.json keys, so failure of one
-      // doesn't invalidate the other.
-      try { handleGuardrailsLifecycle(ev); } catch (e) {
-        console.warn('[pipeline] guardrails lifecycle threw:', e);
-      }
-      try { handleCapabilitiesLifecycle(ev); } catch (e) {
-        console.warn('[pipeline] capabilities lifecycle threw:', e);
-      }
+    const offGuardrails = setPipelineLifecycleEmitter(handleGuardrailsLifecycle);
+    const offCapabilities = setPipelineLifecycleEmitter(handleCapabilitiesLifecycle);
+    const offFailureBundle = setPipelineLifecycleEmitter(handleFailureBundleLifecycle);
+    return () => {
+      offGuardrails();
+      offCapabilities();
+      offFailureBundle();
+    };
+  }, []);
+
+  // Stuck-detector: ticks at 250ms, probes silent runs at 5min, aborts at 8min.
+  // DI mirrors the rest of the pipeline — `findActiveRolePtyId` resolves the
+  // PTY for whichever role is currently active (planner/builder/reviewer)
+  // using the same canvas-store lookup pattern as ClarificationModal.
+  useEffect(() => {
+    const stop = startStuckDetector({
+      getActiveRuns: () => Object.values(usePipelineStore.getState().runs)
+        .filter(r => !isTerminalState(r.state))
+        .map(r => ({
+          id: r.id,
+          lastHeartbeatAt: r.lastHeartbeatAt,
+          startedAt: r.startedAt,
+          ptyId: findActiveRolePtyId(r),
+        })),
+      getLastStdoutAt,
+      probeAgent: async (_runId, ptyId) => { await ptyWrite(ptyId, 'Are you stuck?\n'); },
+      abortRun: (runId, reason) => usePipelineStore.getState().dispatch(runId, { type: 'abort', reason }),
+      now: () => Date.now(),
     });
-    return () => setPipelineLifecycleEmitter(null);
+    return stop;
+  }, []);
+
+  // Phase 2c-iii.3: OS notification + cadence reminders on awaiting_* gates.
+  // Title contains run id (and project name when resolvable); body contains
+  // the gate state + a 1-line summary. Cumulative re-cadence (15min/1hr/4hr/
+  // daily) until the run leaves the awaiting_ state.
+  useEffect(() => {
+    const stop = startNotifier({
+      send: ({ title, body }) => sendNotification({ title, body }),
+      now: () => Date.now(),
+      getProjectName: (projectId) =>
+        useProjectStore.getState().projects.find(p => p.id === projectId)?.name,
+    });
+    return stop;
+  }, []);
+
+  // Phase 2c-iii.4: optional outbound webhook on awaiting_* gate entries.
+  // Per-project `webhookUrl` (UI for editing lands in Phase 3); only
+  // `https://` URLs are honored. Body is JSON-stringified then passed
+  // through `secretsMask` before send. Network failures are swallowed.
+  useEffect(() => {
+    const stop = startWebhookNotifier({
+      getWebhookUrl: (projectId) => {
+        const url = useProjectStore.getState().projects.find(p => p.id === projectId)?.webhookUrl;
+        if (!url || !url.startsWith('https://')) return null;
+        return url;
+      },
+      httpFetch: async (opts) => {
+        const res = await httpFetch(opts);
+        return { status: res.status, body: res.body };
+      },
+      secretsMask,
+      deepLink: (runId) => `terminalx://run/${runId}`,
+      getProjectName: (projectId) =>
+        useProjectStore.getState().projects.find(p => p.id === projectId)?.name,
+    });
+    return stop;
   }, []);
 
   // Auto-install pipeline skills (`tx-pipeline-stage-handoff`,

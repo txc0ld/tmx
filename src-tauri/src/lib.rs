@@ -1,5 +1,6 @@
 mod commands;
 mod state;
+mod util;
 
 use state::app_state::AppState;
 use tauri::Manager;
@@ -85,6 +86,10 @@ pub fn run() {
             commands::secrets::secret_set,
             commands::secrets::secret_get,
             commands::secrets::secret_delete,
+            // Secret masking — telemetry / failure-bundle / webhook hygiene
+            commands::secrets_mask::secrets_mask,
+            // Failure bundle generator (Phase 2c-iii.7)
+            commands::failure_bundle::pipeline_failure_bundle_generate,
             // Pipeline (agentic-pipeline Phase 1)
             commands::pipeline::pipeline_capabilities_install,
             commands::pipeline::pipeline_capabilities_uninstall,
@@ -94,6 +99,7 @@ pub fn run() {
             commands::pipeline::pipeline_merger_request_token,
             commands::pipeline::pipeline_merger_run,
             commands::pipeline::pipeline_preflight,
+            commands::pipeline::pipeline_read_role_prompt,
             commands::pipeline::pipeline_run_verification_step,
             commands::pipeline::pipeline_telemetry_log,
             commands::pipeline::pipeline_worktree_create,

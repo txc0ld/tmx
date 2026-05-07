@@ -14,7 +14,11 @@ const CI_FAIL_BUDGET = 3;
 
 export const TERMINAL_STATES: ReadonlySet<PipelineState> = new Set(['done', 'failed', 'escalated']);
 
-/** Active in-flight stages — used for `clarification_received.resumeTo` and `question_raised` gating. */
+/**
+ * Active in-flight stages — used to gate `question_raised` (only fires from an
+ * active stage) and to validate the `priorActiveState` we resume into when a
+ * `clarification_received` event lands.
+ */
 export const ACTIVE_STAGES: ReadonlySet<PipelineState> = new Set([
   'planning',
   'building',
@@ -36,12 +40,13 @@ export type PipelineEvent =
   | { type: 'ci_fail'; result: CIResult }
   | { type: 'ci_pass'; result: CIResult }
   | { type: 'question_raised'; question: QuestionArtifact }
-  | { type: 'clarification_received'; resumeTo: PipelineState }
+  | { type: 'clarification_received'; answer?: string }
   | { type: 'approve_merge' }
   | { type: 'reject_merge' }
   | { type: 'merge_done' }
   | { type: 'merge_failed'; reason: string }
   | { type: 'replan_requested'; reason: string }
+  | { type: 'heartbeat' }
   | { type: 'abort'; reason: string };
 
 export interface InitialRunInputs {
@@ -50,6 +55,13 @@ export interface InitialRunInputs {
   projectId: string;
   worktreePath: string;
   branch: string;
+  /**
+   * The fork point the run merges back into. Defaults to `'main'` when not
+   * provided so existing call sites stay green; production callers should
+   * resolve this from preflight (`PreflightResult.main_branch`) before
+   * passing it in.
+   */
+  baseBranch?: string;
   fingerprint: RunFingerprint;
 }
 
@@ -60,6 +72,7 @@ export function initialRunState(input: InitialRunInputs): PipelineRun {
     projectId: input.projectId,
     worktreePath: input.worktreePath,
     branch: input.branch,
+    baseBranch: input.baseBranch ?? 'main',
     state: 'idle',
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [] },
     retryCounters: { reviewerReject: 0, ciFail: 0 },
@@ -171,16 +184,32 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
       return {
         ...run,
         state: 'awaiting_clarification',
+        // Remember which active stage we left so `clarification_received`
+        // resumes to the same place without the caller telling us.
+        priorActiveState: run.state,
         artifacts: { ...run.artifacts, questions: [...run.artifacts.questions, ev.question] },
       };
 
-    case 'clarification_received':
-      // Only resume from awaiting_clarification, and only into an active
-      // stage. Resuming to a terminal/awaiting state would silently end or
-      // corrupt the run.
+    case 'clarification_received': {
+      // Only resume from awaiting_clarification.
       if (run.state !== 'awaiting_clarification') return run;
-      if (!ACTIVE_STAGES.has(ev.resumeTo)) return run;
-      return { ...run, state: ev.resumeTo };
+      const resumeTo = run.priorActiveState;
+      // Defensive: priorActiveState should always be set when we're in
+      // awaiting_clarification (only path in is `question_raised`, which sets
+      // it). If it's missing or somehow not an active stage, fail the run
+      // rather than silently lose work.
+      if (!resumeTo || !ACTIVE_STAGES.has(resumeTo)) {
+        return {
+          ...run,
+          state: 'failed',
+          failureReason: 'clarification_received without prior active state',
+          failureClass: 'unknown',
+          endedAt: Date.now(),
+          priorActiveState: undefined,
+        };
+      }
+      return { ...run, state: resumeTo, priorActiveState: undefined };
+    }
 
     case 'approve_merge':
       if (run.state === 'awaiting_merge_approval') return { ...run, state: 'merging' };
@@ -197,6 +226,11 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
     case 'merge_failed':
       if (run.state !== 'merging') return run;
       return { ...run, state: 'failed', failureReason: ev.reason, failureClass: 'unknown', endedAt: Date.now() };
+
+    case 'heartbeat':
+      // Terminal states already filtered above. Just stamp the wall clock —
+      // the stuck-detector reads this to decide when a run has gone silent.
+      return { ...run, lastHeartbeatAt: Date.now() };
 
     case 'replan_requested': {
       // Narrow re-entry: only `escalated` may be re-planned. From any other
