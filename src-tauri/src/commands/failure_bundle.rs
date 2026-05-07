@@ -4,7 +4,9 @@
 //! invokes `pipeline_failure_bundle_generate` to write a single-file
 //! diagnostic archive at:
 //!
-//!     <project_dir>/.terminalx/failure-bundles/<run-id>.tar.gz
+//! ```text
+//! <project_dir>/.terminalx/failure-bundles/<run-id>.tar.gz
+//! ```
 //!
 //! The archive contains six text artifacts, every one of which is run
 //! through `secrets_mask::mask_secrets` BEFORE being written into the
