@@ -88,6 +88,7 @@ pub fn run() {
             // Pipeline (agentic-pipeline Phase 1)
             commands::pipeline::pipeline_install_skills,
             commands::pipeline::pipeline_preflight,
+            commands::pipeline::pipeline_run_verification_step,
             commands::pipeline::pipeline_telemetry_log,
             commands::pipeline::pipeline_worktree_create,
             commands::pipeline::pipeline_worktree_destroy,

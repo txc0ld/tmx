@@ -41,6 +41,7 @@ export type PipelineEvent =
   | { type: 'reject_merge' }
   | { type: 'merge_done' }
   | { type: 'merge_failed'; reason: string }
+  | { type: 'replan_requested'; reason: string }
   | { type: 'abort'; reason: string };
 
 export interface InitialRunInputs {
@@ -66,6 +67,7 @@ export function initialRunState(input: InitialRunInputs): PipelineRun {
     escalationLog: [],
     tiles: {},
     fingerprint: input.fingerprint,
+    planLineage: [],
   };
 }
 
@@ -74,7 +76,11 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
     if (TERMINAL_STATES.has(run.state)) return run;
     return { ...run, state: 'failed', failureReason: ev.reason, failureClass: 'unknown', endedAt: Date.now() };
   }
-  if (TERMINAL_STATES.has(run.state)) return run;
+  // Terminal-state carve-out: `replan_requested` is the ONLY event that may
+  // re-enter the run from `escalated`. Every other event hitting a terminal
+  // state is a no-op (idempotency / late-arriving sentinels). The actual
+  // state-specific gating for replan_requested lives in its case below.
+  if (TERMINAL_STATES.has(run.state) && ev.type !== 'replan_requested') return run;
 
   switch (ev.type) {
     case 'start':
@@ -86,6 +92,7 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
         ...run,
         state: 'awaiting_plan_approval',
         artifacts: { ...run.artifacts, plan: ev.plan },
+        planLineage: [...run.planLineage, ev.plan.planCommitSha],
       };
 
     case 'planner_failed':
@@ -190,6 +197,25 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
     case 'merge_failed':
       if (run.state !== 'merging') return run;
       return { ...run, state: 'failed', failureReason: ev.reason, failureClass: 'unknown', endedAt: Date.now() };
+
+    case 'replan_requested': {
+      // Narrow re-entry: only `escalated` may be re-planned. From any other
+      // state this is a no-op (we don't want a misclick mid-build to nuke
+      // ongoing work, and we don't want to "re-plan" a successful done run).
+      if (run.state !== 'escalated') return run;
+      return {
+        ...run,
+        state: 'planning',
+        // Clear endedAt so the run is "live" again; failureReason/Class stay
+        // for audit. The next planner_done will append a fresh SHA to
+        // planLineage so v2 plan files don't collide with v1.
+        endedAt: undefined,
+        escalationLog: [
+          ...run.escalationLog,
+          { at: Date.now(), reason: ev.reason, decision: 'replan' },
+        ],
+      };
+    }
 
     default: {
       // Compile-time exhaustiveness: adding a PipelineEvent variant without

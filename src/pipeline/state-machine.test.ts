@@ -26,6 +26,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     escalationLog: [],
     tiles: {},
     fingerprint: FP,
+    planLineage: [],
     ...overrides,
   };
 }
@@ -43,7 +44,7 @@ describe('pipeline state machine', () => {
       type: 'planner_done',
       plan: {
         stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
-        tasks: [], summary: 's',
+        tasks: [], summary: 's', planCommitSha: 'sha-v1',
       },
     };
     const next = reducer(run, ev);
@@ -268,5 +269,95 @@ describe('pipeline state machine', () => {
     };
     const next = reducer(run, ev);
     expect(next.retryCounters.reviewerReject).toBe(4);
+  });
+
+  // ─── planLineage + replan_requested ──────────────────────────────────────
+
+  it('initialRunState: planLineage starts empty', () => {
+    const run = initialRunState({
+      runId: 'r-lin', templateId: 'tx.hello', projectId: 'p1',
+      worktreePath: '/tmp/wt/r-lin', branch: 'feat/r-lin', fingerprint: FP,
+    });
+    expect(run.planLineage).toEqual([]);
+  });
+
+  it('planner_done appends plan.planCommitSha to planLineage', () => {
+    const run = makeRun({ state: 'planning' });
+    const ev: PipelineEvent = {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
+        tasks: [], summary: 's', planCommitSha: 'abc123',
+      },
+    };
+    const next = reducer(run, ev);
+    expect(next.planLineage).toEqual(['abc123']);
+  });
+
+  it('replan_requested: escalated → planning + appends EscalationEntry(decision=replan)', () => {
+    const run = makeRun({
+      state: 'escalated',
+      failureClass: 'reviewer_irreconcilable',
+      endedAt: 12345,
+    });
+    const ev: PipelineEvent = { type: 'replan_requested', reason: 'human override after review deadlock' };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('planning');
+    // endedAt must clear so the run is "live" again under isTerminalState/etc.
+    expect(next.endedAt).toBeUndefined();
+    expect(next.escalationLog).toHaveLength(1);
+    expect(next.escalationLog[0].decision).toBe('replan');
+    expect(next.escalationLog[0].reason).toBe('human override after review deadlock');
+  });
+
+  it('replan_requested from non-escalated states is a no-op', () => {
+    for (const state of ['building', 'reviewing', 'done', 'failed', 'idle'] as const) {
+      const run = makeRun({ state });
+      const ev: PipelineEvent = { type: 'replan_requested', reason: 'misclick' };
+      const next = reducer(run, ev);
+      expect(next).toBe(run); // identity preserved (no spurious re-renders)
+    }
+  });
+
+  it('replan_requested + planner_done → planLineage length 2 (v1 SHA + v2 SHA)', () => {
+    let run = makeRun({ state: 'planning' });
+    run = reducer(run, {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
+        tasks: [], summary: 's', planCommitSha: 'sha-v1',
+      },
+    });
+    expect(run.planLineage).toEqual(['sha-v1']);
+
+    // Force into escalated terminal so replan_requested can fire.
+    run = { ...run, state: 'escalated', failureClass: 'reviewer_irreconcilable', endedAt: 1 };
+    run = reducer(run, { type: 'replan_requested', reason: 'try again' });
+    expect(run.state).toBe('planning');
+
+    run = reducer(run, {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's-v2', planPath: 'p-v2',
+        tasks: [], summary: 's2', planCommitSha: 'sha-v2',
+      },
+    });
+    expect(run.planLineage).toEqual(['sha-v1', 'sha-v2']);
+    expect(run.escalationLog).toHaveLength(1);
+    expect(run.escalationLog[0].decision).toBe('replan');
+  });
+
+  it('escalated remains terminal for non-replan events (carve-out is narrow)', () => {
+    const run = makeRun({ state: 'escalated', endedAt: 99 });
+    // start, approve_plan, builder_done, ci_pass — all should be no-ops.
+    expect(reducer(run, { type: 'start' })).toBe(run);
+    expect(reducer(run, { type: 'approve_plan' })).toBe(run);
+    expect(reducer(run, {
+      type: 'builder_done',
+      build: {
+        stage: 'builder', branch: 'b', headSha: 'h', round: 1,
+        commits: [], filesChanged: [], testsAdded: [], ciStatus: 'green',
+      },
+    })).toBe(run);
   });
 });
