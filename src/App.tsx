@@ -12,11 +12,13 @@ import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capa
 import { handleFailureBundleLifecycle } from '@/pipeline/failure-bundle-lifecycle';
 import { startRedTeamDispatcher } from '@/pipeline/red-team-dispatcher';
 import { startDualReviewerDispatcher } from '@/pipeline/dual-reviewer-dispatcher';
+import { buildOneshotBrief } from '@/pipeline/brief-builder';
 import { startStuckDetector } from '@/pipeline/stuck-detector';
 import { startNotifier } from '@/pipeline/notifications';
 import { startWebhookNotifier } from '@/pipeline/webhook-notifier';
 import { sendNotification } from '@tauri-apps/plugin-notification';
-import { getLastStdoutAt, ingestOneshotResult } from '@/pipeline/controller-runtime';
+import { getLastStdoutAt, ingestOneshotResult, clearRunBuffers } from '@/pipeline/controller-runtime';
+import type { PipelineState } from '@/types';
 import { resumeFromClarification } from '@/pipeline/scratchpad-watcher';
 import type { AgentTile, PipelineRole, PipelineRun } from '@/types';
 import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas';
@@ -139,11 +141,17 @@ export default function App() {
   useEffect(() => initUsageTracking(), []);
 
   // Wire pipelineStore telemetry to the Rust JSONL writer at app boot.
-  // Tests leave this unset → telemetry is a no-op in jsdom.
+  // The Rust IPC writes to <projectDir>/.terminalx/pipeline-telemetry/<runId>.jsonl
+  // so we MUST resolve the project's cwd from projectStore — `ev.projectId`
+  // is a UUID, passing it directly would write to a UUID-named directory
+  // somewhere undefined on disk. Tests leave the emitter unset → telemetry
+  // is a no-op in jsdom.
   useEffect(() => {
     return setPipelineTelemetryEmitter(ev => {
+      const project = useProjectStore.getState().projects.find(p => p.id === ev.projectId);
+      if (!project?.cwd) return;  // unbound run — nowhere safe to write
       pipelineTelemetryLog({
-        projectDir: ev.projectId,
+        projectDir: project.cwd,
         runId: ev.runId,
         line: JSON.stringify(ev),
       }).catch(err => console.warn('[pipeline] telemetry log failed:', err));
@@ -178,6 +186,24 @@ export default function App() {
     };
   }, []);
 
+  // Audit fix: prune per-run renderer state on terminal transitions.
+  // controller-runtime accumulates ptyBuffers + lastStdoutAt per (run, role);
+  // scratchpad-watcher and compaction-watcher each carry per-run state.
+  // Without this, those maps grow unbounded across a session — every
+  // terminal-state transition is the moment to reclaim.
+  useEffect(() => {
+    const off = setPipelineLifecycleEmitter((ev) => {
+      // ev.from / ev.to are PipelineState strings; isTerminalState takes the
+      // narrower union but the discriminator is correct at runtime.
+      const wasTerminal = isTerminalState(ev.from as PipelineState);
+      const isTerminalNow = isTerminalState(ev.to as PipelineState);
+      if (!wasTerminal && isTerminalNow) {
+        clearRunBuffers(ev.runId);
+      }
+    });
+    return off;
+  }, []);
+
   // Polish.1: red-team dispatcher. Closes the spawn-side gap from Phase
   // 3c.6 — without this, complex runs reaching `awaiting_red_team` after
   // Reviewer approval stall (the state-machine half is wired, but no
@@ -204,20 +230,8 @@ export default function App() {
       buildBrief: async (runId) => {
         const run = usePipelineStore.getState().runs[runId];
         if (!run) return '';
-        // Phase 3d will flesh this out with the full skill text + diff +
-        // plan + spec context. For now, emit enough that the agent can
-        // self-locate the worktree and emit the sentinel per skill.
-        return [
-          `You are the Red Team for run ${runId}.`,
-          `Branch: ${run.branch}`,
-          `Base: ${run.baseBranch}`,
-          `Worktree: ${run.worktreePath}`,
-          '',
-          'Review the diff (git diff vs base) for adversarial patterns:',
-          'supply-chain risks, prompt-injection, secret exposure, race',
-          'conditions, edge cases. Emit <<<TX_REDTEAM_DONE>>> with the',
-          'JSON report per the tx-pipeline-red-team skill.',
-        ].join('\n');
+        const project = useProjectStore.getState().projects.find(p => p.id === run.projectId);
+        return buildOneshotBrief({ role: 'red-team', run, projectDir: project?.cwd });
       },
     });
     return stop;
@@ -237,10 +251,21 @@ export default function App() {
           codex: 'codex',
           gemini: 'gemini',
         };
+        const run = usePipelineStore.getState().runs[runId];
+        if (!run) return;
+        const project = useProjectStore.getState().projects.find(p => p.id === run.projectId);
+        // Audit fix: build a real brief from the role prompt + run context
+        // before invocation. Without this the agent receives empty stdin
+        // and reliably aborts the run.
+        const brief = await buildOneshotBrief({ role, run, projectDir: project?.cwd });
+        if (!brief) {
+          console.warn(`[dual-reviewer] role-prompt for ${role} missing — skipping spawn`);
+          return;
+        }
         const result = await agentRunOneshot({
           agent: agentMap[provider] ?? 'claude',
           args: ['--print'],
-          stdin: '',  // brief content built per-role; for now bare invocation — Phase 3d fills in
+          stdin: brief,
           timeoutSecs: 600,
         });
         ingestOneshotResult({

@@ -543,6 +543,10 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
         // for audit. The next planner_done will append a fresh SHA to
         // planLineage so v2 plan files don't collide with v1.
         endedAt: undefined,
+        // Clear priorActiveState — held over from a pre-failure clarification
+        // would resume a future `clarification_received` to a stale stage.
+        // The reducer captures it fresh on the next `question_raised`.
+        priorActiveState: undefined,
         escalationLog: [
           ...run.escalationLog,
           { at: Date.now(), reason: ev.reason, decision: 'replan' },

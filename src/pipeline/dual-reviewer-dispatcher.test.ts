@@ -204,6 +204,25 @@ describe('dual-reviewer dispatcher (Phase 3c.4)', () => {
     warn.mockRestore();
   });
 
+  it('Audit fix: prunes bookkeeping on terminal-state transition', () => {
+    seedRun(makeRun());
+    const fire = vi.fn();
+    const deps: DualReviewerDeps = { runOneShotReviewer: fire };
+
+    // Round 1: dual-reviewer fires, bookkeeping records dualFired=true.
+    handleDualReviewerLifecycle(ev({ to: 'awaiting_dual_reviewer' }), deps);
+    expect(fire).toHaveBeenCalledTimes(2);
+
+    // Run reaches terminal state — bookkeeping should be pruned.
+    handleDualReviewerLifecycle(ev({ from: 'awaiting_dual_reviewer', to: 'failed' }), deps);
+
+    // Re-entry on a fresh round-0 should re-fire (proves the entry was pruned;
+    // otherwise dualFired would still be true at reject=0 and the guard
+    // `entry.dualFired && entry.dualLastReject === reject` would silently skip).
+    handleDualReviewerLifecycle(ev({ from: 'building', to: 'awaiting_dual_reviewer' }), deps);
+    expect(fire).toHaveBeenCalledTimes(4);
+  });
+
   it('startDualReviewerDispatcher returns an unsubscribe fn', () => {
     seedRun(makeRun());
     const fire = vi.fn();
