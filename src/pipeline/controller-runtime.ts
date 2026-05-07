@@ -262,6 +262,36 @@ function maybeEscalateUncertainty(
       blocking: true,
     },
   });
+
+  // Phase 3c.7: trust telemetry — record the escalation with the diff
+  // metrics that triggered it. Pull from the same payload we just used,
+  // plus the latest build for reviewer roles. Drivers are surfaced
+  // verbatim so dashboards can group by the agent's stated reasons.
+  let filesChanged: number | undefined;
+  let commits: number | undefined;
+  let tasks: number | undefined;
+  if (role === 'planner') {
+    tasks = (payload as PlanArtifact).tasks?.length;
+  } else if (role === 'builder') {
+    const build = payload as BuildArtifact;
+    filesChanged = build.filesChanged?.length ?? 0;
+    commits = build.commits?.length ?? 0;
+  } else if (role === 'reviewer' || role === 'reviewer-codex') {
+    const last = run.artifacts.builds[run.artifacts.builds.length - 1];
+    filesChanged = last?.filesChanged?.length ?? 0;
+    commits = last?.commits?.length ?? 0;
+  }
+  emitTelemetry({
+    at: Date.now(),
+    event: 'confidence_uncertain_escalated',
+    runId,
+    projectId: run.projectId,
+    role,
+    filesChanged,
+    commits,
+    tasks,
+    uncertaintyDrivers: Array.isArray(drivers) ? drivers : undefined,
+  });
 }
 
 function dispatchSentinel(
@@ -421,7 +451,29 @@ function dispatchSentinel(
         });
         return;
       }
-      dispatch(runId, { type: 'red_team_done', report: ev.payload as RedTeamReport });
+      // Phase 3c.7: emit one `red_team_finding` per finding so dashboards
+      // can aggregate by severity/category without re-parsing the report.
+      // Empty `findings` array → no events (the absence of findings is
+      // visible via the `state_change` to awaiting_merge_approval). We
+      // emit BEFORE dispatch so the findings show up even if the reducer
+      // routes the run to `failed` (a blocker finding) — the events
+      // describe the *findings*, not the resulting state.
+      const validatedReport = ev.payload as RedTeamReport;
+      const runForRedteam = usePipelineStore.getState().runs[runId];
+      const projectId = runForRedteam?.projectId ?? '';
+      for (const finding of validatedReport.findings) {
+        emitTelemetry({
+          at: Date.now(),
+          event: 'red_team_finding',
+          runId,
+          projectId,
+          severity: finding.severity,
+          category: finding.category,
+          file: finding.file,
+          line: finding.line,
+        });
+      }
+      dispatch(runId, { type: 'red_team_done', report: validatedReport });
       return;
     }
     case 'redteam_failed':

@@ -29,6 +29,7 @@ import type { PipelineRole, PipelineState } from '@/types';
 import {
   usePipelineStore,
   setPipelineLifecycleEmitter,
+  emitTelemetry,
   type LifecycleEvent,
 } from '@/stores/pipelineStore';
 
@@ -123,6 +124,19 @@ export function handleDualReviewerLifecycle(
     // gemini CLI binary; if absent it logs and the run stalls until the
     // user intervenes (per spec — no silent fallback).
     fireSafely(deps, { runId: ev.runId, role: 'reviewer', provider: TIEBREAKER_PROVIDER });
+    // Phase 3c.7: trust telemetry — record that the tiebreaker fired.
+    // `dual_reviewer_disagreement` is logged from pipelineStore.dispatch
+    // on the awaiting_dual_reviewer→awaiting_tiebreaker transition; this
+    // event captures that the dispatcher actually invoked the third
+    // provider. The two together let dashboards distinguish "we noticed
+    // a disagreement" from "we resolved it via gemini."
+    emitTelemetry({
+      at: Date.now(),
+      event: 'tiebreaker_invoked',
+      runId: ev.runId,
+      projectId: ev.projectId,
+      provider: TIEBREAKER_PROVIDER,
+    });
     return;
   }
 }
