@@ -1,6 +1,7 @@
 import { usePipelineStore } from '@/stores/pipelineStore';
 import { isTerminalState } from '@/pipeline/state-machine';
 import { MergerConfirmModal } from '@/components/pipeline/MergerConfirmModal';
+import { ClarificationModal } from '@/components/pipeline/ClarificationModal';
 import type { PipelineControllerTile as Tile } from '@/types';
 
 interface Props {
@@ -79,6 +80,9 @@ export function PipelineControllerTile({ tile }: Props) {
         )}
       </div>
       {run.state === 'awaiting_merge_approval' && <MergerConfirmModal run={run} />}
+      {run.state === 'awaiting_clarification' && run.artifacts.questions.length > 0 && (
+        <ClarificationModal run={run} />
+      )}
     </div>
   );
 }

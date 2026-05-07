@@ -386,6 +386,13 @@ export interface PipelineRun {
    * rather than as silent empty arrays at runtime.
    */
   planLineage: string[];
+  /**
+   * The active stage we left when a `question_raised` event fires. Captured
+   * on `question_raised`, consumed (and cleared) on `clarification_received`
+   * so the run resumes to the same stage. Undefined except while in
+   * `awaiting_clarification`.
+   */
+  priorActiveState?: PipelineState;
 }
 
 export interface PipelineControllerTile extends TileBase {

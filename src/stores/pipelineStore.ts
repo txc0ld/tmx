@@ -49,6 +49,16 @@ export interface LifecycleTelemetryEvent {
   error?: string;
 }
 
+/** Clarification answered by the user via ClarificationModal. (Phase 2c-iii.1) */
+export interface ClarificationTelemetryEvent {
+  at: number;
+  event: 'clarification_answered';
+  runId: string;
+  projectId: string;
+  /** The role/stage that asked the question (planner|builder|reviewer|...). */
+  stage: PipelineRole;
+}
+
 /** Merger invocation outcome. (Phase 2c-ii.7) */
 export interface MergerTelemetryEvent {
   at: number;
@@ -66,7 +76,8 @@ export interface MergerTelemetryEvent {
 export type TelemetryEvent =
   | StateChangeTelemetryEvent
   | LifecycleTelemetryEvent
-  | MergerTelemetryEvent;
+  | MergerTelemetryEvent
+  | ClarificationTelemetryEvent;
 
 type TelemetryEmitter = (event: TelemetryEvent) => void;
 let telemetryEmitter: TelemetryEmitter | null = null;

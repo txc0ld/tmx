@@ -144,7 +144,7 @@ describe('pipeline state machine', () => {
     expect(reducer(run, ev).state).toBe('escalated');
   });
 
-  it('any non-terminal state + question_raised → awaiting_clarification', () => {
+  it('any non-terminal state + question_raised → awaiting_clarification (captures priorActiveState)', () => {
     const run = makeRun({ state: 'building' });
     const ev: PipelineEvent = {
       type: 'question_raised',
@@ -153,12 +153,24 @@ describe('pipeline state machine', () => {
     const next = reducer(run, ev);
     expect(next.state).toBe('awaiting_clarification');
     expect(next.artifacts.questions.length).toBe(1);
+    expect(next.priorActiveState).toBe('building');
   });
 
-  it('awaiting_clarification + clarification_received → resumes prior state', () => {
+  it('awaiting_clarification + clarification_received → resumes priorActiveState (and clears it)', () => {
+    const run = makeRun({ state: 'awaiting_clarification', priorActiveState: 'building' });
+    const ev: PipelineEvent = { type: 'clarification_received', answer: 'pick option A' };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('building');
+    expect(next.priorActiveState).toBeUndefined();
+  });
+
+  it('clarification_received with missing priorActiveState → failed (defensive)', () => {
     const run = makeRun({ state: 'awaiting_clarification' });
-    const ev: PipelineEvent = { type: 'clarification_received', resumeTo: 'building' };
-    expect(reducer(run, ev).state).toBe('building');
+    const ev: PipelineEvent = { type: 'clarification_received' };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('failed');
+    expect(next.failureReason).toBe('clarification_received without prior active state');
+    expect(next.priorActiveState).toBeUndefined();
   });
 
   it('awaiting_merge_approval + approve_merge → merging', () => {
