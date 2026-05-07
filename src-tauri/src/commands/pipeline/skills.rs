@@ -39,6 +39,7 @@ pub(super) const BUNDLED_PIPELINE_SKILLS: &[&str] = &[
     "tx-pipeline-stage-handoff",
     "tx-pipeline-reviewer",
     "tx-pipeline-builder-scratchpad",
+    "tx-pipeline-subagent",
 ];
 
 /// Pure helper exposed for testing. Real `install_skills_inner` calls this with
