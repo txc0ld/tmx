@@ -212,6 +212,8 @@ export default function App() {
         if (!url || !url.startsWith('https://')) return null;
         return url;
       },
+      getWebhookCadence: (projectId) =>
+        useProjectStore.getState().projects.find(p => p.id === projectId)?.webhookCadence,
       httpFetch: async (opts) => {
         const res = await httpFetch(opts);
         return { status: res.status, body: res.body };

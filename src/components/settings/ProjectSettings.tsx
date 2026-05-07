@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Project } from '@/types';
+import type { Project, WebhookCadence } from '@/types';
 import { useProjectStore } from '@/stores/projectStore';
+
+const CADENCE_OPTIONS: ReadonlyArray<{ value: WebhookCadence; label: string }> = [
+  { value: 'entry-only', label: 'Entry only' },
+  { value: '15min', label: '+15 minutes' },
+  { value: '1hr', label: '+1 hour' },
+  { value: '4hr', label: '+4 hours' },
+  { value: 'daily', label: 'Daily' },
+];
 
 /**
  * Project sub-panel — Phase 3a.2.
@@ -123,7 +131,9 @@ export function ProjectSettings() {
 
 function ProjectSettingsForm({ project }: { project: Project }) {
   const persisted = project.webhookUrl ?? '';
+  const persistedCadence: WebhookCadence = project.webhookCadence ?? 'entry-only';
   const [draft, setDraft] = useState(persisted);
+  const [draftCadence, setDraftCadence] = useState<WebhookCadence>(persistedCadence);
 
   // If the persisted value changes from under us (e.g. someone else updates
   // the same project, or the user switches projects), resync. The `key` prop
@@ -132,21 +142,42 @@ function ProjectSettingsForm({ project }: { project: Project }) {
   useEffect(() => {
     setDraft(persisted);
   }, [persisted]);
+  useEffect(() => {
+    setDraftCadence(persistedCadence);
+  }, [persistedCadence]);
 
   const validation = useMemo(() => validateWebhookUrl(draft), [draft]);
-  const dirty = draft !== persisted;
+  const urlDirty = draft !== persisted;
+  const cadenceDirty = draftCadence !== persistedCadence;
+  const dirty = urlDirty || cadenceDirty;
   const canSave = validation.ok && dirty;
+
+  // Cadence radio is only meaningful when a webhook URL is configured.
+  const showCadence = draft.trim() !== '';
 
   function onSave() {
     if (!canSave) return;
     const trimmed = draft.trim();
+    const url = trimmed === '' ? undefined : trimmed;
+    // When clearing the URL, also clear cadence (no point storing a cadence
+    // for a disabled webhook). Otherwise persist the chosen cadence; we
+    // store undefined for the implicit default `entry-only` to keep the
+    // JSON tidy.
+    const cadence: WebhookCadence | undefined =
+      url === undefined
+        ? undefined
+        : draftCadence === 'entry-only'
+          ? undefined
+          : draftCadence;
     void useProjectStore.getState().updateProject(project.id, {
-      webhookUrl: trimmed === '' ? undefined : trimmed,
+      webhookUrl: url,
+      webhookCadence: cadence,
     });
   }
 
   function onCancel() {
     setDraft(persisted);
+    setDraftCadence(persistedCadence);
   }
 
   return (
@@ -207,6 +238,57 @@ function ProjectSettingsForm({ project }: { project: Project }) {
             : validation.error}
         </div>
       </label>
+
+      {showCadence && (
+        <fieldset
+          data-testid="project-webhook-cadence"
+          style={{
+            border: '1px solid var(--tx-border)',
+            borderRadius: 4,
+            padding: '8px 12px 10px',
+            margin: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <legend
+            style={{
+              ...labelStyle,
+              padding: '0 6px',
+            }}
+          >
+            Re-fire cadence
+          </legend>
+          <span style={subtitleStyle}>
+            Default fires once on entry. Wider cadences re-POST cumulatively
+            from entry — mirrors OS-notification reminders.
+          </span>
+          {CADENCE_OPTIONS.map(opt => (
+            <label
+              key={opt.value}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 12,
+                color: 'var(--tx-text)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="radio"
+                name="webhook-cadence"
+                value={opt.value}
+                checked={draftCadence === opt.value}
+                onChange={() => setDraftCadence(opt.value)}
+                data-testid={`project-webhook-cadence-${opt.value}`}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </fieldset>
+      )}
 
       <div style={buttonRowStyle}>
         <button

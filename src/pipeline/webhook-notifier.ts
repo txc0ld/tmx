@@ -6,11 +6,24 @@
  *   - awaiting_clarification
  *   - awaiting_merge_approval
  *
- * Re-cadence is intentionally NOT supported here (unlike `notifications.ts`).
- * Webhooks pipe into chat/issue trackers/CI dashboards where each event is
- * persisted; re-firing the same notice every 15min would create alert noise.
- * If a run leaves an awaiting state and re-enters one (same or different
- * gate), that's a fresh entry and fires again.
+ * Re-cadence is OPT-IN per project via `Project.webhookCadence`. Default is
+ * `entry-only` — fire once on entry into `awaiting_*`, no reminders. This
+ * preserves the Phase 2c-iii.4 ship behavior so existing integrations (chat /
+ * issue trackers / CI dashboards) don't suddenly start receiving reminder
+ * pings.
+ *
+ * Wider cadences mirror the cumulative pattern in `notifications.ts`:
+ *   '15min'  → entry + 15min reminder
+ *   '1hr'    → entry + 15min + 1hr
+ *   '4hr'    → entry + 15min + 1hr + 4hr
+ *   'daily'  → entry + 15min + 1hr + 4hr + 24hr, then every 24hr.
+ *
+ * "Cumulative" means: reminder N lands at threshold[N] AFTER entry, NOT after
+ * the previous reminder. State exit drops the run's bookkeeping — re-entering
+ * an `awaiting_*` gate starts the cadence over from zero.
+ *
+ * The cadence is read fresh on each tick (via `getWebhookCadence`) so changes
+ * via the Settings UI apply immediately to in-flight runs.
  *
  * Payload shape:
  *   { runId, state, project, branch, summary, terminalxDeepLink }
@@ -20,18 +33,38 @@
  * boundary.
  *
  * DI mirrors `notifications.ts`: tests inject `httpFetch`, `secretsMask`,
- * `getWebhookUrl`, `deepLink`, and drive `usePipelineStore` directly via
- * the real reducer. URL validation (https-only) is enforced by the deps
- * boundary in production wiring (App.tsx) — the notifier itself trusts
- * whatever `getWebhookUrl` returns.
+ * `getWebhookUrl`, `getWebhookCadence`, `deepLink`, `now`, and drive
+ * `usePipelineStore` directly via the real reducer. URL validation
+ * (https-only) is enforced by the deps boundary in production wiring
+ * (App.tsx) — the notifier itself trusts whatever `getWebhookUrl` returns.
  *
  * Errors (network failure, secretsMask throw) are swallowed and logged via
  * `console.warn`. They must never crash the tick or interrupt the run.
  */
-import type { PipelineState } from '@/types';
+import type { PipelineState, WebhookCadence } from '@/types';
 import { usePipelineStore } from '@/stores/pipelineStore';
 
 export const WEBHOOK_TICK_MS = 1000;
+
+/**
+ * Cumulative thresholds used to derive a per-cadence reminder schedule.
+ * Index N is when reminder N+1 fires (the entry POST is reminder 0).
+ *
+ * `daily` extends past the array by adding the last element (24hr) each
+ * additional reminder, mirroring `notifications.ts`.
+ */
+const RECADENCE_TABLE: Readonly<Record<WebhookCadence, readonly number[]>> = {
+  'entry-only': [],
+  '15min': [15 * 60 * 1000],
+  '1hr': [15 * 60 * 1000, 60 * 60 * 1000],
+  '4hr': [15 * 60 * 1000, 60 * 60 * 1000, 4 * 60 * 60 * 1000],
+  'daily': [
+    15 * 60 * 1000,
+    60 * 60 * 1000,
+    4 * 60 * 60 * 1000,
+    24 * 60 * 60 * 1000,
+  ],
+};
 
 const AWAITING_STATES: ReadonlySet<PipelineState> = new Set([
   'awaiting_plan_approval',
@@ -41,6 +74,27 @@ const AWAITING_STATES: ReadonlySet<PipelineState> = new Set([
 
 function isAwaiting(state: PipelineState): boolean {
   return AWAITING_STATES.has(state);
+}
+
+/**
+ * Returns the cumulative threshold (ms after entry) at which reminder
+ * `idx` is due. idx=0 is the entry POST (always 0). idx=1..N use the
+ * cadence table. For `daily`, the last entry (24hr) extends indefinitely.
+ * For other cadences, returns Infinity past the table so no further
+ * reminders fire.
+ */
+function thresholdForReminder(cadence: WebhookCadence, idx: number): number {
+  if (idx <= 0) return 0;
+  const table = RECADENCE_TABLE[cadence];
+  if (idx <= table.length) {
+    return table[idx - 1];
+  }
+  if (cadence === 'daily' && table.length > 0) {
+    const extra = idx - table.length;
+    const last = table[table.length - 1];
+    return last + extra * last;
+  }
+  return Number.POSITIVE_INFINITY;
 }
 
 export interface WebhookPayload {
@@ -59,6 +113,12 @@ export interface WebhookDeps {
    * malformed URLs — anything this returns is sent verbatim.
    */
   getWebhookUrl(projectId: string): string | null;
+  /**
+   * Returns the configured re-fire cadence for the project. Read fresh on
+   * each tick so Settings UI changes apply without restart. Falls back to
+   * `entry-only` when undefined (matching the type-level default).
+   */
+  getWebhookCadence?(projectId: string): WebhookCadence | undefined;
   /** httpFetch wrapper — DI'd for tests. */
   httpFetch(opts: {
     url: string;
@@ -75,6 +135,8 @@ export interface WebhookDeps {
    * when undefined or missing.
    */
   getProjectName?(projectId: string): string | undefined;
+  /** Wall clock — `Date.now` in production, fake-injected in tests. */
+  now?(): number;
 }
 
 interface RunSnapshot {
@@ -83,6 +145,13 @@ interface RunSnapshot {
   projectId: string;
   branch: string;
   question?: string;
+}
+
+interface RunBookkeeping {
+  state: PipelineState;
+  firstNoticeAt: number;
+  /** How many reminders have fired beyond the entry POST. */
+  reminderIdx: number;
 }
 
 function snapshotRuns(): RunSnapshot[] {
@@ -132,9 +201,8 @@ function buildPayload(snap: RunSnapshot, deps: WebhookDeps): WebhookPayload {
  * interval. Call once at app boot; cleanup is idempotent.
  */
 export function startWebhookNotifier(deps: WebhookDeps): () => void {
-  // Per-run record of which awaiting state we last fired for, so re-entries
-  // (e.g. clarification → builder → another clarification) fire again.
-  const lastFiredState = new Map<string, PipelineState>();
+  const bookkeeping = new Map<string, RunBookkeeping>();
+  const nowFn = deps.now ?? (() => Date.now());
 
   const fire = (snap: RunSnapshot): void => {
     const url = deps.getWebhookUrl(snap.projectId);
@@ -158,33 +226,65 @@ export function startWebhookNotifier(deps: WebhookDeps): () => void {
     })();
   };
 
+  const cadenceFor = (projectId: string): WebhookCadence => {
+    return deps.getWebhookCadence?.(projectId) ?? 'entry-only';
+  };
+
   const tick = (): void => {
+    const now = nowFn();
     const snaps = snapshotRuns();
     const seen = new Set<string>();
 
     for (const snap of snaps) {
       seen.add(snap.id);
       const inAwaiting = isAwaiting(snap.state);
-      const last = lastFiredState.get(snap.id);
+      const entry = bookkeeping.get(snap.id);
 
       if (!inAwaiting) {
-        // State exit (or never entered) — drop bookkeeping so the next entry
-        // counts as a fresh entry.
-        if (last !== undefined) lastFiredState.delete(snap.id);
+        // State exit (or never entered) — drop bookkeeping if we had any.
+        if (entry) bookkeeping.delete(snap.id);
         continue;
       }
 
-      // In awaiting_*: fire only on entry (when last is undefined OR has
-      // changed to a different awaiting state).
-      if (last !== snap.state) {
-        lastFiredState.set(snap.id, snap.state);
+      // From here: snap.state is awaiting_*.
+      if (!entry) {
+        // ENTRY — fire now, idx 0 (= entry POST).
+        bookkeeping.set(snap.id, {
+          state: snap.state,
+          firstNoticeAt: now,
+          reminderIdx: 0,
+        });
+        fire(snap);
+        continue;
+      }
+
+      if (entry.state !== snap.state) {
+        // Awaiting → different awaiting (rare but possible). Treat as a
+        // fresh entry for cadence purposes.
+        bookkeeping.set(snap.id, {
+          state: snap.state,
+          firstNoticeAt: now,
+          reminderIdx: 0,
+        });
+        fire(snap);
+        continue;
+      }
+
+      // Same awaiting state — check if next reminder is due. Cadence is
+      // read fresh per tick so Settings changes apply mid-run.
+      const cadence = cadenceFor(snap.projectId);
+      const elapsed = now - entry.firstNoticeAt;
+      const nextIdx = entry.reminderIdx + 1;
+      const nextThreshold = thresholdForReminder(cadence, nextIdx);
+      if (elapsed >= nextThreshold) {
+        entry.reminderIdx = nextIdx;
         fire(snap);
       }
     }
 
     // Drop bookkeeping for runs no longer in the store.
-    for (const id of lastFiredState.keys()) {
-      if (!seen.has(id)) lastFiredState.delete(id);
+    for (const id of bookkeeping.keys()) {
+      if (!seen.has(id)) bookkeeping.delete(id);
     }
   };
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { startWebhookNotifier, WEBHOOK_TICK_MS, type WebhookDeps } from './webhook-notifier';
 import { usePipelineStore } from '@/stores/pipelineStore';
-import type { RunFingerprint } from '@/types';
+import type { RunFingerprint, WebhookCadence } from '@/types';
 
 const FP: RunFingerprint = {
   templateId: 't', templateHash: 'h', skillHashes: {}, rolePromptHashes: {},
@@ -11,27 +11,48 @@ const FP: RunFingerprint = {
 interface Harness {
   deps: WebhookDeps;
   getWebhookUrl: ReturnType<typeof vi.fn>;
+  getWebhookCadence: ReturnType<typeof vi.fn>;
   httpFetch: ReturnType<typeof vi.fn>;
   secretsMask: ReturnType<typeof vi.fn>;
   deepLink: ReturnType<typeof vi.fn>;
   getProjectName: ReturnType<typeof vi.fn>;
+  setCadence(cadence: WebhookCadence | undefined): void;
 }
 
 function makeHarness(opts: {
   url?: string | null;
+  cadence?: WebhookCadence;
   httpFetchImpl?: WebhookDeps['httpFetch'];
   secretsMaskImpl?: WebhookDeps['secretsMask'];
   projectName?: string;
 } = {}): Harness {
   const url = opts.url === undefined ? 'https://hooks.example.com/abc' : opts.url;
   const getWebhookUrl = vi.fn().mockReturnValue(url);
+  let cadenceState: WebhookCadence | undefined = opts.cadence;
+  const getWebhookCadence = vi.fn(() => cadenceState);
   const httpFetch = vi.fn(opts.httpFetchImpl ?? (async () => ({ status: 200, body: 'ok' })));
   // Default: identity (no masking) so tests can inspect raw payload.
   const secretsMask = vi.fn(opts.secretsMaskImpl ?? (async (s: string) => s));
   const deepLink = vi.fn((runId: string) => `terminalx://run/${runId}`);
   const getProjectName = vi.fn((pid: string) => opts.projectName ?? (pid === 'p1' ? 'TerminalX' : undefined));
-  const deps: WebhookDeps = { getWebhookUrl, httpFetch, secretsMask, deepLink, getProjectName };
-  return { deps, getWebhookUrl, httpFetch, secretsMask, deepLink, getProjectName };
+  const deps: WebhookDeps = {
+    getWebhookUrl,
+    getWebhookCadence,
+    httpFetch,
+    secretsMask,
+    deepLink,
+    getProjectName,
+  };
+  return {
+    deps,
+    getWebhookUrl,
+    getWebhookCadence,
+    httpFetch,
+    secretsMask,
+    deepLink,
+    getProjectName,
+    setCadence(c) { cadenceState = c; },
+  };
 }
 
 /**
@@ -206,5 +227,198 @@ describe('pipeline webhook notifier', () => {
     await flushAsync();
 
     expect(h.httpFetch).not.toHaveBeenCalled();
+  });
+
+  // ─── 3a.5: re-cadence configurability ─────────────────────────────────
+
+  describe('per-project re-fire cadence', () => {
+    const MIN15 = 15 * 60 * 1000;
+    const HR1 = 60 * 60 * 1000;
+    const HR4 = 4 * 60 * 60 * 1000;
+    const HR24 = 24 * 60 * 60 * 1000;
+
+    it('entry-only fires once on entry and never re-fires', async () => {
+      const h = makeHarness({ cadence: 'entry-only' });
+      createAwaitingPlanApprovalRun('r1');
+      const stop = startWebhookNotifier(h.deps);
+
+      advance(WEBHOOK_TICK_MS + 10);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(1);
+
+      // 24+ hours pass — still entry-only.
+      advance(HR24 + HR1);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(1);
+      stop();
+    });
+
+    it('undefined cadence defaults to entry-only', async () => {
+      const h = makeHarness({ cadence: undefined });
+      createAwaitingPlanApprovalRun('r1');
+      const stop = startWebhookNotifier(h.deps);
+
+      advance(WEBHOOK_TICK_MS + 10);
+      await flushAsync();
+      advance(HR24);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(1);
+      stop();
+    });
+
+    it('15min cadence fires on entry + at 15min', async () => {
+      const h = makeHarness({ cadence: '15min' });
+      createAwaitingPlanApprovalRun('r1');
+      const stop = startWebhookNotifier(h.deps);
+
+      advance(WEBHOOK_TICK_MS + 10);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(1);
+
+      // Just before 15min — still 1.
+      advance(MIN15 - WEBHOOK_TICK_MS * 2);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(1);
+
+      // Cross 15min — second fire.
+      advance(WEBHOOK_TICK_MS * 4);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(2);
+
+      // Far past 15min — no further reminders for this cadence.
+      advance(HR4);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(2);
+      stop();
+    });
+
+    it('1hr cadence fires on entry + 15min + 1hr (cumulative)', async () => {
+      const h = makeHarness({ cadence: '1hr' });
+      createAwaitingPlanApprovalRun('r1');
+      const stop = startWebhookNotifier(h.deps);
+
+      advance(WEBHOOK_TICK_MS + 10);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(1);
+
+      // 15min mark.
+      advance(MIN15);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(2);
+
+      // 1hr mark (45min more, cumulative from entry).
+      advance(HR1 - MIN15);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(3);
+
+      // Past 1hr — no further reminders.
+      advance(HR4);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(3);
+      stop();
+    });
+
+    it('daily cadence fires on entry + 15m + 1h + 4h + 24h, then every 24h', async () => {
+      const h = makeHarness({ cadence: 'daily' });
+      createAwaitingPlanApprovalRun('r1');
+      const stop = startWebhookNotifier(h.deps);
+
+      advance(WEBHOOK_TICK_MS + 10);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(1); // entry
+
+      advance(MIN15);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(2); // 15m
+
+      advance(HR1 - MIN15);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(3); // 1h
+
+      advance(HR4 - HR1);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(4); // 4h
+
+      advance(HR24 - HR4);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(5); // 24h
+
+      // 48h — daily continuation.
+      advance(HR24);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(6);
+
+      // 72h — daily continuation.
+      advance(HR24);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(7);
+      stop();
+    });
+
+    it('cadence is read fresh on each tick — mid-run change applies', async () => {
+      const h = makeHarness({ cadence: 'entry-only' });
+      createAwaitingPlanApprovalRun('r1');
+      const stop = startWebhookNotifier(h.deps);
+
+      advance(WEBHOOK_TICK_MS + 10);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(1); // entry
+
+      // After entry but before 15min — widen the cadence.
+      advance(MIN15 / 2);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(1);
+      h.setCadence('1hr');
+
+      // Cross the 15min mark — now expect a reminder under the new cadence.
+      advance(MIN15 / 2 + WEBHOOK_TICK_MS * 2);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(2);
+
+      // Cross 1hr — second reminder.
+      advance(HR1 - MIN15);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(3);
+      stop();
+    });
+
+    it('state exit drops bookkeeping — re-entry resets cadence to zero', async () => {
+      const h = makeHarness({ cadence: '1hr' });
+      createAwaitingClarificationRun('r1', 'first?');
+      const stop = startWebhookNotifier(h.deps);
+
+      advance(WEBHOOK_TICK_MS + 10);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(1); // entry
+
+      advance(MIN15);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(2); // 15m reminder
+
+      // Resolve the clarification → exits awaiting_*.
+      usePipelineStore.getState().dispatch('r1', { type: 'clarification_received', answer: 'yes' });
+      advance(HR1); // long gap with no awaiting state
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(2); // unchanged
+
+      // New question → fresh entry, cadence resets to zero.
+      usePipelineStore.getState().dispatch('r1', { type: 'question_raised', question: {
+        stage: 'builder', question: 'second?', context: '', blocking: true,
+      }});
+      advance(WEBHOOK_TICK_MS + 10);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(3); // re-entry
+
+      // Only 1min since re-entry — no reminder yet.
+      advance(60 * 1000);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(3);
+
+      // 15min after re-entry — reminder.
+      advance(MIN15);
+      await flushAsync();
+      expect(h.httpFetch).toHaveBeenCalledTimes(4);
+      stop();
+    });
   });
 });
