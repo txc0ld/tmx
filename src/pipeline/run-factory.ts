@@ -21,7 +21,7 @@ import type { PipelineTemplate } from '@/stores/templateStore';
 import type { PipelineRole, RoleCapabilities, RunFingerprint } from '@/types';
 import { computeFullFingerprint } from './fingerprint';
 import { usePipelineStore } from '@/stores/pipelineStore';
-import { readFileText } from '@/utils/ipc';
+import { readFileText, pipelineReadRolePrompt } from '@/utils/ipc';
 
 export interface RunFactoryDeps {
   /** Reads a SKILL.md content for the given skill name. Returns null if missing. */
@@ -186,7 +186,15 @@ export function defaultRunFactoryDeps(opts: {
       const onDisk = skillName.replace(/:/g, '/');
       return safeRead(`${home}/.claude/skills/${onDisk}/SKILL.md`);
     },
-    readRolePrompt: async (_role) => null, // Phase 2c-iii.
+    readRolePrompt: async (role) => {
+      try {
+        return await pipelineReadRolePrompt(role);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[run-factory] read role prompt for ${role} failed:`, msg);
+        return null;
+      }
+    },
     readRoleCapabilities: async (_role) => null, // Phase 2c-iii.
     readInvariants: () => safeRead(`${proj}/INVARIANTS.md`),
   };

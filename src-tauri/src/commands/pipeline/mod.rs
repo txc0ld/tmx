@@ -9,11 +9,13 @@
 //! - merger: pipeline_merger_run + pipeline_merger_request_token (Phase 2c-ii)
 //! - guardrails: pipeline_guardrails_install / _uninstall (Phase 2c-ii.3)
 //! - capabilities: pipeline_capabilities_install / _uninstall (Phase 2c-ii.4)
+//! - role_prompts: pipeline_read_role_prompt (Phase 2c-iii post-script)
 
 pub mod capabilities;
 pub mod guardrails;
 pub mod merger;
 pub mod preflight;
+pub mod role_prompts;
 pub mod skill_provenance;
 pub mod skills;
 pub mod telemetry;
@@ -24,6 +26,7 @@ pub use capabilities::*;
 pub use guardrails::*;
 pub use merger::*;
 pub use preflight::*;
+pub use role_prompts::*;
 pub use skills::*;
 pub use telemetry::*;
 pub use verification::*;

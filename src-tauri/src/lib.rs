@@ -98,6 +98,7 @@ pub fn run() {
             commands::pipeline::pipeline_merger_request_token,
             commands::pipeline::pipeline_merger_run,
             commands::pipeline::pipeline_preflight,
+            commands::pipeline::pipeline_read_role_prompt,
             commands::pipeline::pipeline_run_verification_step,
             commands::pipeline::pipeline_telemetry_log,
             commands::pipeline::pipeline_worktree_create,

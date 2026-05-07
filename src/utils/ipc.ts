@@ -411,6 +411,15 @@ export async function pipelineInstallSkills(): Promise<InstallSkillsResult> {
   return invoke<InstallSkillsResult>('pipeline_install_skills');
 }
 
+/**
+ * Read a bundled role-prompt (`planner` / `builder` / `reviewer` /
+ * `reviewer-codex`). Returns null if the file is missing or empty —
+ * the run factory treats that as "not yet authored" and skips hashing.
+ */
+export async function pipelineReadRolePrompt(role: string): Promise<string | null> {
+  return invoke<string | null>('pipeline_read_role_prompt', { role });
+}
+
 export async function pipelineTelemetryLog(opts: {
   projectDir: string;
   runId: string;
