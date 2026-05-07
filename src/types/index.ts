@@ -412,6 +412,20 @@ export type Tile = AgentTile | TerminalTile | BrowserTile | TodoTile | DiffTile 
 
 // ─── Project ──────────────────────────────────────────────────────────
 
+/**
+ * Webhook re-fire cadence — mirrors the cumulative pattern in
+ * `src/pipeline/notifications.ts` but opt-in per project. Default
+ * (when undefined) is `entry-only`, matching the Phase 2c-iii.4 ship
+ * behavior — webhooks fire once on entry into an `awaiting_*` gate.
+ *
+ * Cumulative thresholds measured from `firstNoticeAt`:
+ *   '15min'  → entry + 15min
+ *   '1hr'    → entry + 15min + 1hr
+ *   '4hr'    → entry + 15min + 1hr + 4hr
+ *   'daily'  → entry + 15min + 1hr + 4hr + 24hr, then every 24hr.
+ */
+export type WebhookCadence = 'entry-only' | '15min' | '1hr' | '4hr' | 'daily';
+
 export interface Project {
   id: string;
   name: string;
@@ -430,6 +444,14 @@ export interface Project {
    * infrastructure (see `src/pipeline/webhook-notifier.ts`) is wired.
    */
   webhookUrl?: string;
+  /**
+   * Optional re-fire cadence. Undefined means `entry-only` — fire once
+   * on entry into `awaiting_*`, no reminders. Anything else widens to
+   * cumulative reminders mirroring `notifications.ts`. Read fresh on
+   * each notifier tick so changes apply at the next entry without
+   * restart. See `src/pipeline/webhook-notifier.ts`.
+   */
+  webhookCadence?: WebhookCadence;
 }
 
 // ─── Wiring ───────────────────────────────────────────────────────────

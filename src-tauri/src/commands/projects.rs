@@ -17,6 +17,8 @@ pub struct Project {
     pub git_url: Option<String>,
     #[serde(default)]
     pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
 }
 
 async fn projects_path() -> PathBuf {
@@ -71,6 +73,17 @@ fn validate_project(project: &Project) -> Result<(), String> {
     }
     if let Some(branch) = &project.branch {
         validate_text("Project branch", branch, 255, true)?;
+    }
+    if let Some(webhook) = &project.webhook_url {
+        // Empty is allowed (means "clear it"); when present, must be https://
+        // and capped at a sensible URL length. The deeper SSRF guard runs in
+        // `http_proxy::http_fetch` at delivery time — this is just shape
+        // validation so junk values can't leak into the persisted file.
+        validate_text("Project webhook_url", webhook, 2048, true)?;
+        let trimmed = webhook.trim();
+        if !trimmed.is_empty() && !trimmed.starts_with("https://") {
+            return Err("Project webhook_url must start with https://".to_string());
+        }
     }
     Ok(())
 }
@@ -137,6 +150,18 @@ pub async fn add_project(project: Project) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn update_project(project: Project) -> Result<(), String> {
+    validate_project(&project)?;
+    let mut projects = load_projects().await?;
+    let pos = projects
+        .iter()
+        .position(|p| p.id == project.id)
+        .ok_or_else(|| format!("Project not found: {}", project.id))?;
+    projects[pos] = project;
+    save_projects(projects).await
+}
+
+#[tauri::command]
 pub async fn delete_project(id: String) -> Result<(), String> {
     validate_id(&id)?;
     let mut projects = load_projects().await?;
@@ -158,6 +183,7 @@ mod tests {
             cwd: "/Users/foo/code".into(),
             git_url: None,
             branch: None,
+            webhook_url: None,
         }
     }
 
@@ -238,6 +264,25 @@ mod tests {
             projects.push(p);
         }
         assert!(validate_projects(&projects).is_err());
+    }
+
+    #[test]
+    fn webhook_url_must_be_https() {
+        let mut p = ok_project();
+        p.webhook_url = Some("https://hooks.slack.com/abc".into());
+        assert!(validate_project(&p).is_ok());
+
+        let mut p = ok_project();
+        p.webhook_url = Some("http://hooks.slack.com/abc".into());
+        assert!(validate_project(&p).is_err(), "http rejected");
+
+        let mut p = ok_project();
+        p.webhook_url = Some("file:///etc/passwd".into());
+        assert!(validate_project(&p).is_err(), "non-https scheme rejected");
+
+        let mut p = ok_project();
+        p.webhook_url = Some("".into());
+        assert!(validate_project(&p).is_ok(), "empty allowed (means clear)");
     }
 
     #[test]

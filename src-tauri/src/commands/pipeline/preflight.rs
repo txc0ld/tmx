@@ -2,6 +2,7 @@
 
 use super::validate_path_arg;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -67,13 +68,29 @@ fn matches_sensitive(name: &str) -> bool {
 /// Walk `project_dir` up to depth `SENSITIVE_SCAN_MAX_DEPTH`, skipping
 /// `SCAN_SKIP_DIRS`, and return relative paths whose filename matches the
 /// sensitive pattern set. Output is capped at `SENSITIVE_SCAN_MAX_RESULTS`.
+///
+/// Matching is ASCII-case-insensitive (`.ENV` and `ID_RSA` both flag).
+///
+/// Symlinks are flagged on filename match but never recursed into:
+/// the symlink's own basename is sensitive even if its target isn't, and
+/// descending into symlinked directories would risk cycles. Visited
+/// directories are tracked by canonical path so a `a → b → a` loop on
+/// the parent walk cannot run forever.
 fn scan_sensitive_paths(project_dir: &Path) -> Vec<String> {
     let mut results = Vec::new();
+    let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut stack: Vec<(PathBuf, usize)> = vec![(project_dir.to_path_buf(), 0)];
 
     while let Some((dir, depth)) = stack.pop() {
         if results.len() >= SENSITIVE_SCAN_MAX_RESULTS {
             break;
+        }
+        // Loop guard for the directory walk. If canonicalization fails
+        // (broken symlink, EACCES), fall back to the raw path so we still
+        // de-dup obvious repeats but don't crash.
+        let canon = std::fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
+        if !visited.insert(canon) {
+            continue;
         }
         let entries = match std::fs::read_dir(&dir) {
             Ok(rd) => rd,
@@ -87,18 +104,45 @@ fn scan_sensitive_paths(project_dir: &Path) -> Vec<String> {
                 Ok(ft) => ft,
                 Err(_) => continue,
             };
-            // Skip symlinks entirely — they could escape project_dir.
-            if file_type.is_symlink() {
-                continue;
-            }
             let name_os = entry.file_name();
             let name = match name_os.to_str() {
                 Some(s) => s.to_string(),
                 None => continue,
             };
+            let name_lc = name.to_ascii_lowercase();
             let path = entry.path();
+
+            // Symlinks: never descend (cycle risk). Flag if either the
+            // symlink's own filename OR its resolved target's basename
+            // matches a sensitive pattern. Broken links still flag on the
+            // symlink's own name.
+            if file_type.is_symlink() {
+                let mut matched = matches_sensitive(&name_lc);
+                if !matched {
+                    if let Ok(target) = std::fs::canonicalize(&path) {
+                        if let Some(t_name) = target
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|s| s.to_ascii_lowercase())
+                        {
+                            matched = matches_sensitive(&t_name);
+                        }
+                    }
+                }
+                if matched {
+                    let rel = path
+                        .strip_prefix(project_dir)
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or(path.clone());
+                    if let Some(s) = rel.to_str() {
+                        results.push(s.to_string());
+                    }
+                }
+                continue;
+            }
+
             if file_type.is_dir() {
-                if SCAN_SKIP_DIRS.iter().any(|s| *s == name.as_str()) {
+                if SCAN_SKIP_DIRS.iter().any(|s| *s == name_lc.as_str()) {
                     continue;
                 }
                 if depth + 1 <= SENSITIVE_SCAN_MAX_DEPTH {
@@ -109,7 +153,7 @@ fn scan_sensitive_paths(project_dir: &Path) -> Vec<String> {
             if !file_type.is_file() {
                 continue;
             }
-            if matches_sensitive(&name) {
+            if matches_sensitive(&name_lc) {
                 let rel = path
                     .strip_prefix(project_dir)
                     .map(|p| p.to_path_buf())
@@ -619,6 +663,157 @@ mod tests {
             .map(|p| p.replace('\\', "/"))
             .collect();
         assert_eq!(normalized, vec!["config/secrets.yaml".to_string()]);
+    }
+
+    // ─── 3a.7: case-insensitive + symlink awareness ──────────────
+
+    #[test]
+    fn sensitive_scan_uppercase_dotenv_is_flagged() {
+        // Case-insensitive match: `.ENV` (uppercase) should report.
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        fs::write(dir.path().join(".ENV"), "SECRET=1").unwrap();
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        assert_eq!(result.sensitive_paths_found, vec![".ENV".to_string()]);
+    }
+
+    #[test]
+    fn sensitive_scan_uppercase_idrsa_and_mixed_pem_are_flagged() {
+        // Prefix match (`ID_RSA`) and suffix match (`Cred.PEM`) under
+        // case-insensitive comparison.
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        fs::write(dir.path().join("ID_RSA"), "x").unwrap();
+        fs::write(dir.path().join("Mixed-Case.PEM"), "x").unwrap();
+        // Decoy.
+        fs::write(dir.path().join("README.md"), "x").unwrap();
+
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        let mut found = result.sensitive_paths_found.clone();
+        found.sort();
+        assert_eq!(
+            found,
+            vec!["ID_RSA".to_string(), "Mixed-Case.PEM".to_string()]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_scan_flags_idrsa_symlink_to_innocuous_target() {
+        use std::os::unix::fs::symlink;
+        // The symlink's own basename is sensitive even if the target isn't.
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        let target = dir.path().join("readme.txt");
+        fs::write(&target, "hi").unwrap();
+        let link = dir.path().join("id_rsa");
+        symlink(&target, &link).unwrap();
+
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        let mut found = result.sensitive_paths_found.clone();
+        found.sort();
+        // The target's basename ("readme.txt") doesn't match. Only the
+        // symlink itself should be flagged.
+        assert_eq!(found, vec!["id_rsa".to_string()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_scan_flags_symlink_via_target_basename() {
+        // Symlink whose own name is innocuous but points at a file whose
+        // basename matches → still flagged because target's basename matches.
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        // Real sensitive file inside a SKIPPED dir so the walker won't
+        // visit it directly. The symlink lives at the root.
+        let nm = dir.path().join("node_modules/inner");
+        fs::create_dir_all(&nm).unwrap();
+        let real = nm.join("creds.pem");
+        fs::write(&real, "x").unwrap();
+        let link = dir.path().join("benign_link");
+        symlink(&real, &link).unwrap();
+
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        // Should report the symlink path (target's basename matched).
+        // Should NOT report the file inside node_modules (that dir is skipped,
+        // and we don't descend into symlinks).
+        assert_eq!(result.sensitive_paths_found, vec!["benign_link".to_string()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_scan_does_not_recurse_into_symlinked_dirs() {
+        // A symlinked directory whose entries are sensitive must NOT be
+        // walked — we don't descend into symlinks. The symlink itself
+        // is flagged only if its name matches.
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        // Sensitive file in an out-of-tree dir.
+        let outside = tempdir().unwrap();
+        fs::write(outside.path().join("server.pem"), "x").unwrap();
+        // Symlinked directory inside the project, with an innocuous name.
+        let link = dir.path().join("vendor");
+        symlink(outside.path(), &link).unwrap();
+
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        // Neither the symlink (innocuous name + target is a directory whose
+        // basename doesn't match) nor the file inside it should appear.
+        assert!(
+            result.sensitive_paths_found.is_empty(),
+            "expected no matches, got {:?}",
+            result.sensitive_paths_found
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_scan_survives_symlink_loop() {
+        // Two dirs symlinked to each other → walker must terminate.
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        fs::create_dir_all(&a).unwrap();
+        fs::create_dir_all(&b).unwrap();
+        // a/loop -> b   and   b/loop -> a
+        symlink(&b, a.join("loop")).unwrap();
+        symlink(&a, b.join("loop")).unwrap();
+        // Drop a real sensitive file in a/ so we still produce something.
+        fs::write(a.join("real.pem"), "x").unwrap();
+
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        // The walker doesn't descend INTO symlinks, so the real file in `a/`
+        // is the only thing we'd ever surface. The point of the test is that
+        // the call returns at all (no infinite loop, no stack overflow).
+        let normalized: Vec<String> = result
+            .sensitive_paths_found
+            .iter()
+            .map(|p| p.replace('\\', "/"))
+            .collect();
+        assert!(
+            normalized.contains(&"a/real.pem".to_string()),
+            "expected a/real.pem in {:?}",
+            normalized
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_scan_flags_broken_symlink_with_sensitive_name() {
+        // A broken `id_rsa` symlink — target doesn't exist — still gets
+        // flagged on the link's own filename.
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let home = fake_home();
+        let nonexistent = dir.path().join("vanished-target");
+        let link = dir.path().join("id_rsa");
+        symlink(&nonexistent, &link).unwrap();
+
+        let result = run_preflight_inner(dir.path(), Some(home.path()));
+        assert_eq!(result.sensitive_paths_found, vec!["id_rsa".to_string()]);
     }
 
     #[test]

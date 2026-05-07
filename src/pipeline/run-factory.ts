@@ -21,7 +21,12 @@ import type { PipelineTemplate } from '@/stores/templateStore';
 import type { PipelineRole, RoleCapabilities, RunFingerprint } from '@/types';
 import { computeFullFingerprint } from './fingerprint';
 import { usePipelineStore } from '@/stores/pipelineStore';
-import { readFileText, pipelineReadRolePrompt } from '@/utils/ipc';
+import {
+  readFileText,
+  pipelineReadRolePrompt,
+  pipelinePreflight,
+  type PreflightResult,
+} from '@/utils/ipc';
 
 export interface RunFactoryDeps {
   /** Reads a SKILL.md content for the given skill name. Returns null if missing. */
@@ -32,6 +37,25 @@ export interface RunFactoryDeps {
   readRoleCapabilities(role: PipelineRole): Promise<RoleCapabilities | null>;
   /** Reads project-root INVARIANTS.md if present. Returns null if missing/empty. */
   readInvariants(): Promise<string | null>;
+  /**
+   * Phase 3a.3: optional preflight check called before run creation.
+   * If `sensitive_paths_found` is non-empty AND `confirmSensitivePaths`
+   * is also provided, the factory awaits user confirmation before
+   * proceeding. When omitted, the factory skips the gate (legacy
+   * behavior for fixtures that pre-date the gate).
+   */
+  preflight?(projectDir: string): Promise<PreflightResult>;
+  /**
+   * UI gate: presented with the sensitive paths, returns `true` to
+   * proceed, `false` to abort. Dep-injected so this layer stays
+   * UI-framework-free; the production callsite renders the modal and
+   * resolves the promise on Acknowledge / Cancel.
+   *
+   * If omitted, the factory falls back to auto-proceed even when paths
+   * are detected (matches legacy behavior; the production callsite
+   * always wires this in alongside `preflight`).
+   */
+  confirmSensitivePaths?(paths: string[]): Promise<boolean>;
 }
 
 export interface CreateRunFromTemplateInput {
@@ -49,12 +73,31 @@ export interface CreateRunFromTemplateInput {
   terminalxVersion: string;
   claudeVersion?: string;
   codexVersion?: string;
+  /**
+   * Project root used for preflight. Required when `deps.preflight` is
+   * provided; ignored otherwise. Phase 3a.3.
+   */
+  projectDir?: string;
   deps: RunFactoryDeps;
 }
 
 export interface CreateRunFromTemplateResult {
+  /**
+   * Run id of the created run, or `''` when `aborted === true`. Empty
+   * string is preferred over `undefined` so the existing destructure
+   * pattern (`const { runId } = await createRunFromTemplate(...)`)
+   * doesn't surprise callers with `undefined` ids slipping into store
+   * dispatch.
+   */
   runId: string;
   fingerprint: RunFingerprint;
+  /**
+   * Phase 3a.3: `true` when the user cancelled at the sensitive-paths
+   * gate. The run was NOT created in the store. The caller is
+   * responsible for tearing down any worktree it created upstream
+   * (the factory does not touch the worktree).
+   */
+  aborted?: boolean;
 }
 
 /** Roles that can have prompts/capabilities. Excludes `controller` (no agent, no prompt). */
@@ -88,6 +131,38 @@ export async function createRunFromTemplate(
   input: CreateRunFromTemplateInput,
 ): Promise<CreateRunFromTemplateResult> {
   const { template, deps } = input;
+
+  // 0. Phase 3a.3 preflight gate. Only runs when both deps are wired in,
+  // so existing fixtures that pre-date the gate stay green. The caller
+  // (UI launch flow) is responsible for tearing down any worktree it
+  // created upstream when this returns `aborted: true` — the factory
+  // does not own the worktree lifecycle.
+  if (deps.preflight && input.projectDir) {
+    const result = await deps.preflight(input.projectDir);
+    if (
+      result.sensitive_paths_found.length > 0 &&
+      deps.confirmSensitivePaths
+    ) {
+      const ok = await deps.confirmSensitivePaths(result.sensitive_paths_found);
+      if (!ok) {
+        // Abort BEFORE fingerprint compute / store insertion. Caller can
+        // detect this via `aborted: true` and tear down the worktree.
+        return {
+          runId: '',
+          fingerprint: {
+            templateId: template.id,
+            templateHash: '',
+            skillHashes: {},
+            rolePromptHashes: {},
+            models: {},
+            capabilityManifests: {},
+            terminalxVersion: input.terminalxVersion,
+          },
+          aborted: true,
+        };
+      }
+    }
+  }
 
   // 1. Skills — dedup across roles, single read per unique name.
   const skillContents: Record<string, string> = {};
@@ -204,5 +279,10 @@ export function defaultRunFactoryDeps(opts: {
     },
     readRoleCapabilities: async (_role) => null, // Phase 2c-iii.
     readInvariants: () => safeRead(`${proj}/INVARIANTS.md`),
+    // Phase 3a.3: production preflight is the Tauri IPC. Default deps
+    // do NOT supply `confirmSensitivePaths` — that wiring lives at the
+    // UI launch callsite where the modal is mounted (the factory itself
+    // stays UI-framework-free).
+    preflight: (projectDir) => pipelinePreflight(projectDir),
   };
 }

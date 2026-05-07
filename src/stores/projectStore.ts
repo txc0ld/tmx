@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 import type { Project } from '@/types';
 import { useCanvasStore } from './canvasStore';
-import { loadProjects, addProjectToStore, deleteProjectFromStore, gitClone } from '@/utils/ipc';
+import {
+  loadProjects,
+  addProjectToStore,
+  updateProjectInStore,
+  deleteProjectFromStore,
+  gitClone,
+} from '@/utils/ipc';
 
 const DEFAULT_PROJECTS: Project[] = [];
 
@@ -14,6 +20,7 @@ interface ProjectState {
   setActive: (id: string) => void;
   loadFromDisk: () => Promise<void>;
   addProject: (project: Project) => Promise<void>;
+  updateProject: (id: string, patch: Partial<Project>) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   cloneFromGithub: (url: string, destPath: string, name: string) => Promise<Project>;
 }
@@ -47,6 +54,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           cwd: p.cwd,
           gitUrl: p.git_url,
           branch: p.branch,
+          webhookUrl: p.webhook_url,
         }));
         // Pick the previously-active project if it's still on disk; otherwise
         // fall back to the first. Use `setActive` so localStorage stays in
@@ -70,6 +78,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   addProject: async (project: Project) => {
     set(s => ({ projects: [...s.projects, project] }));
     await addProjectToStore(toIpc(project)).catch(console.error);
+  },
+
+  updateProject: async (id: string, patch: Partial<Project>) => {
+    const prev = get().projects;
+    const idx = prev.findIndex(p => p.id === id);
+    if (idx === -1) return;
+    // Never let `id` be patched — that would corrupt the persisted file's
+    // identity invariant. The Rust validator enforces this server-side too.
+    const { id: _ignore, ...safePatch } = patch;
+    void _ignore;
+    const merged: Project = { ...prev[idx], ...safePatch };
+    const next = prev.slice();
+    next[idx] = merged;
+    set({ projects: next });
+    try {
+      await updateProjectInStore(toIpc(merged));
+    } catch (err) {
+      // Optimistic rollback on persist failure — same pattern as deleteProject.
+      console.error(err);
+      set({ projects: prev });
+    }
   },
 
   deleteProject: async (id: string) => {
@@ -123,6 +152,7 @@ function toIpc(p: Project) {
     cwd: p.cwd,
     git_url: p.gitUrl,
     branch: p.branch,
+    webhook_url: p.webhookUrl,
   };
 }
 

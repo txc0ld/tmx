@@ -63,6 +63,7 @@ pub fn run() {
             commands::projects::load_projects,
             commands::projects::save_projects,
             commands::projects::add_project,
+            commands::projects::update_project,
             commands::projects::delete_project,
             // Git
             commands::git::git_available,
@@ -96,6 +97,8 @@ pub fn run() {
             commands::pipeline::pipeline_guardrails_install,
             commands::pipeline::pipeline_guardrails_uninstall,
             commands::pipeline::pipeline_install_skills,
+            commands::pipeline::pipeline_skill_status,
+            commands::pipeline::pipeline_force_install_skill,
             commands::pipeline::pipeline_merger_request_token,
             commands::pipeline::pipeline_merger_run,
             commands::pipeline::pipeline_preflight,
