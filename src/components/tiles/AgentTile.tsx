@@ -226,6 +226,14 @@ export function AgentTile({ tile }: AgentTileProps) {
       ...(tile.command ? { customCommand: tile.command } : {}),
     }).then(async (id) => {
       useCanvasStore.getState().updateTile(tile.id, { ptyId: id, status: 'working' } as Partial<AgentTileType>);
+      // Pipeline role-prompt injection (Phase 2c-iii post-script): if the
+      // tile's mode is one of the four pipeline roles, write the bundled
+      // role prompt as the agent's first input. Skipped for stub modes
+      // and for non-pipeline agent tiles. Awaits before agent-memory
+      // injection so the role prompt always lands first.
+      const { injectRolePromptForAgent } = await import('@/pipeline/role-prompt-injection');
+      await injectRolePromptForAgent({ ptyId: id, mode: tile.mode });
+
       // Inject agent memory context once the agent is ready. Ready =
       // 1.2 s of PTY silence after any output arrives, indicating the
       // agent has finished its startup banner and is sitting at a prompt.
