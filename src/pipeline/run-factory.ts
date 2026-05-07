@@ -40,6 +40,12 @@ export interface CreateRunFromTemplateInput {
   projectId: string;
   worktreePath: string;
   branch: string;
+  /**
+   * Fork point the run merges back into. Production callers should resolve
+   * this from `pipelinePreflight().main_branch` before calling. Defaults to
+   * `'main'` if omitted so existing call sites and tests stay green.
+   */
+  baseBranch?: string;
   terminalxVersion: string;
   claudeVersion?: string;
   codexVersion?: string;
@@ -133,6 +139,7 @@ export async function createRunFromTemplate(
     projectId: input.projectId,
     worktreePath: input.worktreePath,
     branch: input.branch,
+    baseBranch: input.baseBranch,
     fingerprint,
   });
 

@@ -55,6 +55,13 @@ export interface InitialRunInputs {
   projectId: string;
   worktreePath: string;
   branch: string;
+  /**
+   * The fork point the run merges back into. Defaults to `'main'` when not
+   * provided so existing call sites stay green; production callers should
+   * resolve this from preflight (`PreflightResult.main_branch`) before
+   * passing it in.
+   */
+  baseBranch?: string;
   fingerprint: RunFingerprint;
 }
 
@@ -65,6 +72,7 @@ export function initialRunState(input: InitialRunInputs): PipelineRun {
     projectId: input.projectId,
     worktreePath: input.worktreePath,
     branch: input.branch,
+    baseBranch: input.baseBranch ?? 'main',
     state: 'idle',
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [] },
     retryCounters: { reviewerReject: 0, ciFail: 0 },

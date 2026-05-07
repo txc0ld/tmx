@@ -35,6 +35,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     projectId: 'proj-1',
     worktreePath: '/tmp/wt/run-clar-1',
     branch: 'feat/run-clar-1',
+    baseBranch: 'main',
     state: 'awaiting_clarification',
     priorActiveState: 'building',
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [makeQuestion()] },

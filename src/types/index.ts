@@ -367,6 +367,14 @@ export interface PipelineRun {
   projectId: string;
   worktreePath: string;
   branch: string;
+  /**
+   * The fork point the run merges back into (typically `main` / `master` /
+   * `develop`). Set at run creation from `git symbolic-ref refs/remotes/origin/HEAD`
+   * (preflight already resolves this) or from a template override.
+   * The merger modal renders the right `gh pr create --base` flag and the
+   * failure bundle takes its `git diff <baseBranch>..HEAD` from this.
+   */
+  baseBranch: string;
   state: PipelineState;
   artifacts: PipelineRunArtifacts;
   retryCounters: { reviewerReject: number; ciFail: number };

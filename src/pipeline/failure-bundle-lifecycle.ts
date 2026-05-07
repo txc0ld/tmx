@@ -107,16 +107,11 @@ export function handleFailureBundleLifecycle(ev: LifecycleEvent): void {
   // distinguish "no preflight" from "preflight missing".
   const preflightJson = '{}';
 
-  // The pipeline run shape doesn't carry the base branch (fingerprint
-  // has the binary versions but not the fork point). Default to "main"
-  // — Phase 3 will plumb this through when the run shape adds it.
-  const baseBranch = 'main';
-
   pipelineFailureBundleGenerate({
     runId: ev.runId,
     projectDir: projectCwd,
     branch: run.branch,
-    baseBranch,
+    baseBranch: run.baseBranch,
     artifactsJson,
     preflightJson,
     terminalxVersion: run.fingerprint.terminalxVersion || TERMINALX_VERSION,

@@ -19,6 +19,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     projectId: 'p1',
     worktreePath: '/tmp/wt/r1',
     branch: 'feat/r1',
+    baseBranch: 'main',
     state: 'idle',
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [] },
     retryCounters: { reviewerReject: 0, ciFail: 0 },

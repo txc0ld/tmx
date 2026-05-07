@@ -32,6 +32,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     projectId: 'proj-1',
     worktreePath: '/tmp/wt/run-test-1',
     branch: 'feat/r-abc',
+    baseBranch: 'main',
     state: 'awaiting_merge_approval',
     artifacts: {
       builds: [

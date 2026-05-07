@@ -13,7 +13,11 @@ function truncDetail(s: string): string {
 
 interface Props {
   run: PipelineRun;
-  /** Optional override for tests / future callers. Defaults to 'main'. */
+  /**
+   * Optional override for tests. Production reads `run.baseBranch` so the
+   * modal renders the correct `gh pr create --base` flag and merge command
+   * for projects targeting `master`/`develop`/etc.
+   */
   baseBranch?: string;
 }
 
@@ -110,7 +114,8 @@ function verdictRowStyle(verdict: ReviewVerdict['verdict']): React.CSSProperties
 
 const COMMIT_LIST_MAX_HEIGHT = 180;
 
-export function MergerConfirmModal({ run, baseBranch = 'main' }: Props) {
+export function MergerConfirmModal({ run, baseBranch: baseBranchOverride }: Props) {
+  const baseBranch = baseBranchOverride ?? run.baseBranch;
   const dispatch = usePipelineStore(s => s.dispatch);
   const addToast = useToastStore(s => s.addToast);
   const [submitting, setSubmitting] = useState(false);

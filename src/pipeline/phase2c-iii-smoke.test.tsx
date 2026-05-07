@@ -119,6 +119,7 @@ function seedRun(runId: string, overrides: Partial<PipelineRun> = {}): PipelineR
     projectId: PROJECT_ID,
     worktreePath: WORKTREE,
     branch: BRANCH,
+    baseBranch: 'main',
     state: 'idle',
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [] },
     retryCounters: { reviewerReject: 0, ciFail: 0 },
