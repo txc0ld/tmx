@@ -9,6 +9,7 @@ import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter, usePipelineSt
 import { isTerminalState } from '@/pipeline/state-machine';
 import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
 import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capabilities-lifecycle';
+import { handleFailureBundleLifecycle } from '@/pipeline/failure-bundle-lifecycle';
 import { startStuckDetector } from '@/pipeline/stuck-detector';
 import { startNotifier } from '@/pipeline/notifications';
 import { startWebhookNotifier } from '@/pipeline/webhook-notifier';
@@ -161,6 +162,11 @@ export default function App() {
       }
       try { handleCapabilitiesLifecycle(ev); } catch (e) {
         console.warn('[pipeline] capabilities lifecycle threw:', e);
+      }
+      // Phase 2c-iii.7: on terminal-FAILURE crossings, write a tar.gz
+      // failure bundle next to the project. Successes (`done`) skip.
+      try { handleFailureBundleLifecycle(ev); } catch (e) {
+        console.warn('[pipeline] failure-bundle lifecycle threw:', e);
       }
     });
     return () => setPipelineLifecycleEmitter(null);

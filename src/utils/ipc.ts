@@ -444,6 +444,47 @@ export async function pipelineGuardrailsUninstall(worktreeDir: string): Promise<
   await invoke<void>('pipeline_guardrails_uninstall', { worktreeDir });
 }
 
+// ─── Pipeline failure-bundle generator (Phase 2c-iii.7) ─────────
+
+export interface FailureBundleResult {
+  bundle_path: string;
+  size_bytes: number;
+  entries: string[];
+}
+
+/**
+ * Generate `<projectDir>/.terminalx/failure-bundles/<runId>.tar.gz` with
+ * telemetry, artifacts, preflight, git status/diff, and tool versions.
+ * Every text artifact is masked through `secretsMask` server-side before
+ * tar-archiving — frontend callers don't have to pre-mask, but doing so
+ * is harmless because `mask_secrets` is idempotent.
+ */
+export async function pipelineFailureBundleGenerate(opts: {
+  runId: string;
+  projectDir: string;
+  branch: string;
+  baseBranch: string;
+  artifactsJson: string;
+  preflightJson: string;
+  terminalxVersion: string;
+  claudeVersion?: string;
+  codexVersion?: string;
+}): Promise<FailureBundleResult> {
+  return invoke<FailureBundleResult>('pipeline_failure_bundle_generate', {
+    input: {
+      project_dir: opts.projectDir,
+      run_id: opts.runId,
+      branch: opts.branch,
+      base_branch: opts.baseBranch,
+      artifacts_json: opts.artifactsJson,
+      preflight_json: opts.preflightJson,
+      terminalx_version: opts.terminalxVersion,
+      claude_version: opts.claudeVersion ?? null,
+      codex_version: opts.codexVersion ?? null,
+    },
+  });
+}
+
 // ─── Pipeline capability scoping (Phase 2c-ii.4) ──────────────
 
 export async function pipelineCapabilitiesInstall(opts: {
