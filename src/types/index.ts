@@ -218,6 +218,8 @@ export type PipelineState =
   | 'awaiting_plan_approval'
   | 'building'
   | 'reviewing'
+  | 'awaiting_dual_reviewer'
+  | 'awaiting_tiebreaker'
   | 'awaiting_clarification'
   | 'awaiting_merge_approval'
   | 'merging'

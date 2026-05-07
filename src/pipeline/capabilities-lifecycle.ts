@@ -54,6 +54,12 @@ export function activeRoleForState(state: PipelineState): PipelineRole | null {
     case 'building':
       return 'builder';
     case 'reviewing':
+    case 'awaiting_dual_reviewer':
+    case 'awaiting_tiebreaker':
+      // Phase 3c.4: dual-reviewer + tiebreaker rounds keep reviewer caps
+      // installed. Both `reviewer` and `reviewer-codex` use the same
+      // capability manifest (read-only diff review), so we install caps
+      // for `reviewer` and let both consume them.
       return 'reviewer';
     default:
       return null;

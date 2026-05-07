@@ -57,6 +57,8 @@ export const ACTIVE_STAGES: ReadonlySet<PipelineState> = new Set([
   'planning',
   'building',
   'reviewing',
+  'awaiting_dual_reviewer',
+  'awaiting_tiebreaker',
   'merging',
 ]);
 
@@ -75,6 +77,8 @@ export const QUESTIONABLE_STATES: ReadonlySet<PipelineState> = new Set([
   'planning',
   'building',
   'reviewing',
+  'awaiting_dual_reviewer',
+  'awaiting_tiebreaker',
   'merging',
   'awaiting_plan_approval',
   'awaiting_merge_approval',
@@ -228,37 +232,145 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
       if (run.state !== 'building') return run;
       return {
         ...run,
-        state: 'reviewing',
+        // Phase 3c.4: dual-reviewer runs fan out to BOTH `reviewer` (Opus)
+        // and `reviewer-codex` after each build. The reducer routes through
+        // `awaiting_dual_reviewer` so the controller's lifecycle dispatcher
+        // can spawn the second one-shot. Single-reviewer flow (default) keeps
+        // the legacy `reviewing` transition.
+        state: run.useDualReviewer ? 'awaiting_dual_reviewer' : 'reviewing',
         artifacts: { ...run.artifacts, builds: [...run.artifacts.builds, ev.build] },
       };
 
     case 'reviewer_done': {
-      if (run.state !== 'reviewing') return run;
-      const reviews = [...run.artifacts.reviews, ev.verdict];
-      if (ev.verdict.verdict === 'approve') {
+      // Single-reviewer flow (legacy / non-dual templates / non-complex runs).
+      if (run.state === 'reviewing') {
+        const reviews = [...run.artifacts.reviews, ev.verdict];
+        if (ev.verdict.verdict === 'approve') {
+          return {
+            ...run,
+            state: 'awaiting_merge_approval',
+            artifacts: { ...run.artifacts, reviews },
+          };
+        }
+        const next = run.retryCounters.reviewerReject + 1;
+        if (next > run.effectiveRetryBudgets.reviewerReject) {
+          return {
+            ...run,
+            state: 'escalated',
+            retryCounters: { ...run.retryCounters, reviewerReject: next },
+            artifacts: { ...run.artifacts, reviews },
+            failureClass: 'reviewer_irreconcilable',
+            endedAt: Date.now(),
+          };
+        }
         return {
           ...run,
-          state: 'awaiting_merge_approval',
-          artifacts: { ...run.artifacts, reviews },
-        };
-      }
-      const next = run.retryCounters.reviewerReject + 1;
-      if (next > run.effectiveRetryBudgets.reviewerReject) {
-        return {
-          ...run,
-          state: 'escalated',
+          state: 'building',
           retryCounters: { ...run.retryCounters, reviewerReject: next },
           artifacts: { ...run.artifacts, reviews },
-          failureClass: 'reviewer_irreconcilable',
-          endedAt: Date.now(),
         };
       }
-      return {
-        ...run,
-        state: 'building',
-        retryCounters: { ...run.retryCounters, reviewerReject: next },
-        artifacts: { ...run.artifacts, reviews },
-      };
+
+      // Phase 3c.4: dual-reviewer flow.
+      //
+      // Both `reviewer` (Opus) + `reviewer-codex` are in flight after
+      // `builder_done`. We hold in `awaiting_dual_reviewer` until BOTH
+      // verdicts have arrived, then reconcile:
+      //   - Both approve → awaiting_merge_approval (synthesize a 'merged'
+      //     verdict that records both source reviewers' confidence).
+      //   - Both reject → building (counter increments; budget-respecting).
+      //   - Disagree → awaiting_tiebreaker, NO counter increment yet — the
+      //     third (gemini) provider's vote breaks the tie.
+      //
+      // Late/duplicate verdicts from the same reviewer are appended to the
+      // artifacts list but don't double-count for reconciliation; we match
+      // by `reviewer` key (opus / codex) on every reconciliation pass.
+      if (run.state === 'awaiting_dual_reviewer') {
+        const reviews = [...run.artifacts.reviews, ev.verdict];
+        // Pull the most-recent verdict from each reviewer this round (search
+        // backwards so a defensive duplicate sentinel from the same reviewer
+        // doesn't shadow the other one's verdict).
+        let opusVerdict: ReviewVerdict | undefined;
+        let codexVerdict: ReviewVerdict | undefined;
+        for (let i = reviews.length - 1; i >= 0; i--) {
+          const r = reviews[i];
+          if (!opusVerdict && r.reviewer === 'opus') opusVerdict = r;
+          else if (!codexVerdict && r.reviewer === 'codex') codexVerdict = r;
+          if (opusVerdict && codexVerdict) break;
+        }
+        if (!opusVerdict || !codexVerdict) {
+          // First of two — keep waiting. State unchanged but artifacts grow.
+          return { ...run, artifacts: { ...run.artifacts, reviews } };
+        }
+        // Reconcile.
+        if (opusVerdict.verdict === 'approve' && codexVerdict.verdict === 'approve') {
+          return {
+            ...run,
+            state: 'awaiting_merge_approval',
+            artifacts: { ...run.artifacts, reviews },
+          };
+        }
+        if (opusVerdict.verdict === 'reject' && codexVerdict.verdict === 'reject') {
+          const next = run.retryCounters.reviewerReject + 1;
+          if (next > run.effectiveRetryBudgets.reviewerReject) {
+            return {
+              ...run,
+              state: 'escalated',
+              retryCounters: { ...run.retryCounters, reviewerReject: next },
+              artifacts: { ...run.artifacts, reviews },
+              failureClass: 'reviewer_irreconcilable',
+              endedAt: Date.now(),
+            };
+          }
+          return {
+            ...run,
+            state: 'building',
+            retryCounters: { ...run.retryCounters, reviewerReject: next },
+            artifacts: { ...run.artifacts, reviews },
+          };
+        }
+        // Disagreement — third reviewer breaks the tie. NO counter bump:
+        // we don't penalize the builder for one rejection that's contested
+        // by the other reviewer. The tiebreaker's verdict decides whether
+        // the round counts as a rejection.
+        return {
+          ...run,
+          state: 'awaiting_tiebreaker',
+          artifacts: { ...run.artifacts, reviews },
+        };
+      }
+
+      // Tiebreaker round — the third provider's verdict is decisive.
+      if (run.state === 'awaiting_tiebreaker') {
+        const reviews = [...run.artifacts.reviews, ev.verdict];
+        if (ev.verdict.verdict === 'approve') {
+          return {
+            ...run,
+            state: 'awaiting_merge_approval',
+            artifacts: { ...run.artifacts, reviews },
+          };
+        }
+        // Tiebreaker rejected — NOW the round counts as a rejection.
+        const next = run.retryCounters.reviewerReject + 1;
+        if (next > run.effectiveRetryBudgets.reviewerReject) {
+          return {
+            ...run,
+            state: 'escalated',
+            retryCounters: { ...run.retryCounters, reviewerReject: next },
+            artifacts: { ...run.artifacts, reviews },
+            failureClass: 'reviewer_irreconcilable',
+            endedAt: Date.now(),
+          };
+        }
+        return {
+          ...run,
+          state: 'building',
+          retryCounters: { ...run.retryCounters, reviewerReject: next },
+          artifacts: { ...run.artifacts, reviews },
+        };
+      }
+
+      return run;
     }
 
     case 'ci_pass':

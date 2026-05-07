@@ -602,4 +602,220 @@ describe('pipeline state machine', () => {
       },
     })).toBe(run);
   });
+
+  // ─── Phase 3c.4: dual-reviewer reconciliation + tiebreaker ──────
+
+  describe('dual-reviewer reconciliation (Phase 3c.4)', () => {
+    const opusApprove = (round = 1) => ({
+      stage: 'reviewer' as const, reviewer: 'opus' as const, verdict: 'approve' as const,
+      round, comments: [], summary: 'lgtm-opus', confidence: 'verified' as const,
+    });
+    const opusReject = (round = 1) => ({
+      stage: 'reviewer' as const, reviewer: 'opus' as const, verdict: 'reject' as const,
+      round, comments: [], summary: 'no-opus', confidence: 'verified' as const,
+    });
+    const codexApprove = (round = 1) => ({
+      stage: 'reviewer' as const, reviewer: 'codex' as const, verdict: 'approve' as const,
+      round, comments: [], summary: 'lgtm-codex', confidence: 'verified' as const,
+    });
+    const codexReject = (round = 1) => ({
+      stage: 'reviewer' as const, reviewer: 'codex' as const, verdict: 'reject' as const,
+      round, comments: [], summary: 'no-codex', confidence: 'verified' as const,
+    });
+    // Tiebreaker uses the merged-style stamp (any reviewer slot will do; the
+    // reducer doesn't care which `reviewer` field wins the tiebreaker, only
+    // its `verdict`). Use 'merged' so the artifact log clearly marks it.
+    const tiebreakerApprove = () => ({
+      stage: 'reviewer' as const, reviewer: 'merged' as const, verdict: 'approve' as const,
+      round: 1, comments: [], summary: 'lgtm-tiebreaker', confidence: 'verified' as const,
+    });
+    const tiebreakerReject = () => ({
+      stage: 'reviewer' as const, reviewer: 'merged' as const, verdict: 'reject' as const,
+      round: 1, comments: [], summary: 'no-tiebreaker', confidence: 'verified' as const,
+    });
+
+    it('non-dual run: builder_done → reviewing (legacy single-reviewer flow)', () => {
+      const run = makeRun({ state: 'building', useDualReviewer: false });
+      const next = reducer(run, {
+        type: 'builder_done',
+        build: {
+          stage: 'builder', branch: 'feat/r1', headSha: 'a', round: 1,
+          commits: [], filesChanged: [], testsAdded: [], ciStatus: 'green',
+          confidence: 'verified',
+        },
+      });
+      expect(next.state).toBe('reviewing');
+    });
+
+    it('dual run: builder_done → awaiting_dual_reviewer', () => {
+      const run = makeRun({ state: 'building', useDualReviewer: true });
+      const next = reducer(run, {
+        type: 'builder_done',
+        build: {
+          stage: 'builder', branch: 'feat/r1', headSha: 'a', round: 1,
+          commits: [], filesChanged: [], testsAdded: [], ciStatus: 'green',
+          confidence: 'verified',
+        },
+      });
+      expect(next.state).toBe('awaiting_dual_reviewer');
+      expect(next.artifacts.builds.length).toBe(1);
+    });
+
+    it('first reviewer arrives alone → stays in awaiting_dual_reviewer', () => {
+      const run = makeRun({ state: 'awaiting_dual_reviewer', useDualReviewer: true });
+      const next = reducer(run, { type: 'reviewer_done', verdict: opusApprove() });
+      expect(next.state).toBe('awaiting_dual_reviewer');
+      expect(next.artifacts.reviews.length).toBe(1);
+    });
+
+    it('both approve → awaiting_merge_approval', () => {
+      let run = makeRun({ state: 'awaiting_dual_reviewer', useDualReviewer: true });
+      run = reducer(run, { type: 'reviewer_done', verdict: opusApprove() });
+      expect(run.state).toBe('awaiting_dual_reviewer');
+      run = reducer(run, { type: 'reviewer_done', verdict: codexApprove() });
+      expect(run.state).toBe('awaiting_merge_approval');
+      expect(run.artifacts.reviews.length).toBe(2);
+      expect(run.retryCounters.reviewerReject).toBe(0);
+    });
+
+    it('both reject within budget → building (counter increments)', () => {
+      let run = makeRun({ state: 'awaiting_dual_reviewer', useDualReviewer: true });
+      run = reducer(run, { type: 'reviewer_done', verdict: opusReject() });
+      run = reducer(run, { type: 'reviewer_done', verdict: codexReject() });
+      expect(run.state).toBe('building');
+      expect(run.retryCounters.reviewerReject).toBe(1);
+      expect(run.artifacts.reviews.length).toBe(2);
+    });
+
+    it('both reject exceeds budget → escalated (reviewer_irreconcilable)', () => {
+      let run = makeRun({
+        state: 'awaiting_dual_reviewer',
+        useDualReviewer: true,
+        retryCounters: { reviewerReject: 3, ciFail: 0 },
+      });
+      run = reducer(run, { type: 'reviewer_done', verdict: opusReject(4) });
+      run = reducer(run, { type: 'reviewer_done', verdict: codexReject(4) });
+      expect(run.state).toBe('escalated');
+      expect(run.failureClass).toBe('reviewer_irreconcilable');
+      expect(run.endedAt).toBeGreaterThan(0);
+    });
+
+    it('disagree (opus approve, codex reject) → awaiting_tiebreaker, NO counter bump', () => {
+      let run = makeRun({ state: 'awaiting_dual_reviewer', useDualReviewer: true });
+      run = reducer(run, { type: 'reviewer_done', verdict: opusApprove() });
+      run = reducer(run, { type: 'reviewer_done', verdict: codexReject() });
+      expect(run.state).toBe('awaiting_tiebreaker');
+      expect(run.retryCounters.reviewerReject).toBe(0);
+      expect(run.artifacts.reviews.length).toBe(2);
+    });
+
+    it('disagree (opus reject, codex approve) → awaiting_tiebreaker (order independent)', () => {
+      let run = makeRun({ state: 'awaiting_dual_reviewer', useDualReviewer: true });
+      run = reducer(run, { type: 'reviewer_done', verdict: codexApprove() });
+      run = reducer(run, { type: 'reviewer_done', verdict: opusReject() });
+      expect(run.state).toBe('awaiting_tiebreaker');
+      expect(run.retryCounters.reviewerReject).toBe(0);
+    });
+
+    it('tiebreaker approves → awaiting_merge_approval', () => {
+      let run = makeRun({
+        state: 'awaiting_dual_reviewer',
+        useDualReviewer: true,
+        artifacts: {
+          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [],
+        },
+      });
+      // First, get into the tiebreaker state (the test prepares that with
+      // pre-seeded artifacts by re-issuing one of them and letting the
+      // reducer reconcile). Simpler: jump straight to awaiting_tiebreaker.
+      run = makeRun({
+        state: 'awaiting_tiebreaker',
+        useDualReviewer: true,
+        artifacts: {
+          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [],
+        },
+      });
+      run = reducer(run, { type: 'reviewer_done', verdict: tiebreakerApprove() });
+      expect(run.state).toBe('awaiting_merge_approval');
+      expect(run.retryCounters.reviewerReject).toBe(0);
+      expect(run.artifacts.reviews.length).toBe(3);
+    });
+
+    it('tiebreaker rejects within budget → building (counter NOW increments)', () => {
+      let run = makeRun({
+        state: 'awaiting_tiebreaker',
+        useDualReviewer: true,
+        artifacts: {
+          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [],
+        },
+      });
+      run = reducer(run, { type: 'reviewer_done', verdict: tiebreakerReject() });
+      expect(run.state).toBe('building');
+      expect(run.retryCounters.reviewerReject).toBe(1);
+      expect(run.artifacts.reviews.length).toBe(3);
+    });
+
+    it('tiebreaker rejects at budget threshold → escalated', () => {
+      let run = makeRun({
+        state: 'awaiting_tiebreaker',
+        useDualReviewer: true,
+        retryCounters: { reviewerReject: 3, ciFail: 0 },
+        artifacts: {
+          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [],
+        },
+      });
+      run = reducer(run, { type: 'reviewer_done', verdict: tiebreakerReject() });
+      expect(run.state).toBe('escalated');
+      expect(run.failureClass).toBe('reviewer_irreconcilable');
+      expect(run.endedAt).toBeGreaterThan(0);
+    });
+
+    it('end-to-end: complex run loops through dual + tiebreaker + retry', () => {
+      let run = makeRun({
+        state: 'planning',
+        useDualReviewer: true,
+        templateDualReviewer: true,
+        runMode: 'complex',
+        effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
+      });
+      // planner_done → awaiting_plan_approval
+      run = reducer(run, {
+        type: 'planner_done',
+        plan: {
+          stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
+          tasks: [], summary: 's', planCommitSha: 'sha-v1',
+          complexity: 'complex', confidence: 'verified',
+        },
+      });
+      expect(run.state).toBe('awaiting_plan_approval');
+      expect(run.useDualReviewer).toBe(true);
+      // approve → building → builder_done → awaiting_dual_reviewer
+      run = reducer(run, { type: 'approve_plan' });
+      expect(run.state).toBe('building');
+      run = reducer(run, {
+        type: 'builder_done',
+        build: {
+          stage: 'builder', branch: 'feat/r1', headSha: 'a', round: 1,
+          commits: [], filesChanged: [], testsAdded: [], ciStatus: 'green',
+          confidence: 'verified',
+        },
+      });
+      expect(run.state).toBe('awaiting_dual_reviewer');
+      // Disagree → awaiting_tiebreaker (no counter bump)
+      run = reducer(run, { type: 'reviewer_done', verdict: opusApprove() });
+      run = reducer(run, { type: 'reviewer_done', verdict: codexReject() });
+      expect(run.state).toBe('awaiting_tiebreaker');
+      expect(run.retryCounters.reviewerReject).toBe(0);
+      // Tiebreaker rejects → building (counter NOW = 1)
+      run = reducer(run, { type: 'reviewer_done', verdict: tiebreakerReject() });
+      expect(run.state).toBe('building');
+      expect(run.retryCounters.reviewerReject).toBe(1);
+    });
+
+    it('reviewer_done in unrelated state is no-op', () => {
+      const run = makeRun({ state: 'building', useDualReviewer: true });
+      const next = reducer(run, { type: 'reviewer_done', verdict: opusApprove() });
+      expect(next).toBe(run);
+    });
+  });
 });
