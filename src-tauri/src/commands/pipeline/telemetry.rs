@@ -1,6 +1,13 @@
 //! `pipeline_telemetry_log` — JSONL append-only log per pipeline run.
+//!
+//! Every line is run through `secrets_mask::mask_secrets` before write so
+//! the on-disk telemetry can never leak a token / PEM / high-entropy env
+//! value. This is defense-in-depth: the frontend already calls
+//! `secretsMask` for explicit cases (failure bundle, webhook), but the
+//! telemetry path here also masks so a forgotten call site can't leak.
 
 use super::validate_path_arg;
+use crate::commands::secrets_mask::mask_secrets;
 use std::path::Path;
 
 fn validate_run_id(id: &str) -> Result<(), String> {
@@ -22,6 +29,16 @@ fn telemetry_log_inner(project_dir: &Path, run_id: &str, line: &str) -> Result<(
         return Err("telemetry line may not contain newlines".into());
     }
 
+    // Mask secrets BEFORE write. `mask_secrets` is idempotent so frontend
+    // callers that already masked won't double-encode.
+    let masked = mask_secrets(line);
+    if masked.contains('\n') {
+        // Belt-and-suspenders: masking shouldn't introduce newlines (PEM
+        // collapses to a single token, hashes are 6-char). If somehow
+        // the mask introduced one, refuse.
+        return Err("masked telemetry line contains newline".into());
+    }
+
     let dir = project_dir.join(".terminalx/pipeline-telemetry");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create dir: {e}"))?;
 
@@ -32,7 +49,7 @@ fn telemetry_log_inner(project_dir: &Path, run_id: &str, line: &str) -> Result<(
         .append(true)
         .open(&path)
         .map_err(|e| format!("open {}: {e}", path.display()))?;
-    f.write_all(line.as_bytes()).map_err(|e| format!("write: {e}"))?;
+    f.write_all(masked.as_bytes()).map_err(|e| format!("write: {e}"))?;
     f.write_all(b"\n").map_err(|e| format!("write nl: {e}"))?;
 
     Ok(())
@@ -96,5 +113,22 @@ mod tests {
         let dir = tempdir().unwrap();
         let res = telemetry_log_inner(dir.path(), "../escape", r#"{"at":1}"#);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn telemetry_log_masks_secrets_before_write() {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        let line = r#"{"at":1,"event":"state_change","note":"OPENAI_API_KEY=sk-abc123XYZ_ZZZ-456789defghi"}"#;
+
+        telemetry_log_inner(project, "r-mask", line).unwrap();
+
+        let f = project.join(".terminalx/pipeline-telemetry/r-mask.jsonl");
+        let contents = fs::read_to_string(&f).unwrap();
+        assert!(
+            !contents.contains("sk-abc123XYZ_ZZZ-456789defghi"),
+            "secret leaked into telemetry: {contents}"
+        );
+        assert!(contents.contains("<MASKED:"), "no mask token in telemetry: {contents}");
     }
 }

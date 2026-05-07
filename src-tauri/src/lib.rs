@@ -85,6 +85,8 @@ pub fn run() {
             commands::secrets::secret_set,
             commands::secrets::secret_get,
             commands::secrets::secret_delete,
+            // Secret masking — telemetry / failure-bundle / webhook hygiene
+            commands::secrets_mask::secrets_mask,
             // Pipeline (agentic-pipeline Phase 1)
             commands::pipeline::pipeline_capabilities_install,
             commands::pipeline::pipeline_capabilities_uninstall,

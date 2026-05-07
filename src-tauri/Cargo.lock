@@ -4795,6 +4795,7 @@ dependencies = [
  "notify-debouncer-mini",
  "parking_lot",
  "portable-pty",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

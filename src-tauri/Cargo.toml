@@ -53,6 +53,7 @@ dirs = "6"
 shellexpand = "3"
 parking_lot = "0.12"
 sha2 = "0.10"
+regex = "1"
 
 # OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret
 # Service) for MCP tokens. `apple-native` + `windows-native` use the

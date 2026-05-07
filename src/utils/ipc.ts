@@ -416,6 +416,23 @@ export async function pipelineTelemetryLog(opts: {
   await invoke<void>('pipeline_telemetry_log', opts);
 }
 
+/**
+ * Mask detected secrets in arbitrary text. Returns the same string with
+ * known-prefix tokens (`sk-…`, `ghp_…`, `xoxb-…`, `AKIA…`, `AIza…`,
+ * `ya29.…`, `glpat-…`) replaced by `<MASKED:hash6>`, PEM blocks replaced
+ * by `<MASKED:PEM>`, and high-entropy values in `KEY=…` / `"key": …`
+ * shapes replaced by `<MASKED:hash6>`. Pure-hex (git SHAs, lock-file
+ * checksums) and `sha\d+-…` lock-file integrity hashes are deliberately
+ * NOT masked.
+ *
+ * The pipeline telemetry path applies masking server-side automatically;
+ * call this for failure-bundle / webhook payloads where the frontend
+ * controls the wire format.
+ */
+export async function secretsMask(input: string): Promise<string> {
+  return invoke<string>('secrets_mask', { input });
+}
+
 export async function pipelineGuardrailsInstall(worktreeDir: string): Promise<void> {
   await invoke<void>('pipeline_guardrails_install', { worktreeDir });
 }
