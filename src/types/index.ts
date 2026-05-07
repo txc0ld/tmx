@@ -210,7 +210,7 @@ export interface UsageTile extends TileBase {
 // ─── Pipeline (Phase 1 foundation) ─────────────────────────────────
 
 export type PipelineRole =
-  | 'planner' | 'builder' | 'reviewer' | 'reviewer-codex' | 'controller';
+  | 'planner' | 'builder' | 'reviewer' | 'reviewer-codex' | 'red-team' | 'controller';
 
 export type PipelineState =
   | 'idle'
@@ -220,6 +220,7 @@ export type PipelineState =
   | 'reviewing'
   | 'awaiting_dual_reviewer'
   | 'awaiting_tiebreaker'
+  | 'awaiting_red_team'
   | 'awaiting_clarification'
   | 'awaiting_merge_approval'
   | 'merging'
@@ -233,6 +234,7 @@ export type FailureClass =
   | 'builder_loop'
   | 'reviewer_irreconcilable'
   | 'reviewer_disagreement_unresolved'
+  | 'red_team_blocker'
   | 'budget_exceeded'
   | 'stage_unresponsive'
   | 'subagent_failed'
@@ -378,6 +380,30 @@ export interface QuestionArtifact {
   blocking: true;
 }
 
+/**
+ * Phase 3c.6: red-team finding categories. Mirrors ReviewComment.severity
+ * (`blocker | concern | nit`) so the merger modal can render both with
+ * a consistent severity legend. `blocker` halts the run; `concern` is
+ * surfaced but doesn't block; `nit` is advisory.
+ */
+export interface RedTeamFinding {
+  severity: 'blocker' | 'concern' | 'nit';
+  category: 'supply-chain' | 'prompt-injection' | 'secret-exposure' | 'race-condition' | 'edge-case' | 'other';
+  description: string;
+  /** Optional citation — the file the issue manifests in. */
+  file?: string;
+  line?: number;
+}
+
+export interface RedTeamReport {
+  stage: 'red-team';
+  findings: RedTeamFinding[];
+  summary: string;
+  /** Same calibrated self-assessment field as Reviewer/Builder/Planner. */
+  confidence: 'verified' | 'likely' | 'uncertain';
+  uncertaintyDrivers?: string[];
+}
+
 export interface EscalationEntry {
   at: number;
   reason: string;
@@ -392,6 +418,14 @@ export interface PipelineRunArtifacts {
   reviews: ReviewVerdict[];
   ciResults: CIResult[];
   questions: QuestionArtifact[];
+  /**
+   * Phase 3c.6: red-team reports. Empty unless the run is `complex` and
+   * the Reviewer approved at least once (the red-team only fires after
+   * approval). `concern`-severity findings live here for the merger modal
+   * to render; `blocker`-severity findings transition the run to `failed`
+   * with `failureClass: 'red_team_blocker'`.
+   */
+  redTeamReports: RedTeamReport[];
 }
 
 export interface PipelineRun {

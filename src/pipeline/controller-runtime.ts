@@ -14,6 +14,7 @@ import type {
   BuildArtifact,
   ReviewVerdict,
   QuestionArtifact,
+  RedTeamReport,
   Tile,
   AgentTile,
 } from '@/types';
@@ -402,6 +403,30 @@ function dispatchSentinel(
       }
       return;
     }
+    case 'redteam_done': {
+      // Phase 3c.6: red-team one-shot finished. Validate the payload shape
+      // before handing it to the reducer — a bad sentinel from the role
+      // shouldn't hang the run. Required fields: stage, findings (array),
+      // summary (string), confidence.
+      const report = ev.payload as Partial<RedTeamReport>;
+      if (
+        report.stage !== 'red-team' ||
+        !Array.isArray(report.findings) ||
+        typeof report.summary !== 'string' ||
+        !isValidConfidence(report.confidence)
+      ) {
+        dispatch(runId, {
+          type: 'abort',
+          reason: `${role} red-team sentinel malformed (missing stage/findings/summary/confidence)`,
+        });
+        return;
+      }
+      dispatch(runId, { type: 'red_team_done', report: ev.payload as RedTeamReport });
+      return;
+    }
+    case 'redteam_failed':
+      dispatch(runId, { type: 'red_team_failed', reason: `${role}: ${ev.payload.reason}` });
+      return;
     case 'parse_error':
       dispatch(runId, role === 'planner'
         ? { type: 'planner_failed', reason: `malformed sentinel: ${ev.error}` }

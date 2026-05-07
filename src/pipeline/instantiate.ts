@@ -22,6 +22,7 @@ const ROLE_TITLES: Record<PipelineRole, string> = {
   builder: 'Builder',
   reviewer: 'Reviewer',
   'reviewer-codex': 'Reviewer (Codex)',
+  'red-team': 'Red Team',
   controller: 'Controller',
 };
 

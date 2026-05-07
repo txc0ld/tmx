@@ -158,4 +158,42 @@ describe('scanForSentinel', () => {
     }
     expect(event?.consumedThrough).toBeGreaterThan(0);
   });
+
+  // Phase 3c.6: red-team sentinels.
+  it('finds TX_REDTEAM_DONE with findings + summary + confidence', () => {
+    const buf =
+      '<<<TX_REDTEAM_DONE>>>{"stage":"red-team","findings":[{"severity":"concern","category":"supply-chain","description":"new dep `foo` not pinned","file":"package.json","line":42}],"summary":"one supply-chain concern","confidence":"verified"}\n';
+    const event = scanForSentinel(buf);
+    expect(event?.kind).toBe('redteam_done');
+    if (event?.kind === 'redteam_done') {
+      expect(event.payload.stage).toBe('red-team');
+      expect(event.payload.findings).toHaveLength(1);
+      expect(event.payload.findings[0].severity).toBe('concern');
+      expect(event.payload.findings[0].category).toBe('supply-chain');
+      expect(event.payload.summary).toBe('one supply-chain concern');
+      expect(event.payload.confidence).toBe('verified');
+    }
+    expect(event?.consumedThrough).toBeGreaterThan(0);
+  });
+
+  it('finds TX_REDTEAM_DONE with empty findings (clean diff)', () => {
+    const buf =
+      '<<<TX_REDTEAM_DONE>>>{"stage":"red-team","findings":[],"summary":"clean","confidence":"verified"}\n';
+    const event = scanForSentinel(buf);
+    expect(event?.kind).toBe('redteam_done');
+    if (event?.kind === 'redteam_done') {
+      expect(event.payload.findings).toEqual([]);
+    }
+  });
+
+  it('finds TX_REDTEAM_FAILED with reason', () => {
+    const buf =
+      '<<<TX_REDTEAM_FAILED>>>{"reason":"could not access diff","suggestedFix":"re-run after merging base"}\n';
+    const event = scanForSentinel(buf);
+    expect(event?.kind).toBe('redteam_failed');
+    if (event?.kind === 'redteam_failed') {
+      expect(event.payload.reason).toBe('could not access diff');
+      expect(event.payload.suggestedFix).toBe('re-run after merging base');
+    }
+  });
 });

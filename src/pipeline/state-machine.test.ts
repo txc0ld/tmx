@@ -21,7 +21,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     branch: 'feat/r1',
     baseBranch: 'main',
     state: 'idle',
-    artifacts: { builds: [], reviews: [], ciResults: [], questions: [] },
+    artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
     retryCounters: { reviewerReject: 0, ciFail: 0 },
     startedAt: 0,
     escalationLog: [],
@@ -722,7 +722,7 @@ describe('pipeline state machine', () => {
         state: 'awaiting_dual_reviewer',
         useDualReviewer: true,
         artifacts: {
-          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [],
+          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [], redTeamReports: [],
         },
       });
       // First, get into the tiebreaker state (the test prepares that with
@@ -732,7 +732,7 @@ describe('pipeline state machine', () => {
         state: 'awaiting_tiebreaker',
         useDualReviewer: true,
         artifacts: {
-          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [],
+          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [], redTeamReports: [],
         },
       });
       run = reducer(run, { type: 'reviewer_done', verdict: tiebreakerApprove() });
@@ -746,7 +746,7 @@ describe('pipeline state machine', () => {
         state: 'awaiting_tiebreaker',
         useDualReviewer: true,
         artifacts: {
-          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [],
+          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [], redTeamReports: [],
         },
       });
       run = reducer(run, { type: 'reviewer_done', verdict: tiebreakerReject() });
@@ -761,7 +761,7 @@ describe('pipeline state machine', () => {
         useDualReviewer: true,
         retryCounters: { reviewerReject: 3, ciFail: 0 },
         artifacts: {
-          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [],
+          builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [], redTeamReports: [],
         },
       });
       run = reducer(run, { type: 'reviewer_done', verdict: tiebreakerReject() });
@@ -816,6 +816,175 @@ describe('pipeline state machine', () => {
       const run = makeRun({ state: 'building', useDualReviewer: true });
       const next = reducer(run, { type: 'reviewer_done', verdict: opusApprove() });
       expect(next).toBe(run);
+    });
+  });
+
+  // ─── Phase 3c.6: red-team role ──────────────────────────────────────
+
+  describe('red-team role (Phase 3c.6)', () => {
+    const reviewApprove = () => ({
+      stage: 'reviewer' as const, reviewer: 'opus' as const, verdict: 'approve' as const,
+      round: 1, comments: [], summary: 'lgtm', confidence: 'verified' as const,
+    });
+    const codexApproveLocal = () => ({
+      stage: 'reviewer' as const, reviewer: 'codex' as const, verdict: 'approve' as const,
+      round: 1, comments: [], summary: 'lgtm-codex', confidence: 'verified' as const,
+    });
+    const tiebreakerApproveLocal = () => ({
+      stage: 'reviewer' as const, reviewer: 'merged' as const, verdict: 'approve' as const,
+      round: 1, comments: [], summary: 'lgtm-tb', confidence: 'verified' as const,
+    });
+    const cleanReport = (): import('@/types').RedTeamReport => ({
+      stage: 'red-team',
+      findings: [],
+      summary: 'no findings',
+      confidence: 'verified',
+    });
+    const concernReport = (): import('@/types').RedTeamReport => ({
+      stage: 'red-team',
+      findings: [{
+        severity: 'concern',
+        category: 'supply-chain',
+        description: 'new dep not pinned',
+        file: 'package.json',
+        line: 42,
+      }],
+      summary: 'one supply-chain concern',
+      confidence: 'verified',
+    });
+    const blockerReport = (): import('@/types').RedTeamReport => ({
+      stage: 'red-team',
+      findings: [{
+        severity: 'blocker',
+        category: 'secret-exposure',
+        description: 'API key written to log on error path',
+        file: 'src/auth.ts',
+        line: 88,
+      }],
+      summary: 'secret leaks under error',
+      confidence: 'verified',
+    });
+
+    it('reviewer approve + runRedTeam=false → awaiting_merge_approval (control)', () => {
+      const run = makeRun({ state: 'reviewing', runRedTeam: false });
+      const next = reducer(run, { type: 'reviewer_done', verdict: reviewApprove() });
+      expect(next.state).toBe('awaiting_merge_approval');
+    });
+
+    it('reviewer approve + runRedTeam=true → awaiting_red_team (new branch)', () => {
+      const run = makeRun({ state: 'reviewing', runRedTeam: true });
+      const next = reducer(run, { type: 'reviewer_done', verdict: reviewApprove() });
+      expect(next.state).toBe('awaiting_red_team');
+    });
+
+    it('dual-reviewer both approve + runRedTeam=true → awaiting_red_team', () => {
+      let run = makeRun({
+        state: 'awaiting_dual_reviewer',
+        useDualReviewer: true,
+        runRedTeam: true,
+      });
+      run = reducer(run, { type: 'reviewer_done', verdict: reviewApprove() });
+      expect(run.state).toBe('awaiting_dual_reviewer'); // first arrives alone
+      run = reducer(run, { type: 'reviewer_done', verdict: codexApproveLocal() });
+      expect(run.state).toBe('awaiting_red_team');
+    });
+
+    it('tiebreaker approve + runRedTeam=true → awaiting_red_team', () => {
+      const codexRejectLocal = () => ({
+        stage: 'reviewer' as const, reviewer: 'codex' as const, verdict: 'reject' as const,
+        round: 1, comments: [], summary: 'no-codex', confidence: 'verified' as const,
+      });
+      const run = makeRun({
+        state: 'awaiting_tiebreaker',
+        useDualReviewer: true,
+        runRedTeam: true,
+        artifacts: {
+          builds: [], reviews: [reviewApprove(), codexRejectLocal()], ciResults: [], questions: [], redTeamReports: [],
+        },
+      });
+      const next = reducer(run, { type: 'reviewer_done', verdict: tiebreakerApproveLocal() });
+      expect(next.state).toBe('awaiting_red_team');
+    });
+
+    it('red_team_done with no findings → awaiting_merge_approval', () => {
+      const run = makeRun({ state: 'awaiting_red_team', runRedTeam: true });
+      const next = reducer(run, { type: 'red_team_done', report: cleanReport() });
+      expect(next.state).toBe('awaiting_merge_approval');
+      expect(next.artifacts.redTeamReports).toHaveLength(1);
+    });
+
+    it('red_team_done with concerns only → awaiting_merge_approval (concerns surface, do not block)', () => {
+      const run = makeRun({ state: 'awaiting_red_team', runRedTeam: true });
+      const next = reducer(run, { type: 'red_team_done', report: concernReport() });
+      expect(next.state).toBe('awaiting_merge_approval');
+      expect(next.artifacts.redTeamReports).toHaveLength(1);
+      expect(next.artifacts.redTeamReports[0].findings[0].severity).toBe('concern');
+    });
+
+    it('red_team_done with blocker → failed (failureClass=red_team_blocker)', () => {
+      const run = makeRun({ state: 'awaiting_red_team', runRedTeam: true });
+      const next = reducer(run, { type: 'red_team_done', report: blockerReport() });
+      expect(next.state).toBe('failed');
+      expect(next.failureClass).toBe('red_team_blocker');
+      expect(next.failureReason).toContain('blocker');
+      expect(next.endedAt).toBeGreaterThan(0);
+      expect(next.artifacts.redTeamReports).toHaveLength(1);
+    });
+
+    it('red_team_done with mixed severities (1 blocker + 2 concerns) → failed', () => {
+      const run = makeRun({ state: 'awaiting_red_team', runRedTeam: true });
+      const mixed: import('@/types').RedTeamReport = {
+        stage: 'red-team',
+        findings: [
+          { severity: 'concern', category: 'edge-case', description: 'unicode boundary' },
+          { severity: 'blocker', category: 'race-condition', description: 'lock released early' },
+          { severity: 'concern', category: 'supply-chain', description: 'unpinned dep' },
+        ],
+        summary: 'mixed',
+        confidence: 'verified',
+      };
+      const next = reducer(run, { type: 'red_team_done', report: mixed });
+      expect(next.state).toBe('failed');
+      expect(next.failureClass).toBe('red_team_blocker');
+    });
+
+    it('red_team_failed → failed with role reason', () => {
+      const run = makeRun({ state: 'awaiting_red_team', runRedTeam: true });
+      const next = reducer(run, { type: 'red_team_failed', reason: 'red-team: env broken' });
+      expect(next.state).toBe('failed');
+      expect(next.failureClass).toBe('red_team_blocker');
+      expect(next.failureReason).toBe('red-team: env broken');
+    });
+
+    it('red_team_done from non-awaiting_red_team state is no-op', () => {
+      for (const state of ['building', 'reviewing', 'awaiting_merge_approval', 'merging'] as const) {
+        const run = makeRun({ state, runRedTeam: true });
+        const next = reducer(run, { type: 'red_team_done', report: blockerReport() });
+        expect(next).toBe(run);
+      }
+    });
+
+    it('approve_merge from awaiting_red_team is a no-op (must clear red-team first)', () => {
+      const run = makeRun({ state: 'awaiting_red_team', runRedTeam: true });
+      const next = reducer(run, { type: 'approve_merge' });
+      expect(next).toBe(run);
+    });
+
+    it('end-to-end complex flow: reviewer approve → red-team clean → merge_approval → done', () => {
+      let run = makeRun({
+        state: 'reviewing',
+        runMode: 'complex',
+        runRedTeam: true,
+        effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
+      });
+      run = reducer(run, { type: 'reviewer_done', verdict: reviewApprove() });
+      expect(run.state).toBe('awaiting_red_team');
+      run = reducer(run, { type: 'red_team_done', report: cleanReport() });
+      expect(run.state).toBe('awaiting_merge_approval');
+      run = reducer(run, { type: 'approve_merge' });
+      expect(run.state).toBe('merging');
+      run = reducer(run, { type: 'merge_done' });
+      expect(run.state).toBe('done');
     });
   });
 });

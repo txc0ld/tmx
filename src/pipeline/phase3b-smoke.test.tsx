@@ -98,7 +98,7 @@ function makeRun(state: PipelineState = 'building', overrides: Partial<PipelineR
     branch: 'feat/3b',
     baseBranch: 'main',
     state,
-    artifacts: { builds: [], reviews: [], ciResults: [], questions: [] },
+    artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
     retryCounters: { reviewerReject: 0, ciFail: 0 },
     startedAt: Date.now(),
     escalationLog: [],

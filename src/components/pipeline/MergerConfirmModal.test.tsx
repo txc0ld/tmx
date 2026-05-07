@@ -73,6 +73,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
       ],
       ciResults: [],
       questions: [],
+      redTeamReports: [],
     },
     retryCounters: { reviewerReject: 0, ciFail: 0 },
     startedAt: 1,

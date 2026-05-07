@@ -121,7 +121,7 @@ function seedRun(runId: string, overrides: Partial<PipelineRun> = {}): PipelineR
     branch: BRANCH,
     baseBranch: 'main',
     state: 'idle',
-    artifacts: { builds: [], reviews: [], ciResults: [], questions: [] },
+    artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
     retryCounters: { reviewerReject: 0, ciFail: 0 },
     startedAt: Date.now(),
     escalationLog: [],

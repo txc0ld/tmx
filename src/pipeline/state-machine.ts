@@ -6,6 +6,7 @@ import type {
   ReviewVerdict,
   CIResult,
   QuestionArtifact,
+  RedTeamReport,
   RunFingerprint,
 } from '@/types';
 
@@ -48,6 +49,21 @@ function scaleBudgets(
 export const TERMINAL_STATES: ReadonlySet<PipelineState> = new Set(['done', 'failed', 'escalated']);
 
 /**
+ * Phase 3c.6: when a reviewer-approve transition fires (single, dual-both,
+ * or tiebreaker), the run normally heads to `awaiting_merge_approval`.
+ * For `complex`-complexity runs the complexity gate stamped
+ * `runRedTeam = true`; in that case we route through `awaiting_red_team`
+ * first so the red-team one-shot has a chance to surface findings.
+ *
+ * Concerns surface in `artifacts.redTeamReports` for the merger modal but
+ * don't block; blockers transition the run to `failed` with
+ * `failureClass: 'red_team_blocker'`. See `red_team_done` reducer case.
+ */
+function postReviewerApprovalState(run: PipelineRun): PipelineState {
+  return run.runRedTeam ? 'awaiting_red_team' : 'awaiting_merge_approval';
+}
+
+/**
  * Active in-flight stages — used to validate the `priorActiveState` we resume
  * into when a `clarification_received` event lands (and historically to gate
  * `question_raised`, but see `QUESTIONABLE_STATES` for the broader set that
@@ -59,6 +75,7 @@ export const ACTIVE_STAGES: ReadonlySet<PipelineState> = new Set([
   'reviewing',
   'awaiting_dual_reviewer',
   'awaiting_tiebreaker',
+  'awaiting_red_team',
   'merging',
 ]);
 
@@ -79,6 +96,7 @@ export const QUESTIONABLE_STATES: ReadonlySet<PipelineState> = new Set([
   'reviewing',
   'awaiting_dual_reviewer',
   'awaiting_tiebreaker',
+  'awaiting_red_team',
   'merging',
   'awaiting_plan_approval',
   'awaiting_merge_approval',
@@ -105,6 +123,8 @@ export type PipelineEvent =
   | { type: 'merge_failed'; reason: string }
   | { type: 'replan_requested'; reason: string }
   | { type: 'heartbeat' }
+  | { type: 'red_team_done'; report: RedTeamReport }
+  | { type: 'red_team_failed'; reason: string }
   | { type: 'abort'; reason: string };
 
 export interface InitialRunInputs {
@@ -143,7 +163,7 @@ export function initialRunState(input: InitialRunInputs): PipelineRun {
     branch: input.branch,
     baseBranch: input.baseBranch ?? 'main',
     state: 'idle',
-    artifacts: { builds: [], reviews: [], ciResults: [], questions: [] },
+    artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
     retryCounters: { reviewerReject: 0, ciFail: 0 },
     startedAt: Date.now(),
     escalationLog: [],
@@ -248,7 +268,7 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
         if (ev.verdict.verdict === 'approve') {
           return {
             ...run,
-            state: 'awaiting_merge_approval',
+            state: postReviewerApprovalState(run),
             artifacts: { ...run.artifacts, reviews },
           };
         }
@@ -306,7 +326,7 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
         if (opusVerdict.verdict === 'approve' && codexVerdict.verdict === 'approve') {
           return {
             ...run,
-            state: 'awaiting_merge_approval',
+            state: postReviewerApprovalState(run),
             artifacts: { ...run.artifacts, reviews },
           };
         }
@@ -346,7 +366,7 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
         if (ev.verdict.verdict === 'approve') {
           return {
             ...run,
-            state: 'awaiting_merge_approval',
+            state: postReviewerApprovalState(run),
             artifacts: { ...run.artifacts, reviews },
           };
         }
@@ -457,6 +477,59 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
       // Terminal states already filtered above. Just stamp the wall clock —
       // the stuck-detector reads this to decide when a run has gone silent.
       return { ...run, lastHeartbeatAt: Date.now() };
+
+    case 'red_team_done': {
+      // Phase 3c.6: red-team completion. Only valid from `awaiting_red_team`;
+      // late/duplicate sentinels in any other state are no-ops (the run has
+      // already moved on, e.g. user already approved the merge).
+      //
+      // Routing:
+      //   - 0 blockers → awaiting_merge_approval (concerns persist in
+      //     artifacts.redTeamReports for the merger modal to render).
+      //   - ≥1 blocker → failed with failureClass='red_team_blocker'.
+      //
+      // We use `failed` (not `escalated`) because the red-team finding a
+      // blocker is a non-recoverable signal — the diff has a flaw the
+      // Reviewer missed AND the system is calibrated to halt rather than
+      // re-loop. The user can `replan_requested` from `escalated`, not
+      // `failed`. If a future iteration wants red-team blockers to feed
+      // back into `building`, that's a behavioral change — capture it in
+      // a follow-up plan.
+      if (run.state !== 'awaiting_red_team') return run;
+      const redTeamReports = [...run.artifacts.redTeamReports, ev.report];
+      const hasBlocker = ev.report.findings.some(f => f.severity === 'blocker');
+      if (hasBlocker) {
+        return {
+          ...run,
+          state: 'failed',
+          failureReason: `red-team found ${ev.report.findings.filter(f => f.severity === 'blocker').length} blocker(s)`,
+          failureClass: 'red_team_blocker',
+          artifacts: { ...run.artifacts, redTeamReports },
+          endedAt: Date.now(),
+        };
+      }
+      return {
+        ...run,
+        state: 'awaiting_merge_approval',
+        artifacts: { ...run.artifacts, redTeamReports },
+      };
+    }
+
+    case 'red_team_failed': {
+      // The red-team role refusal-protocoled (TX_REDTEAM_FAILED). Like
+      // builder/reviewer abort: the run can't safely advance to merge
+      // because the red-team didn't get a chance to look. Halt with the
+      // role's reason; user can replan if they want to try again under
+      // different conditions.
+      if (run.state !== 'awaiting_red_team') return run;
+      return {
+        ...run,
+        state: 'failed',
+        failureReason: ev.reason,
+        failureClass: 'red_team_blocker',
+        endedAt: Date.now(),
+      };
+    }
 
     case 'replan_requested': {
       // Narrow re-entry: only `escalated` may be re-planned. From any other

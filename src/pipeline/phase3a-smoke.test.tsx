@@ -310,6 +310,7 @@ describe('Phase 3a smoke: settings modal + factory gate + skills + webhook caden
                   blocking: true,
                 },
               ],
+              redTeamReports: [],
             },
             retryCounters: { reviewerReject: 0, ciFail: 0 },
             startedAt: Date.now(),
@@ -385,6 +386,7 @@ describe('Phase 3a smoke: settings modal + factory gate + skills + webhook caden
               questions: [
                 { stage: 'builder', question: 'q?', context: '', blocking: true },
               ],
+              redTeamReports: [],
             },
             retryCounters: { reviewerReject: 0, ciFail: 0 },
             startedAt: Date.now(),

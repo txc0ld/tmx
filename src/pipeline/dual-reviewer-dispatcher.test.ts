@@ -32,7 +32,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     branch: 'feat/r1',
     baseBranch: 'main',
     state: 'awaiting_dual_reviewer',
-    artifacts: { builds: [], reviews: [], ciResults: [], questions: [] },
+    artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
     retryCounters: { reviewerReject: 0, ciFail: 0 },
     startedAt: 0,
     escalationLog: [],

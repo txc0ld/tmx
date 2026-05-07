@@ -106,6 +106,7 @@ const PROMPTED_ROLES: readonly PipelineRole[] = [
   'builder',
   'reviewer',
   'reviewer-codex',
+  'red-team',
 ];
 
 /**
