@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   ingestPtyChunk,
   ingestOneshotResult,
   getLastStdoutAt,
   resetIngestionBuffersForTest,
+  clearRunBuffers,
 } from './controller-runtime';
+import * as scratchpadWatcher from './scratchpad-watcher';
 import { usePipelineStore } from '@/stores/pipelineStore';
 import type { RunFingerprint } from '@/types';
 
@@ -153,6 +155,60 @@ describe('controller runtime', () => {
     expect(run.lastHeartbeatAt!).toBeLessThanOrEqual(after);
     // Heartbeat must NOT change pipeline state.
     expect(run.state).toBe('planning');
+  });
+
+  it('Phase 3b.2: Builder heartbeat invokes scratchpad-watcher with worktreePath', () => {
+    const spy = vi.spyOn(scratchpadWatcher, 'notifyBuilderActivity').mockResolvedValue();
+    try {
+      const runId = usePipelineStore.getState().createRun({
+        runId: 'r-sw1', templateId: 't', projectId: 'p1',
+        worktreePath: '/tmp/wt-sw', branch: 'feat/r1', fingerprint: FP,
+      });
+      usePipelineStore.getState().dispatch(runId, { type: 'start' });
+      usePipelineStore.getState().dispatch(runId, { type: 'planner_done', plan: {
+        stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha',
+      }});
+      usePipelineStore.getState().dispatch(runId, { type: 'approve_plan' });
+
+      ingestPtyChunk({ runId, role: 'builder', chunk: '<<<TX_HEARTBEAT>>>{"reason":"thinking"}\n' });
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+        runId,
+        role: 'builder',
+        worktreePath: '/tmp/wt-sw',
+      }));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('Phase 3b.2: non-builder roles do NOT invoke scratchpad-watcher', () => {
+    const spy = vi.spyOn(scratchpadWatcher, 'notifyBuilderActivity').mockResolvedValue();
+    try {
+      const runId = usePipelineStore.getState().createRun({
+        runId: 'r-sw2', templateId: 't', projectId: 'p1',
+        worktreePath: '/tmp/wt-sw', branch: 'feat/r1', fingerprint: FP,
+      });
+      usePipelineStore.getState().dispatch(runId, { type: 'start' });
+
+      // Planner heartbeat — must NOT trigger the watcher.
+      ingestPtyChunk({ runId, role: 'planner', chunk: '<<<TX_HEARTBEAT>>>{"reason":"thinking"}\n' });
+
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('Phase 3b.2: clearRunBuffers also clears scratchpad bookkeeping', () => {
+    const spy = vi.spyOn(scratchpadWatcher, 'clearScratchpadState');
+    try {
+      clearRunBuffers('r-sw3');
+      expect(spy).toHaveBeenCalledWith('r-sw3');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('ingestPtyChunk records last-stdout-at; clearRunBuffers (terminal) clears it', () => {

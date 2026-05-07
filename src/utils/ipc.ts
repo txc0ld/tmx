@@ -117,6 +117,16 @@ export async function getFileSize(path: string): Promise<number> {
   return invoke('get_file_size', { path });
 }
 
+/**
+ * Last-modified time of a file in ms since epoch, or `null` when missing.
+ * Used by the pipeline scratchpad-watcher (Phase 3b.2) to detect Builder
+ * stagnation on `<worktree>/.tx-builder-notes.md`. Unlike `read_file_text`,
+ * a missing file resolves cleanly to `null` rather than rejecting.
+ */
+export async function readFileMtime(path: string): Promise<number | null> {
+  return invoke('read_file_mtime', { path });
+}
+
 // ─── OS keychain — sensitive value storage ────────────────
 // Never stores the value in localStorage. Use for API tokens, OAuth
 // secrets, anything you'd redact in a log. Account convention:

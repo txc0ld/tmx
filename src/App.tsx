@@ -15,6 +15,7 @@ import { startNotifier } from '@/pipeline/notifications';
 import { startWebhookNotifier } from '@/pipeline/webhook-notifier';
 import { sendNotification } from '@tauri-apps/plugin-notification';
 import { getLastStdoutAt } from '@/pipeline/controller-runtime';
+import { resumeFromClarification } from '@/pipeline/scratchpad-watcher';
 import type { AgentTile, PipelineRole, PipelineRun } from '@/types';
 import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas';
 import { ProjectSidebar } from '@/components/sidebar/ProjectSidebar';
@@ -158,10 +159,20 @@ export default function App() {
     const offGuardrails = setPipelineLifecycleEmitter(handleGuardrailsLifecycle);
     const offCapabilities = setPipelineLifecycleEmitter(handleCapabilitiesLifecycle);
     const offFailureBundle = setPipelineLifecycleEmitter(handleFailureBundleLifecycle);
+    // Phase 3b.2: when a run leaves `awaiting_clarification`, reset the
+    // scratchpad-watcher's pendingProbe debounce so the next stagnation
+    // window can fire one fresh synthetic clarification (rather than being
+    // permanently silenced after the first probe).
+    const offScratchpadResume = setPipelineLifecycleEmitter((ev) => {
+      if (ev.from === 'awaiting_clarification' && ev.to !== 'awaiting_clarification') {
+        resumeFromClarification(ev.runId);
+      }
+    });
     return () => {
       offGuardrails();
       offCapabilities();
       offFailureBundle();
+      offScratchpadResume();
     };
   }, []);
 

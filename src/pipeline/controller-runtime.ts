@@ -1,5 +1,6 @@
 import { usePipelineStore } from '@/stores/pipelineStore';
 import { scanForSentinel } from './sentinel-scanner';
+import { notifyBuilderActivity, clearScratchpadState } from './scratchpad-watcher';
 import type {
   PipelineRole,
   PlanArtifact,
@@ -107,12 +108,30 @@ export function ingestOneshotResult(input: {
   });
 }
 
+/**
+ * Phase 3b.2: every Builder sentinel/heartbeat triggers a scratchpad
+ * mtime check. Fire-and-forget — the watcher is async (IPC) but the
+ * dispatch path is sync; we don't want to block sentinel processing on
+ * a filesystem stat. Errors are swallowed inside the watcher itself.
+ */
+function maybeNotifyBuilder(runId: string, role: PipelineRole): void {
+  if (role !== 'builder') return;
+  const run = usePipelineStore.getState().runs[runId];
+  if (!run || !run.worktreePath) return;
+  void notifyBuilderActivity({ runId, role, worktreePath: run.worktreePath });
+}
+
 function dispatchSentinel(
   runId: string,
   role: PipelineRole,
   ev: ReturnType<typeof scanForSentinel> & object,
   dispatch: Dispatch,
 ): void {
+  // Builder activity (any sentinel kind, including heartbeat) → kick
+  // the scratchpad-watcher. Done before the dispatch so the watcher
+  // sees the run *before* a terminal-state transition might tear it down.
+  maybeNotifyBuilder(runId, role);
+
   switch (ev.kind) {
     case 'done': {
       const payload = ev.payload as PlanArtifact | BuildArtifact | ReviewVerdict;
@@ -171,6 +190,8 @@ export function clearRunBuffers(runId: string): void {
     if (key.startsWith(`${runId}:`)) ptyBuffers.delete(key);
   }
   lastStdoutAt.delete(runId);
+  // Phase 3b.2: drop scratchpad bookkeeping alongside other per-run state.
+  clearScratchpadState(runId);
 }
 
 /** Test helper — reset all internal buffers between vitest cases. */
