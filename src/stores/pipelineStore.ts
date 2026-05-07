@@ -80,10 +80,23 @@ export type TelemetryEvent =
   | ClarificationTelemetryEvent;
 
 type TelemetryEmitter = (event: TelemetryEvent) => void;
-let telemetryEmitter: TelemetryEmitter | null = null;
+const telemetryListeners: Set<TelemetryEmitter> = new Set();
 
-export function setPipelineTelemetryEmitter(fn: TelemetryEmitter | null): void {
-  telemetryEmitter = fn;
+/**
+ * Register a telemetry listener; returns an unsubscribe fn. Multiple
+ * listeners are supported — each is invoked on every emit, isolated with
+ * try/catch so one throwing doesn't suppress the others.
+ *
+ * Back-compat: passing `null` clears every listener (matches the prior
+ * single-slot semantic).
+ */
+export function setPipelineTelemetryEmitter(fn: TelemetryEmitter | null): (() => void) {
+  if (fn === null) {
+    telemetryListeners.clear();
+    return () => {};
+  }
+  telemetryListeners.add(fn);
+  return () => telemetryListeners.delete(fn);
 }
 
 /**
@@ -91,14 +104,15 @@ export function setPipelineTelemetryEmitter(fn: TelemetryEmitter | null): void {
  * lifecycle handlers (capabilities/guardrails) and the MergerConfirmModal
  * to record outcomes that aren't tied to a state-machine transition.
  *
- * Safe no-op when no emitter is registered (e.g. vitest jsdom).
+ * Safe no-op when no listener is registered (e.g. vitest jsdom).
  */
 export function emitTelemetry(event: TelemetryEvent): void {
-  if (!telemetryEmitter) return;
-  try {
-    telemetryEmitter(event);
-  } catch (err) {
-    console.warn('[pipeline] telemetry emitter threw:', err);
+  for (const fn of telemetryListeners) {
+    try {
+      fn(event);
+    } catch (err) {
+      console.warn('[pipeline] telemetry listener threw:', err);
+    }
   }
 }
 
@@ -122,10 +136,23 @@ export interface LifecycleEvent {
   trigger: string;
 }
 type LifecycleEmitter = (event: LifecycleEvent) => void;
-let lifecycleEmitter: LifecycleEmitter | null = null;
+const lifecycleListeners: Set<LifecycleEmitter> = new Set();
 
-export function setPipelineLifecycleEmitter(fn: LifecycleEmitter | null): void {
-  lifecycleEmitter = fn;
+/**
+ * Register a lifecycle listener; returns an unsubscribe fn. Multiple
+ * listeners are supported — guardrails / capabilities / failure-bundle
+ * each register independently. Each is invoked with try/catch isolation
+ * so one throwing doesn't suppress the others.
+ *
+ * Back-compat: passing `null` clears every listener.
+ */
+export function setPipelineLifecycleEmitter(fn: LifecycleEmitter | null): (() => void) {
+  if (fn === null) {
+    lifecycleListeners.clear();
+    return () => {};
+  }
+  lifecycleListeners.add(fn);
+  return () => lifecycleListeners.delete(fn);
 }
 
 interface PipelineStoreShape {
@@ -195,18 +222,18 @@ export const usePipelineStore = create<PipelineStoreShape>((set) => ({
       return { runs, activeRunIds };
     });
 
-    if (pendingTelemetry && telemetryEmitter) {
-      try {
-        telemetryEmitter(pendingTelemetry);
-      } catch (err) {
-        console.warn('[pipeline] telemetry emitter threw:', err);
+    if (pendingTelemetry) {
+      for (const fn of telemetryListeners) {
+        try { fn(pendingTelemetry); } catch (err) {
+          console.warn('[pipeline] telemetry listener threw:', err);
+        }
       }
     }
-    if (pendingLifecycle && lifecycleEmitter) {
-      try {
-        lifecycleEmitter(pendingLifecycle);
-      } catch (err) {
-        console.warn('[pipeline] lifecycle emitter threw:', err);
+    if (pendingLifecycle) {
+      for (const fn of lifecycleListeners) {
+        try { fn(pendingLifecycle); } catch (err) {
+          console.warn('[pipeline] lifecycle listener threw:', err);
+        }
       }
     }
   },

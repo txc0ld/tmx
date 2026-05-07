@@ -137,39 +137,31 @@ export default function App() {
   // Wire pipelineStore telemetry to the Rust JSONL writer at app boot.
   // Tests leave this unset → telemetry is a no-op in jsdom.
   useEffect(() => {
-    setPipelineTelemetryEmitter(ev => {
+    return setPipelineTelemetryEmitter(ev => {
       pipelineTelemetryLog({
         projectDir: ev.projectId,
         runId: ev.runId,
         line: JSON.stringify(ev),
       }).catch(err => console.warn('[pipeline] telemetry log failed:', err));
     });
-    return () => setPipelineTelemetryEmitter(null);
   }, []);
 
-  // Phase 2c-ii.3 + 2c-ii.4: pipeline lifecycle emitter dispatches to BOTH
-  // the guardrails (PreToolUse hook) and the capabilities (permissions
-  // allow/deny per role) handlers. They operate on the same settings.json
-  // but on different keys so order doesn't matter; we run guardrails first
-  // for chronology with the rollout (it shipped one task earlier).
+  // Pipeline lifecycle handlers — registered as independent listeners
+  // (the store fans out to all of them with try/catch isolation per
+  // listener). Each handler operates on a disjoint slice of state:
+  // - guardrails (Phase 2c-ii.3): worktree's `.claude/settings.json`
+  //   `hooks.PreToolUse` entries
+  // - capabilities (Phase 2c-ii.4): same file's `permissions.*` keys
+  // - failure-bundle (Phase 2c-iii.7): writes a tar.gz on terminal failure
   useEffect(() => {
-    setPipelineLifecycleEmitter((ev) => {
-      // Each handler isolated — a synchronous throw in one must NOT swallow
-      // the other. Both drive disjoint settings.json keys, so failure of one
-      // doesn't invalidate the other.
-      try { handleGuardrailsLifecycle(ev); } catch (e) {
-        console.warn('[pipeline] guardrails lifecycle threw:', e);
-      }
-      try { handleCapabilitiesLifecycle(ev); } catch (e) {
-        console.warn('[pipeline] capabilities lifecycle threw:', e);
-      }
-      // Phase 2c-iii.7: on terminal-FAILURE crossings, write a tar.gz
-      // failure bundle next to the project. Successes (`done`) skip.
-      try { handleFailureBundleLifecycle(ev); } catch (e) {
-        console.warn('[pipeline] failure-bundle lifecycle threw:', e);
-      }
-    });
-    return () => setPipelineLifecycleEmitter(null);
+    const offGuardrails = setPipelineLifecycleEmitter(handleGuardrailsLifecycle);
+    const offCapabilities = setPipelineLifecycleEmitter(handleCapabilitiesLifecycle);
+    const offFailureBundle = setPipelineLifecycleEmitter(handleFailureBundleLifecycle);
+    return () => {
+      offGuardrails();
+      offCapabilities();
+      offFailureBundle();
+    };
   }, []);
 
   // Stuck-detector: ticks at 250ms, probes silent runs at 5min, aborts at 8min.
