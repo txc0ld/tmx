@@ -358,6 +358,10 @@ export interface PreflightResult {
   gh_present: boolean;
   gh_authenticated: boolean;
   worktree_dir_writable: boolean;
+  // 2c-ii.6 additions (kept at end so older deserializers stay compat).
+  signed_skills_ok: boolean;
+  capability_binaries_ok: boolean;
+  skill_cache_writable: boolean;
   errors: string[];
 }
 
@@ -412,6 +416,31 @@ export async function pipelineTelemetryLog(opts: {
   await invoke<void>('pipeline_telemetry_log', opts);
 }
 
+export async function pipelineGuardrailsInstall(worktreeDir: string): Promise<void> {
+  await invoke<void>('pipeline_guardrails_install', { worktreeDir });
+}
+
+export async function pipelineGuardrailsUninstall(worktreeDir: string): Promise<void> {
+  await invoke<void>('pipeline_guardrails_uninstall', { worktreeDir });
+}
+
+// ─── Pipeline capability scoping (Phase 2c-ii.4) ──────────────
+
+export async function pipelineCapabilitiesInstall(opts: {
+  worktreeDir: string;
+  role: string;
+  capabilities: import('@/types').RoleCapabilities;
+}): Promise<void> {
+  await invoke<void>('pipeline_capabilities_install', opts);
+}
+
+export async function pipelineCapabilitiesUninstall(opts: {
+  worktreeDir: string;
+  role: string;
+}): Promise<void> {
+  await invoke<void>('pipeline_capabilities_uninstall', opts);
+}
+
 // ─── Pipeline verification step (Phase 2c-i) ──────────────────
 
 export interface VerificationStepResult {
@@ -441,6 +470,50 @@ export async function pipelineRunVerificationStep(opts: {
       command: opts.command,
       kind: opts.kind,
       timeout_secs: opts.timeoutSecs ?? 600,
+    },
+  });
+}
+
+// ─── Pipeline merger (Phase 2c-ii) ────────────────────────────
+
+export interface MergerResult {
+  status: 'success' | 'failure' | 'invalid_token';
+  mode: 'pr' | 'local' | 'unknown';
+  pr_url: string | null;
+  detail: string;
+}
+
+/**
+ * Request a one-shot 5-min confirm-token bound to `runId`. The UI confirm modal
+ * (Phase 2c-ii.2) issues this immediately before calling `pipelineMergerRun` so
+ * no IPC caller can merge without going through the modal.
+ */
+export async function pipelineMergerRequestToken(runId: string): Promise<string> {
+  return invoke<string>('pipeline_merger_request_token', { runId });
+}
+
+/**
+ * Run the merger step: opens a PR via `gh pr create` when a GitHub remote is
+ * detected, otherwise performs a local `git switch <base> && git merge --no-ff
+ * <branch>`. `confirmToken` MUST be a token previously returned by
+ * `pipelineMergerRequestToken(runId)`; tokens are one-shot and expire after 5
+ * minutes. Runtime failures fold into `{ status: 'failure'|'invalid_token' }`
+ * rather than rejecting.
+ */
+export async function pipelineMergerRun(opts: {
+  runId: string;
+  projectDir: string;
+  branch: string;
+  baseBranch: string;
+  confirmToken: string;
+}): Promise<MergerResult> {
+  return invoke<MergerResult>('pipeline_merger_run', {
+    input: {
+      run_id: opts.runId,
+      project_dir: opts.projectDir,
+      branch: opts.branch,
+      base_branch: opts.baseBranch,
+      confirm_token: opts.confirmToken,
     },
   });
 }
