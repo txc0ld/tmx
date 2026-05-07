@@ -176,6 +176,19 @@ function dispatchSentinel(
     case 'heartbeat':
       dispatch(runId, { type: 'heartbeat' });
       return;
+    case 'subagent_done':
+      // Sub-agent invocations live *within* a Builder task — they don't
+      // transition pipeline state. Phase 3b.8 wires a real telemetry
+      // variant; for now log so a developer tailing the console sees
+      // the sub-agent boundary. The Builder activity bookkeeping above
+      // (`maybeNotifyBuilder`) already kicked the scratchpad-watcher.
+      // eslint-disable-next-line no-console
+      console.info('[pipeline] subagent_done:', { runId, role, payload: ev.payload });
+      return;
+    case 'subagent_failed':
+      // eslint-disable-next-line no-console
+      console.info('[pipeline] subagent_failed:', { runId, role, payload: ev.payload });
+      return;
     case 'parse_error':
       dispatch(runId, role === 'planner'
         ? { type: 'planner_failed', reason: `malformed sentinel: ${ev.error}` }

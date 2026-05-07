@@ -211,6 +211,74 @@ describe('controller runtime', () => {
     }
   });
 
+  // Phase 3b.5: sub-agent sentinels are informational — they must NOT
+  // transition pipeline state. They live within a Builder task, and the
+  // state machine only tracks stage-level transitions.
+  it('Phase 3b.5: TX_SUBAGENT_DONE does NOT advance Builder run state', () => {
+    const runId = usePipelineStore.getState().createRun({
+      runId: 'r-sa1', templateId: 't', projectId: 'p1',
+      worktreePath: '/tmp/wt-sa', branch: 'feat/r1', fingerprint: FP,
+    });
+    usePipelineStore.getState().dispatch(runId, { type: 'start' });
+    usePipelineStore.getState().dispatch(runId, { type: 'planner_done', plan: {
+      stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha',
+    }});
+    usePipelineStore.getState().dispatch(runId, { type: 'approve_plan' });
+    expect(usePipelineStore.getState().runs[runId].state).toBe('building');
+
+    const sentinel = '<<<TX_SUBAGENT_DONE>>>{"filesEdited":["src/x.ts"],"commitsCreated":["abc1234"],"summary":"did the thing"}\n';
+    ingestPtyChunk({ runId, role: 'builder', chunk: sentinel });
+
+    // State unchanged — sub-agents don't transition the run.
+    expect(usePipelineStore.getState().runs[runId].state).toBe('building');
+  });
+
+  it('Phase 3b.5: TX_SUBAGENT_FAILED does NOT advance run state (still building)', () => {
+    const runId = usePipelineStore.getState().createRun({
+      runId: 'r-sa2', templateId: 't', projectId: 'p1',
+      worktreePath: '/tmp/wt-sa', branch: 'feat/r1', fingerprint: FP,
+    });
+    usePipelineStore.getState().dispatch(runId, { type: 'start' });
+    usePipelineStore.getState().dispatch(runId, { type: 'planner_done', plan: {
+      stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha',
+    }});
+    usePipelineStore.getState().dispatch(runId, { type: 'approve_plan' });
+
+    const sentinel = '<<<TX_SUBAGENT_FAILED>>>{"reason":"sub-agent crashed","suggestedFix":"reduce scope"}\n';
+    ingestPtyChunk({ runId, role: 'builder', chunk: sentinel });
+
+    // Builder owns the failure decision — sub-agent failure is just a record.
+    expect(usePipelineStore.getState().runs[runId].state).toBe('building');
+    expect(usePipelineStore.getState().runs[runId].failureReason).toBeUndefined();
+  });
+
+  it('Phase 3b.5: TX_SUBAGENT_DONE still triggers Builder scratchpad bookkeeping', () => {
+    const spy = vi.spyOn(scratchpadWatcher, 'notifyBuilderActivity').mockResolvedValue();
+    try {
+      const runId = usePipelineStore.getState().createRun({
+        runId: 'r-sa3', templateId: 't', projectId: 'p1',
+        worktreePath: '/tmp/wt-sa', branch: 'feat/r1', fingerprint: FP,
+      });
+      usePipelineStore.getState().dispatch(runId, { type: 'start' });
+      usePipelineStore.getState().dispatch(runId, { type: 'planner_done', plan: {
+        stage: 'planner', branch: 'b', specPath: 's', planPath: 'p', tasks: [], summary: '', planCommitSha: 'sha',
+      }});
+      usePipelineStore.getState().dispatch(runId, { type: 'approve_plan' });
+
+      const sentinel = '<<<TX_SUBAGENT_DONE>>>{"filesEdited":[],"commitsCreated":[],"summary":"x"}\n';
+      ingestPtyChunk({ runId, role: 'builder', chunk: sentinel });
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({
+        runId,
+        role: 'builder',
+        worktreePath: '/tmp/wt-sa',
+      }));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('ingestPtyChunk records last-stdout-at; clearRunBuffers (terminal) clears it', () => {
     const runId = usePipelineStore.getState().createRun({
       runId: 'r1', templateId: 't', projectId: 'p1',
