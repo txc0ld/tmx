@@ -56,29 +56,9 @@ fn sanitize_name(name: &str) -> Result<(), String> {
 /// Atomic write — write to temp file then rename.
 /// Prevents corruption if the app crashes mid-write.
 async fn atomic_write(path: &std::path::Path, contents: &str) -> Result<(), String> {
-    let tmp = path.with_extension("tmp");
-    tokio::fs::write(&tmp, contents)
+    crate::util::fs_atomic::atomic_write_async(path, contents.as_bytes())
         .await
-        .map_err(|e| format!("Write error: {}", e))?;
-    match tokio::fs::rename(&tmp, path).await {
-        Ok(()) => Ok(()),
-        Err(first_err) => {
-            if path.exists() {
-                if let Err(remove_err) = tokio::fs::remove_file(path).await {
-                    let _ = tokio::fs::remove_file(&tmp).await;
-                    return Err(format!("Rename error: {}; cleanup failed: {}", first_err, remove_err));
-                }
-                if let Err(rename_err) = tokio::fs::rename(&tmp, path).await {
-                    let _ = tokio::fs::remove_file(&tmp).await;
-                    return Err(format!("Rename error: {}", rename_err));
-                }
-                Ok(())
-            } else {
-                let _ = tokio::fs::remove_file(&tmp).await;
-                Err(format!("Rename error: {}", first_err))
-            }
-        }
-    }
+        .map_err(|e| format!("Write error: {}", e))
 }
 
 fn ensure_json_size(json: &str) -> Result<(), String> {

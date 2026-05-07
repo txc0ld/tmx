@@ -97,24 +97,11 @@ fn read_settings(path: &Path) -> Result<Value, String> {
     serde_json::from_str::<Value>(&raw).map_err(|e| format!("parse {}: {e}", path.display()))
 }
 
-/// Atomic write: temp + rename. Mirrors `guardrails.rs::atomic_write`.
+/// Atomic write: temp + rename. Thin wrapper over the shared
+/// `util::fs_atomic::atomic_write_sync` helper.
 fn atomic_write(path: &Path, contents: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("create dir {}: {e}", parent.display()))?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, contents).map_err(|e| format!("write tmp: {e}"))?;
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        if path.exists() {
-            std::fs::remove_file(path)
-                .map_err(|err| format!("rename failed ({e}); cleanup also failed: {err}"))?;
-            std::fs::rename(&tmp, path).map_err(|err| format!("rename retry failed: {err}"))?;
-        } else {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(format!("rename failed: {e}"));
-        }
-    }
-    Ok(())
+    crate::util::fs_atomic::atomic_write_sync(path, contents.as_bytes())
+        .map_err(|e| format!("write {}: {e}", path.display()))
 }
 
 // ─── Capability → permission-string translation ─────────────────────
