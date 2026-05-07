@@ -6,15 +6,14 @@
 //! so the agents inside the worktree can't `git push` / `reset --hard` / etc.
 //! On terminal state the controller removes the hook again. Both operations
 //! preserve any user-authored content in the same settings file via the
-//! `tx-pipeline-managed: true` marker on the entry we own.
+//! `_tx_pipeline_managed_entry: true` sibling marker on each entry we own
+//! (see `managed_marker.rs` for the unified convention; legacy
+//! `tx-pipeline-managed: true` markers are auto-migrated on read).
 
+use super::managed_marker::{self, ENTRY_MARKER as MARKER_KEY};
 use super::validate_path_arg;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
-
-/// Sibling field on each settings entry we manage. Uninstall removes only
-/// entries with this marker so user-authored hooks survive.
-const MARKER_KEY: &str = "tx-pipeline-managed";
 
 /// Hook command. Matches the schema documented in
 /// `~/.claude/skills/git-guardrails-claude-code/SKILL.md` (global form):
@@ -77,25 +76,36 @@ fn get_or_create_pretooluse(root: &mut Value) -> Result<&mut Vec<Value>, String>
     Ok(pretool.as_array_mut().expect("checked above"))
 }
 
+/// Local pass-through to `managed_marker::entry_is_managed` so existing call
+/// sites keep their short name.
 fn entry_is_managed(entry: &Value) -> bool {
-    entry
-        .as_object()
-        .and_then(|o| o.get(MARKER_KEY))
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+    managed_marker::entry_is_managed(entry)
 }
 
 fn install_inner(worktree_dir: &Path) -> Result<(), String> {
     let path = settings_path(worktree_dir);
     let mut root = read_settings(&path)?;
+    // Migrate any legacy markers (kebab-case `tx-pipeline-managed`,
+    // top-level `_tx_pipeline_capabilities`) to the unified convention
+    // before we read or mutate. This is idempotent on already-migrated files.
+    let pre_migrate = root.clone();
+    managed_marker::migrate_in_place(&mut root);
+    let migration_dirty = root != pre_migrate;
+    let mut content_dirty = false;
     {
         let arr = get_or_create_pretooluse(&mut root)?;
-        // Idempotent: if any entry is already marked, leave the file alone.
-        if arr.iter().any(entry_is_managed) {
-            // Still write nothing — the file is already correct.
-            return Ok(());
+        // Idempotent: if any entry is already marked (after migration), don't
+        // add another. We may still write below if migration itself dirtied
+        // the file — that's how the legacy → new marker rename actually lands
+        // on disk.
+        if !arr.iter().any(entry_is_managed) {
+            arr.push(build_marked_entry());
+            content_dirty = true;
         }
-        arr.push(build_marked_entry());
+    }
+    if !migration_dirty && !content_dirty {
+        // Nothing changed — preserve the file's current bytes.
+        return Ok(());
     }
     let serialized = serde_json::to_string_pretty(&root).map_err(|e| format!("serialize: {e}"))?;
     atomic_write(&path, &serialized)
@@ -107,16 +117,23 @@ fn uninstall_inner(worktree_dir: &Path) -> Result<(), String> {
         return Ok(());
     }
     let mut root = read_settings(&path)?;
+    let pre_migrate = root.clone();
+    managed_marker::migrate_in_place(&mut root);
+    let migration_dirty = root != pre_migrate;
+    let mut removed_any = false;
     {
         let arr = get_or_create_pretooluse(&mut root)?;
         let before = arr.len();
         arr.retain(|e| !entry_is_managed(e));
-        if arr.len() == before {
-            // Nothing of ours to remove — don't rewrite the file.
-            return Ok(());
+        if arr.len() != before {
+            removed_any = true;
         }
         // NOTE: empty array is intentionally preserved so the user-visible
         // structure stays the same.
+    }
+    if !migration_dirty && !removed_any {
+        // Nothing of ours to remove and migration was a no-op.
+        return Ok(());
     }
     let serialized = serde_json::to_string_pretty(&root).map_err(|e| format!("serialize: {e}"))?;
     atomic_write(&path, &serialized)
@@ -310,5 +327,64 @@ mod tests {
         install_inner(dir.path()).unwrap();
         let v = read_json(&path);
         assert_eq!(v["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+    }
+
+    /// Legacy key alias used to seed migration-test fixtures. Kept here only
+    /// — production code should use [`MARKER_KEY`].
+    const LEGACY_MARKER_KEY: &str = "tx-pipeline-managed";
+
+    #[test]
+    fn install_on_old_marker_file_migrates_in_place() {
+        // A user with a previous TerminalX install has the legacy
+        // `tx-pipeline-managed: true` marker. Calling install should migrate
+        // it to the new `_tx_pipeline_managed_entry: true` and not add a
+        // duplicate entry (the legacy entry was already ours).
+        let dir = tempdir().unwrap();
+        let path = settings_path(dir.path());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let pre = json!({
+            "hooks": {
+                "PreToolUse": [
+                    { "matcher": "Bash", LEGACY_MARKER_KEY: true,
+                      "hooks": [{ "type": "command", "command": HOOK_COMMAND }] }
+                ]
+            }
+        });
+        fs::write(&path, serde_json::to_string_pretty(&pre).unwrap()).unwrap();
+
+        install_inner(dir.path()).unwrap();
+
+        let v = read_json(&path);
+        let arr = v["hooks"]["PreToolUse"].as_array().expect("array");
+        assert_eq!(arr.len(), 1, "no duplicate added — legacy entry was already ours");
+        assert_eq!(arr[0][MARKER_KEY], json!(true), "new marker present");
+        assert!(arr[0].get(LEGACY_MARKER_KEY).is_none(), "legacy marker stripped");
+    }
+
+    #[test]
+    fn uninstall_on_old_marker_file_still_removes_entry() {
+        // Mirror: a roll-forward → roll-back scenario where the old binary
+        // installed with the legacy marker, the new binary is now uninstalling.
+        // It must still find and remove our entry.
+        let dir = tempdir().unwrap();
+        let path = settings_path(dir.path());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let pre = json!({
+            "hooks": {
+                "PreToolUse": [
+                    { "matcher": "Read", "hooks": [{ "type": "command", "command": "echo user" }] },
+                    { "matcher": "Bash", LEGACY_MARKER_KEY: true,
+                      "hooks": [{ "type": "command", "command": HOOK_COMMAND }] }
+                ]
+            }
+        });
+        fs::write(&path, serde_json::to_string_pretty(&pre).unwrap()).unwrap();
+
+        uninstall_inner(dir.path()).unwrap();
+
+        let v = read_json(&path);
+        let arr = v["hooks"]["PreToolUse"].as_array().expect("array");
+        assert_eq!(arr.len(), 1, "legacy-marked entry removed");
+        assert_eq!(arr[0]["matcher"], json!("Read"), "user entry preserved");
     }
 }

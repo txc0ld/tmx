@@ -1,23 +1,24 @@
 //! `pipeline_capabilities_install` / `pipeline_capabilities_uninstall` —
 //! translate a per-role `RoleCapabilities` manifest into Claude Code
 //! `permissions.allow` / `permissions.deny` entries inside the worktree's
-//! `.claude/settings.json`, scoped via a `_tx_pipeline_capabilities` marker
-//! so uninstall only removes the entries we added (preserving anything the
-//! user authored in the same file).
+//! `.claude/settings.json`, scoped via the unified
+//! `_tx_pipeline_managed.capabilities[<role>]` marker so uninstall only
+//! removes the entries we added (preserving anything the user authored in
+//! the same file).
+//!
+//! Legacy `_tx_pipeline_capabilities` (top-level sibling) markers from
+//! pre-3a installs are auto-migrated on read via `managed_marker::migrate_in_place`.
 //!
 //! See spec §17.1 for the rationale: guardrails block destructive git verbs;
 //! capability scoping additionally bounds file-write paths, shell verbs,
 //! network egress, and MCP tool selection per agent role *before* the agent
 //! process spawns.
 
+use super::managed_marker;
 use super::validate_path_arg;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
-
-/// Sibling field on the settings root holding our generated allow/deny copies
-/// per role. Uninstall reads this to remove only the strings we authored.
-const MARKER_KEY: &str = "_tx_pipeline_capabilities";
 
 /// Per-role copy of the entries we appended to `permissions.allow` / `permissions.deny`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -183,22 +184,49 @@ fn capabilities_to_permissions(caps: &RoleCapabilities) -> ManagedPermissions {
 
 // ─── settings.json mutation helpers ─────────────────────
 
-/// Read the marker map from the settings root, if any.
+/// Read the per-role `_tx_pipeline_managed.capabilities` map from the
+/// settings root, if any. Used by both install (idempotency check) and
+/// uninstall (removal).
 fn read_marker(root: &Value) -> Map<String, Value> {
-    root.get(MARKER_KEY)
+    root.as_object()
+        .and_then(|o| o.get(managed_marker::NAMESPACE))
+        .and_then(Value::as_object)
+        .and_then(|o| o.get("capabilities"))
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default()
 }
 
-/// Write the marker map back into the root, removing the key entirely if empty.
+/// Write the per-role map back to `_tx_pipeline_managed.capabilities`.
+/// Removes intermediate keys when they become empty so the file stays
+/// clean of breadcrumb markers when no roles remain.
 fn write_marker(root: &mut Value, marker: Map<String, Value>) {
     let obj = root.as_object_mut().expect("validated upstream");
     if marker.is_empty() {
-        obj.remove(MARKER_KEY);
-    } else {
-        obj.insert(MARKER_KEY.to_string(), Value::Object(marker));
+        // Clean up the namespace if `capabilities` was the only sub-key.
+        if let Some(ns) = obj.get_mut(managed_marker::NAMESPACE).and_then(Value::as_object_mut) {
+            ns.remove("capabilities");
+            if ns.is_empty() {
+                obj.remove(managed_marker::NAMESPACE);
+            }
+        }
+        return;
     }
+    let ns = obj
+        .entry(managed_marker::NAMESPACE.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let ns_map = match ns.as_object_mut() {
+        Some(m) => m,
+        None => {
+            // Namespace exists but is corrupted (non-object). Replace it —
+            // this can only happen if the user hand-edited the file with
+            // garbage, which we accept overwriting since the namespace is
+            // ours.
+            *ns = Value::Object(Map::new());
+            ns.as_object_mut().expect("just inserted")
+        }
+    };
+    ns_map.insert("capabilities".to_string(), Value::Object(marker));
 }
 
 /// Append `entries` to the JSON array at `root.permissions.<field>`,
@@ -264,15 +292,30 @@ fn install_inner(
         return Err("settings.json root must be a JSON object".into());
     }
 
+    // Migrate any legacy markers (`_tx_pipeline_capabilities`,
+    // `tx-pipeline-managed`) into the unified namespace before reading the
+    // per-role marker. This is a no-op on already-migrated files.
+    let pre_migrate = root.clone();
+    managed_marker::migrate_in_place(&mut root);
+    let migration_dirty = root != pre_migrate;
+
     let new_managed = capabilities_to_permissions(caps);
 
-    // Idempotency: if marker[role] already matches what we'd write, no-op.
+    // Idempotency: if marker[role] already matches what we'd write, no-op
+    // *unless* migration moved bytes around — in which case we still need
+    // to flush the renamed marker to disk.
     let marker = read_marker(&root);
     if let Some(existing) = marker.get(role) {
         if let Ok(existing_parsed) = serde_json::from_value::<ManagedPermissions>(existing.clone()) {
             if existing_parsed == new_managed {
-                // Trust the on-disk file — same role, same capabilities.
-                return Ok(());
+                if !migration_dirty {
+                    // Trust the on-disk file — same role, same capabilities.
+                    return Ok(());
+                }
+                // Same content but migration renamed the key — write through.
+                let serialized = serde_json::to_string_pretty(&root)
+                    .map_err(|e| format!("serialize: {e}"))?;
+                return atomic_write(&path, &serialized);
             }
         }
         // Different content under our marker: uninstall first so we don't
@@ -308,6 +351,9 @@ fn uninstall_inner(worktree_dir: &Path, role: &str) -> Result<(), String> {
         // Bizarre user content — leave it alone.
         return Ok(());
     }
+    // Migrate legacy markers first so an uninstall called by a new binary on
+    // a settings.json written by an old binary still finds our entries.
+    managed_marker::migrate_in_place(&mut root);
     let mut marker = read_marker(&root);
     let Some(existing) = marker.remove(role) else {
         // We never installed for this role (or someone deleted our marker).
@@ -449,8 +495,8 @@ mod tests {
         assert!(deny.iter().any(|x| x.as_str() == Some("WebFetch")));
         assert!(deny.iter().any(|x| x.as_str() == Some("WebSearch")));
 
-        // Marker present.
-        assert!(v[MARKER_KEY]["planner"].is_object());
+        // Marker present under the unified namespace.
+        assert!(v[managed_marker::NAMESPACE]["capabilities"]["planner"].is_object());
     }
 
     #[test]
@@ -479,8 +525,8 @@ mod tests {
         uninstall_inner(dir.path(), "planner").unwrap();
 
         let v = read_json(&path);
-        // Marker gone.
-        assert!(v.get(MARKER_KEY).is_none(), "marker should be removed when last role uninstalled");
+        // Marker gone (cleanup unwinds the empty namespace too).
+        assert!(v.get(managed_marker::NAMESPACE).is_none(), "marker should be removed when last role uninstalled");
         // Permissions arrays empty (not removed — same as guardrails leaves PreToolUse).
         assert_eq!(v["permissions"]["allow"].as_array().unwrap().len(), 0);
         assert_eq!(v["permissions"]["deny"].as_array().unwrap().len(), 0);
@@ -561,8 +607,9 @@ mod tests {
         // assertion meaningful).
         assert!(!allow.iter().any(|x| x.as_str() == Some("Bash(rg *)")));
         // Marker only contains builder.
-        assert!(v[MARKER_KEY]["builder"].is_object());
-        assert!(v[MARKER_KEY].get("planner").is_none());
+        let caps_marker = &v[managed_marker::NAMESPACE]["capabilities"];
+        assert!(caps_marker["builder"].is_object());
+        assert!(caps_marker.get("planner").is_none());
     }
 
     #[test]
@@ -684,5 +731,93 @@ mod tests {
         install_inner(dir.path(), "planner", &planner_caps()).unwrap();
         let v = read_json(&path);
         assert!(v["permissions"]["allow"].is_array());
+    }
+
+    /// Legacy top-level capabilities key. Kept here only for migration-test
+    /// fixtures — production code routes through `managed_marker::NAMESPACE`.
+    const LEGACY_CAPABILITIES_KEY: &str = "_tx_pipeline_capabilities";
+
+    #[test]
+    fn install_on_legacy_marker_file_migrates_to_unified_namespace() {
+        // Pre-3a settings.json: `_tx_pipeline_capabilities` at the root.
+        // After install, the legacy key must be gone and the contents must
+        // live under `_tx_pipeline_managed.capabilities`. User content is
+        // preserved.
+        let dir = tempdir().unwrap();
+        let path = settings_path(dir.path());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let pre = json!({
+            "permissions": {
+                "allow": ["Bash(echo hello)", "Bash(rg *)", "Bash(git status)",
+                          "Write(docs/superpowers/specs/**)", "Edit(docs/superpowers/specs/**)",
+                          "Write(docs/superpowers/plans/**)", "Edit(docs/superpowers/plans/**)"],
+                "deny":  ["Bash(git push *)", "Bash(rm -rf *)",
+                          "Write(**/*.env)", "Edit(**/*.env)",
+                          "Write(**/.git/**)", "Edit(**/.git/**)",
+                          "Write(**/secrets.*)", "Edit(**/secrets.*)",
+                          "WebFetch", "WebSearch"]
+            },
+            "extra": "untouched",
+            LEGACY_CAPABILITIES_KEY: {
+                "planner": {
+                    "allow": ["Bash(rg *)", "Bash(git status)",
+                              "Write(docs/superpowers/specs/**)", "Edit(docs/superpowers/specs/**)",
+                              "Write(docs/superpowers/plans/**)", "Edit(docs/superpowers/plans/**)"],
+                    "deny":  ["Bash(git push *)", "Bash(rm -rf *)",
+                              "Write(**/*.env)", "Edit(**/*.env)",
+                              "Write(**/.git/**)", "Edit(**/.git/**)",
+                              "Write(**/secrets.*)", "Edit(**/secrets.*)",
+                              "WebFetch", "WebSearch"]
+                }
+            }
+        });
+        fs::write(&path, serde_json::to_string_pretty(&pre).unwrap()).unwrap();
+
+        // Re-installing with the same capabilities should migrate the marker
+        // without changing the permission arrays.
+        install_inner(dir.path(), "planner", &planner_caps()).unwrap();
+
+        let v = read_json(&path);
+        assert!(v.get(LEGACY_CAPABILITIES_KEY).is_none(), "legacy key must be removed");
+        assert!(
+            v[managed_marker::NAMESPACE]["capabilities"]["planner"].is_object(),
+            "marker migrated under unified namespace"
+        );
+        // User content preserved.
+        assert_eq!(v["extra"], json!("untouched"));
+        let allow = v["permissions"]["allow"].as_array().expect("allow");
+        assert!(allow.iter().any(|x| x.as_str() == Some("Bash(echo hello)")));
+    }
+
+    #[test]
+    fn user_content_preserved_through_migration_with_unrelated_keys() {
+        // A user's settings.json with hand-authored unrelated keys plus our
+        // legacy marker — both must survive the migration unchanged.
+        let dir = tempdir().unwrap();
+        let path = settings_path(dir.path());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let pre = json!({
+            "permissions": { "allow": ["Read"], "deny": [] },
+            "model": "claude-opus-4-1",
+            "env": { "FOO": "bar" },
+            LEGACY_CAPABILITIES_KEY: {
+                "planner": { "allow": [], "deny": [] }
+            }
+        });
+        fs::write(&path, serde_json::to_string_pretty(&pre).unwrap()).unwrap();
+
+        // Force a uninstall pathway — the legacy marker says we own a planner
+        // entry with empty allow/deny, so uninstall just removes the marker.
+        uninstall_inner(dir.path(), "planner").unwrap();
+
+        let v = read_json(&path);
+        // Legacy key gone.
+        assert!(v.get(LEGACY_CAPABILITIES_KEY).is_none());
+        // Namespace also gone (no roles left after uninstall).
+        assert!(v.get(managed_marker::NAMESPACE).is_none());
+        // User content untouched.
+        assert_eq!(v["model"], json!("claude-opus-4-1"));
+        assert_eq!(v["env"]["FOO"], json!("bar"));
+        assert_eq!(v["permissions"]["allow"], json!(["Read"]));
     }
 }

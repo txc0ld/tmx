@@ -13,6 +13,7 @@
 
 pub mod capabilities;
 pub mod guardrails;
+pub mod managed_marker;
 pub mod merger;
 pub mod preflight;
 pub mod role_prompts;
