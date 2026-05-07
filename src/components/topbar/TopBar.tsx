@@ -6,6 +6,7 @@ import { useTemplateStore, type TileTemplate } from '@/stores/templateStore';
 import { colors, spacing, typography, glass, radius, motion, tileColors, fonts, alpha } from '@/design/tokens';
 import { isMac, modShortcut } from '@/utils/platform';
 import { isTemplatePinned, toggleTemplatePin } from '@/components/canvas/TileDock';
+import { useSettingsStore } from '@/stores/settingsStore';
 import type { Project, TileType, Tile } from '@/types';
 
 interface TopBarProps {
@@ -136,6 +137,9 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette }: TopBarProp
           </div>
         )}
       </div>
+
+      {/* Settings gear — sits to the left of layout/clear, the action group */}
+      <SettingsGearButton />
 
       {/* Layout buttons */}
       <LayoutMenuButton />
@@ -615,6 +619,38 @@ const slotIconBtnStyle: React.CSSProperties = {
   flexShrink: 0,
   padding: 0,
 };
+
+function SettingsGearButton() {
+  const handleClick = useCallback(() => {
+    useSettingsStore.getState().openAt();
+  }, []);
+
+  return (
+    <button
+      onClick={handleClick}
+      aria-label="Open settings"
+      title="Settings"
+      data-testid="topbar-settings-gear"
+      style={{
+        // @ts-expect-error webkit property
+        WebkitAppRegion: 'no-drag',
+        height: 28,
+        width: 28,
+        padding: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'var(--tx-outline-ghost)',
+        border: `1px solid ${colors.outlineGhost}`,
+        borderRadius: radius.md, color: colors.onSurfaceVariant,
+        ...typography.labelSm, cursor: 'pointer', transition: `all ${motion.hover}`,
+        fontSize: 14, lineHeight: 1,
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'var(--tx-outline-variant)'; }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'var(--tx-outline-ghost)'; }}
+    >
+      ⚙
+    </button>
+  );
+}
 
 function ClearCanvasButton() {
   const handleClick = useCallback(() => {

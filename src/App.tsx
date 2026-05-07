@@ -24,6 +24,7 @@ import { ToastContainer } from '@/components/status/ToastContainer';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { SearchOverlay } from '@/components/canvas/SearchOverlay';
 import { SessionTimeline } from '@/components/timeline/SessionTimeline';
+import { SettingsModal } from '@/components/settings/SettingsModal';
 import type { TileType, Tile } from '@/types';
 import type { TileTemplate } from '@/stores/templateStore';
 import '@/stores/clipboardStore'; // Initialize clipboard listener
@@ -481,6 +482,8 @@ export default function App() {
       {searchOpen && (
         <SearchOverlay onClose={() => setSearchOpen(false)} />
       )}
+
+      <SettingsModal />
 
       <ToastContainer />
     </div>
