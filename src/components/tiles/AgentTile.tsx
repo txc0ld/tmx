@@ -232,7 +232,12 @@ export function AgentTile({ tile }: AgentTileProps) {
       // and for non-pipeline agent tiles. Awaits before agent-memory
       // injection so the role prompt always lands first.
       const { injectRolePromptForAgent } = await import('@/pipeline/role-prompt-injection');
-      await injectRolePromptForAgent({ ptyId: id, mode: tile.mode });
+      // Phase 3b.7: pass the agent's cwd as `projectDir` so the injection
+      // step can read `<projectDir>/INVARIANTS.md` and substitute its content
+      // into the role prompt's `{INVARIANTS_PLACEHOLDER}` token. Re-read at
+      // spawn time so users editing INVARIANTS.md mid-run see the new content
+      // on next role spawn.
+      await injectRolePromptForAgent({ ptyId: id, mode: tile.mode, projectDir: tile.cwd });
 
       // Inject agent memory context once the agent is ready. Ready =
       // 1.2 s of PTY silence after any output arrives, indicating the

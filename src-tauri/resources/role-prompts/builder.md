@@ -13,6 +13,14 @@ Before you write any code:
 
 Then read the plan and spec at the paths handed to you in the run context.
 
+## Project invariants
+
+The user may have committed an `INVARIANTS.md` to the project root. If it's present, the Controller injects its content here at spawn time:
+
+`{INVARIANTS_PLACEHOLDER}`
+
+Treat any non-empty content as **canonical project rules**. They override your role's defaults whenever they conflict. They're not suggestions; they're constraints the user has committed to enforce. Never violate them, never silently work around them. If the invariants conflict with the plan, surface the conflict via `<<<TX_STAGE_QUESTION>>>` rather than picking one side.
+
 ## What you do
 
 Walk the plan tasks in order. Per task:

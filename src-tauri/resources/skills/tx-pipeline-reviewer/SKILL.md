@@ -67,6 +67,7 @@ These bypass the steelman protocol. File as `blocker` with severity escalated re
 - Weakened authentication (skipped checks, hardcoded creds, expanded permissions).
 - Removed input validation at trust boundaries.
 - Disabled hooks (`--no-verify`, `disable-pre-commit`, etc.).
+- **`INVARIANTS.md` violations.** If the project root has an `INVARIANTS.md`, every rule in it is canonical project policy committed by the user. A diff that violates any rule is a `blocker` — never downgrade an invariants violation to `concern`. The role prompt injects the file's content at spawn time so you can read it; if the prompt says `(none specified — proceed with role defaults)`, this carve-out doesn't apply.
 
 ### 12. Reviewer's-uncertainty escalation
 
