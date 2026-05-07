@@ -11,6 +11,19 @@ import type {
 const ptyBuffers = new Map<string, string>();
 const MAX_BUFFER = 64 * 1024;
 
+/**
+ * Wall-clock timestamp of the most-recent stdout chunk per run (PTY or
+ * one-shot). The stuck-detector reads this to decide whether a run has gone
+ * silent vs. is happily streaming output without sentinels. Cleared on
+ * terminal state via `clearRunBuffers` to bound memory.
+ */
+const lastStdoutAt = new Map<string, number>();
+
+/** Read the last-stdout timestamp recorded by `ingest`. Undefined if none yet. */
+export function getLastStdoutAt(runId: string): number | undefined {
+  return lastStdoutAt.get(runId);
+}
+
 type Dispatch = ReturnType<typeof usePipelineStore.getState>['dispatch'];
 
 interface IngestRequest {
@@ -32,6 +45,12 @@ interface IngestRequest {
 export function ingest(input: IngestRequest): void {
   const dispatch = usePipelineStore.getState().dispatch;
   const key = `${input.runId}:${input.role}`;
+
+  // Liveness: any stdout (sentinel-bearing or not) counts as the run being
+  // alive. The stuck-detector uses this to decide when to probe / abort.
+  if (input.raw.length > 0) {
+    lastStdoutAt.set(input.runId, Date.now());
+  }
 
   if (input.source === 'pty') {
     let buf = (ptyBuffers.get(key) ?? '') + input.raw;
@@ -136,6 +155,7 @@ function dispatchSentinel(
       dispatch(runId, { type: 'question_raised', question: ev.payload as QuestionArtifact });
       return;
     case 'heartbeat':
+      dispatch(runId, { type: 'heartbeat' });
       return;
     case 'parse_error':
       dispatch(runId, role === 'planner'
@@ -150,11 +170,13 @@ export function clearRunBuffers(runId: string): void {
   for (const key of ptyBuffers.keys()) {
     if (key.startsWith(`${runId}:`)) ptyBuffers.delete(key);
   }
+  lastStdoutAt.delete(runId);
 }
 
 /** Test helper — reset all internal buffers between vitest cases. */
 export function resetIngestionBuffersForTest(): void {
   ptyBuffers.clear();
+  lastStdoutAt.clear();
 }
 
 /** @deprecated use `resetIngestionBuffersForTest`. */

@@ -4,10 +4,14 @@ import { useProjectStore } from '@/stores/projectStore';
 import { useTimelineStore } from '@/stores/timelineStore';
 import { colors } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
-import { loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog } from '@/utils/ipc';
-import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter } from '@/stores/pipelineStore';
+import { loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite } from '@/utils/ipc';
+import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter, usePipelineStore } from '@/stores/pipelineStore';
+import { isTerminalState } from '@/pipeline/state-machine';
 import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
-import { handleCapabilitiesLifecycle } from '@/pipeline/capabilities-lifecycle';
+import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capabilities-lifecycle';
+import { startStuckDetector } from '@/pipeline/stuck-detector';
+import { getLastStdoutAt } from '@/pipeline/controller-runtime';
+import type { AgentTile, PipelineRole, PipelineRun } from '@/types';
 import { InfiniteCanvas } from '@/components/canvas/InfiniteCanvas';
 import { ProjectSidebar } from '@/components/sidebar/ProjectSidebar';
 import { TopBar } from '@/components/topbar/TopBar';
@@ -60,6 +64,28 @@ function buildTileDefaults(type: TileType): Record<string, unknown> {
     case 'usage': return {};
     default: return {};
   }
+}
+
+/**
+ * Resolve the PTY id of the role currently active for a run (planner during
+ * `planning`, builder during `building`, reviewer during `reviewing`).
+ * Returns undefined for runs in awaiting/terminal states or when the role's
+ * tile has no PTY (one-shot reviewers, unspawned tiles). Mirrors the
+ * canvas-store lookup pattern in ClarificationModal::findAgentTile.
+ */
+function findActiveRolePtyId(run: PipelineRun): string | undefined {
+  const role: PipelineRole | null = activeRoleForState(run.state);
+  if (!role) return undefined;
+  const tileId = run.tiles[role];
+  if (!tileId) return undefined;
+  const projectTiles = useCanvasStore.getState().tiles;
+  for (const list of Object.values(projectTiles)) {
+    const arr = list as Tile[] | undefined;
+    if (!arr) continue;
+    const found = arr.find(t => t.id === tileId);
+    if (found && found.type === 'agent') return (found as AgentTile).ptyId;
+  }
+  return undefined;
 }
 
 function spawnTileAtCenter(type: TileType, overrides: Record<string, unknown> = {}): void {
@@ -135,6 +161,28 @@ export default function App() {
       }
     });
     return () => setPipelineLifecycleEmitter(null);
+  }, []);
+
+  // Stuck-detector: ticks at 250ms, probes silent runs at 5min, aborts at 8min.
+  // DI mirrors the rest of the pipeline — `findActiveRolePtyId` resolves the
+  // PTY for whichever role is currently active (planner/builder/reviewer)
+  // using the same canvas-store lookup pattern as ClarificationModal.
+  useEffect(() => {
+    const stop = startStuckDetector({
+      getActiveRuns: () => Object.values(usePipelineStore.getState().runs)
+        .filter(r => !isTerminalState(r.state))
+        .map(r => ({
+          id: r.id,
+          lastHeartbeatAt: r.lastHeartbeatAt,
+          startedAt: r.startedAt,
+          ptyId: findActiveRolePtyId(r),
+        })),
+      getLastStdoutAt,
+      probeAgent: async (_runId, ptyId) => { await ptyWrite(ptyId, 'Are you stuck?\n'); },
+      abortRun: (runId, reason) => usePipelineStore.getState().dispatch(runId, { type: 'abort', reason }),
+      now: () => Date.now(),
+    });
+    return stop;
   }, []);
 
   // Auto-install pipeline skills (`tx-pipeline-stage-handoff`,

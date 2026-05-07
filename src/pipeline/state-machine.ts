@@ -46,6 +46,7 @@ export type PipelineEvent =
   | { type: 'merge_done' }
   | { type: 'merge_failed'; reason: string }
   | { type: 'replan_requested'; reason: string }
+  | { type: 'heartbeat' }
   | { type: 'abort'; reason: string };
 
 export interface InitialRunInputs {
@@ -217,6 +218,11 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
     case 'merge_failed':
       if (run.state !== 'merging') return run;
       return { ...run, state: 'failed', failureReason: ev.reason, failureClass: 'unknown', endedAt: Date.now() };
+
+    case 'heartbeat':
+      // Terminal states already filtered above. Just stamp the wall clock —
+      // the stuck-detector reads this to decide when a run has gone silent.
+      return { ...run, lastHeartbeatAt: Date.now() };
 
     case 'replan_requested': {
       // Narrow re-entry: only `escalated` may be re-planned. From any other

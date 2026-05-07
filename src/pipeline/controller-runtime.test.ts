@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ingestPtyChunk, ingestOneshotResult } from './controller-runtime';
+import {
+  ingestPtyChunk,
+  ingestOneshotResult,
+  getLastStdoutAt,
+  resetIngestionBuffersForTest,
+} from './controller-runtime';
 import { usePipelineStore } from '@/stores/pipelineStore';
 import type { RunFingerprint } from '@/types';
 
@@ -11,6 +16,7 @@ const FP: RunFingerprint = {
 describe('controller runtime', () => {
   beforeEach(() => {
     usePipelineStore.setState({ runs: {}, activeRunIds: [] });
+    resetIngestionBuffersForTest();
   });
 
   it('ingestPtyChunk parses TX_STAGE_DONE for planner role and advances state', () => {
@@ -127,5 +133,53 @@ describe('controller runtime', () => {
 
     ingestOneshotResult({ runId, role: 'reviewer', stdout: 'agent crashed', exitCode: 1 });
     expect(usePipelineStore.getState().runs[runId].state).toBe('failed');
+  });
+
+  it('TX_HEARTBEAT sentinel updates run.lastHeartbeatAt via dispatch', () => {
+    const runId = usePipelineStore.getState().createRun({
+      runId: 'r1', templateId: 't', projectId: 'p1',
+      worktreePath: '/tmp/wt', branch: 'feat/r1', fingerprint: FP,
+    });
+    usePipelineStore.getState().dispatch(runId, { type: 'start' });
+    expect(usePipelineStore.getState().runs[runId].lastHeartbeatAt).toBeUndefined();
+
+    const before = Date.now();
+    ingestPtyChunk({ runId, role: 'planner', chunk: '<<<TX_HEARTBEAT>>>{"reason":"thinking"}\n' });
+    const after = Date.now();
+
+    const run = usePipelineStore.getState().runs[runId];
+    expect(run.lastHeartbeatAt).toBeDefined();
+    expect(run.lastHeartbeatAt!).toBeGreaterThanOrEqual(before);
+    expect(run.lastHeartbeatAt!).toBeLessThanOrEqual(after);
+    // Heartbeat must NOT change pipeline state.
+    expect(run.state).toBe('planning');
+  });
+
+  it('ingestPtyChunk records last-stdout-at; clearRunBuffers (terminal) clears it', () => {
+    const runId = usePipelineStore.getState().createRun({
+      runId: 'r1', templateId: 't', projectId: 'p1',
+      worktreePath: '/tmp/wt', branch: 'feat/r1', fingerprint: FP,
+    });
+    usePipelineStore.getState().dispatch(runId, { type: 'start' });
+
+    expect(getLastStdoutAt(runId)).toBeUndefined();
+
+    const before = Date.now();
+    ingestPtyChunk({ runId, role: 'planner', chunk: 'random stdout no sentinel\n' });
+    const after = Date.now();
+
+    const stamp = getLastStdoutAt(runId);
+    expect(stamp).toBeDefined();
+    expect(stamp!).toBeGreaterThanOrEqual(before);
+    expect(stamp!).toBeLessThanOrEqual(after);
+
+    // One-shot path also bumps the stamp — sanity check it doesn't go back.
+    const mid = Date.now();
+    ingestOneshotResult({ runId, role: 'reviewer', stdout: 'still alive', exitCode: 0 });
+    expect(getLastStdoutAt(runId)!).toBeGreaterThanOrEqual(mid);
+
+    // Reset clears it (mirrors what clearRunBuffers does on terminal).
+    resetIngestionBuffersForTest();
+    expect(getLastStdoutAt(runId)).toBeUndefined();
   });
 });
