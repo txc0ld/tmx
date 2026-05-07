@@ -11,6 +11,7 @@ import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
 import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capabilities-lifecycle';
 import { handleFailureBundleLifecycle } from '@/pipeline/failure-bundle-lifecycle';
 import { startRedTeamDispatcher } from '@/pipeline/red-team-dispatcher';
+import { startDualReviewerDispatcher } from '@/pipeline/dual-reviewer-dispatcher';
 import { startStuckDetector } from '@/pipeline/stuck-detector';
 import { startNotifier } from '@/pipeline/notifications';
 import { startWebhookNotifier } from '@/pipeline/webhook-notifier';
@@ -217,6 +218,37 @@ export default function App() {
           'conditions, edge cases. Emit <<<TX_REDTEAM_DONE>>> with the',
           'JSON report per the tx-pipeline-red-team skill.',
         ].join('\n');
+      },
+    });
+    return stop;
+  }, []);
+
+  // Polish.1 (companion): dual-reviewer dispatcher (Phase 3c.4 ship-gap).
+  // The state-machine half lands the run in `awaiting_dual_reviewer` /
+  // `awaiting_tiebreaker`, but until this useEffect was added no agent
+  // ever fired — runs would stall. Same pattern as the red-team
+  // dispatcher above: each invocation is one-shot, sentinels land back
+  // through `ingestOneshotResult`.
+  useEffect(() => {
+    const stop = startDualReviewerDispatcher({
+      runOneShotReviewer: async ({ runId, role, provider }) => {
+        const agentMap: Record<string, 'claude' | 'codex' | 'gemini'> = {
+          opus: 'claude',
+          codex: 'codex',
+          gemini: 'gemini',
+        };
+        const result = await agentRunOneshot({
+          agent: agentMap[provider] ?? 'claude',
+          args: ['--print'],
+          stdin: '',  // brief content built per-role; for now bare invocation — Phase 3d fills in
+          timeoutSecs: 600,
+        });
+        ingestOneshotResult({
+          runId,
+          role,
+          stdout: result.stdout,
+          exitCode: result.exit_code,
+        });
       },
     });
     return stop;
