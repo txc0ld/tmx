@@ -648,7 +648,7 @@ Network enforcement uses a PreToolUse hook that blocks fetches outside an allowl
 
 A Reviewer that can write files is one prompt-injection away from rewriting its own verdict and the code under review. Capability scoping makes the Reviewer process *physically incapable* of writing, not "instructed not to."
 
-### 17.2 Clarification sentinel (from addendum A5)
+### 17.2 Clarification sentinel (from addendum A5) — *shipped 2c-iii.1*
 
 Today an agent has two outcomes: complete (DONE) or give up (FAILED). The middle case — *"I can't proceed without a decision the human owns"* — is missing. This pushes agents toward two pathologies: faking DONE with a wrong assumption, or FAILED-ing too eagerly when a one-line clarification would unblock them.
 
@@ -678,7 +678,7 @@ Skill enforcement: `tx-pipeline-stage-handoff` is amended with an additional rul
 
 This is the difference between "agent that pretends to know" and "agent that knows what it doesn't know" — load-bearing for trustworthy autonomy.
 
-### 17.3 Heartbeats and stuck detection (from addendum A10)
+### 17.3 Heartbeats and stuck detection (from addendum A10) — *shipped 2c-iii.2*
 
 Builder running for 40 minutes with no output — thinking, stuck in a tool-use loop, or crashed without exiting? Without heartbeats, indistinguishable.
 
@@ -711,7 +711,7 @@ export interface RunFingerprint {
 
 Persisted in the run record and the failure bundle. Two values: **replay** (a "re-run with same fingerprint" command replays from telemetry; skill or prompt drift fails loudly with a hash mismatch) and **drift detection** (a startup check can warn pre-flight when a skill version is known to perform poorly). Reproducibility is non-negotiable for trust at scale.
 
-### 17.5 Notifications and human-on-the-loop UX (from addendum A14)
+### 17.5 Notifications and human-on-the-loop UX (from addendum A14) — *shipped 2c-iii.3 (OS notifications) + 2c-iii.4 (webhook delivery)*
 
 "Minimal human intervention" still requires humans at gates: `awaiting_plan_approval`, `awaiting_merge_approval`, `awaiting_clarification`, plus future `budget_paused`. A pipeline that pauses at 2 a.m. and waits silently until 9 a.m. is worse than no automation.
 
@@ -723,7 +723,7 @@ On entry to any `awaiting_*` state, the controller emits a notification through 
 
 Re-notification cadence: 15min, 1hr, 4hr, then daily — until acted on. Aborted/done runs clear all pending notifications.
 
-### 17.6 Secrets handling (new — flagged in 2026-05-04 review)
+### 17.6 Secrets handling (new — flagged in 2026-05-04 review) — *shipped 2c-iii.5 (mask) + 2c-iii.6 (preflight scan) + 2c-iii.7 (failure bundle)*
 
 Builder reads files, Reviewer reads diffs — both can contain secrets. Failure bundles ship via webhooks and bug reports. Without explicit handling, this is one user submission away from leaking creds.
 
