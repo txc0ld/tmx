@@ -105,6 +105,13 @@ function makeRun(state: PipelineState = 'building', overrides: Partial<PipelineR
     tiles: { builder: BUILDER_TILE_ID },
     fingerprint: FP,
     planLineage: [],
+    runMode: 'standard',
+    autoApprovePlan: false,
+    useDualReviewer: false,
+    runRedTeam: false,
+    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    templateDualReviewer: false,
     ...overrides,
   };
 }

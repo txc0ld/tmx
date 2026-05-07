@@ -9,8 +9,41 @@ import type {
   RunFingerprint,
 } from '@/types';
 
-const REVIEWER_REJECT_BUDGET = 3;
-const CI_FAIL_BUDGET = 3;
+/**
+ * Default per-run retry budgets when no template-derived values are passed
+ * to `initialRunState`. These match the legacy hardcoded constants so
+ * existing call sites that don't yet thread template config through stay
+ * green. Per-run effective budgets live on `PipelineRun.effectiveRetryBudgets`
+ * and are scaled by the complexity gate at `planner_done` (see `scaleBudgets`).
+ */
+export const DEFAULT_RETRY_BUDGETS = { reviewerReject: 3, ciFail: 3 } as const;
+
+/**
+ * Complexity scaling for retry budgets:
+ *  - trivial: halved (min 1) — small changes shouldn't loop forever
+ *  - standard: unchanged
+ *  - complex: doubled — architectural work earns more retries
+ */
+function scaleBudgets(
+  base: { reviewerReject: number; ciFail: number },
+  mode: 'trivial' | 'standard' | 'complex',
+): { reviewerReject: number; ciFail: number } {
+  switch (mode) {
+    case 'trivial':
+      return {
+        reviewerReject: Math.max(1, Math.floor(base.reviewerReject / 2)),
+        ciFail: Math.max(1, Math.floor(base.ciFail / 2)),
+      };
+    case 'complex':
+      return {
+        reviewerReject: base.reviewerReject * 2,
+        ciFail: base.ciFail * 2,
+      };
+    case 'standard':
+    default:
+      return { ...base };
+  }
+}
 
 export const TERMINAL_STATES: ReadonlySet<PipelineState> = new Set(['done', 'failed', 'escalated']);
 
@@ -63,9 +96,20 @@ export interface InitialRunInputs {
    */
   baseBranch?: string;
   fingerprint: RunFingerprint;
+  /**
+   * Template-derived defaults for the complexity-gate routing fields.
+   * Optional so test fixtures + legacy callers stay green. When omitted,
+   * `initialRunState` falls back to `DEFAULT_RETRY_BUDGETS` and
+   * `templateDualReviewer = false`. The reducer's `planner_done` case
+   * re-stamps these with complexity-scaled values once the planner reports.
+   */
+  templateRetryBudget?: { reviewerReject: number; ciFail: number };
+  templateDualReviewer?: boolean;
 }
 
 export function initialRunState(input: InitialRunInputs): PipelineRun {
+  const baseBudgets = input.templateRetryBudget ?? DEFAULT_RETRY_BUDGETS;
+  const templateDualReviewer = input.templateDualReviewer ?? false;
   return {
     id: input.runId,
     templateId: input.templateId,
@@ -81,6 +125,13 @@ export function initialRunState(input: InitialRunInputs): PipelineRun {
     tiles: {},
     fingerprint: input.fingerprint,
     planLineage: [],
+    runMode: 'standard',
+    autoApprovePlan: false,
+    useDualReviewer: templateDualReviewer,
+    runRedTeam: false,
+    effectiveRetryBudgets: { ...baseBudgets },
+    templateRetryBudget: { ...baseBudgets },
+    templateDualReviewer,
   };
 }
 
@@ -100,13 +151,50 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
       if (run.state === 'idle') return { ...run, state: 'planning' };
       return run;
 
-    case 'planner_done':
+    case 'planner_done': {
+      // Complexity gate (Phase 3c.1): the planner self-classifies each plan
+      // as trivial/standard/complex via `plan.complexity`. We re-stamp the
+      // run-level routing fields here so subsequent transitions read the
+      // correct budgets and post-build flags. Missing field → 'standard'
+      // (the safe default).
+      //
+      // Re-stamping uses the immutable `templateRetryBudget` /
+      // `templateDualReviewer` baselines captured at run creation, so a
+      // replan from complex→trivial correctly halves the *standard*
+      // template baseline, not the prior complex-doubled value. This
+      // honors the addendum §A4 "re-plans are full resets" rule.
+      //
+      // For 'trivial' we *skip* awaiting_plan_approval and transition
+      // straight to 'building'. This deliberately bypasses the human
+      // confirm gate — the trade-off is faster turnaround on small,
+      // unambiguous changes (typos, dep bumps, doc updates) at the cost
+      // of forfeiting the operator's chance to redirect the plan. The
+      // planner role-prompt sets honest expectations about what counts
+      // as trivial; understating complexity for a security-sensitive fix
+      // would skip not just this gate but also the dual-reviewer + red-team
+      // safety nets, so the calibration matters. `autoApprovePlan` stays
+      // true on the run as an audit trail.
+      //
+      // For 'complex' we stamp dual-reviewer + red-team flags (consumed
+      // by 3c.4 + 3c.6 respectively).
+      const mode: 'trivial' | 'standard' | 'complex' = ev.plan.complexity ?? 'standard';
+      const effectiveRetryBudgets = scaleBudgets(run.templateRetryBudget, mode);
+      const autoApprovePlan = mode === 'trivial';
+      const useDualReviewer = mode === 'complex' || run.templateDualReviewer;
+      const runRedTeam = mode === 'complex';
+      const nextState: PipelineState = autoApprovePlan ? 'building' : 'awaiting_plan_approval';
       return {
         ...run,
-        state: 'awaiting_plan_approval',
+        state: nextState,
         artifacts: { ...run.artifacts, plan: ev.plan },
         planLineage: [...run.planLineage, ev.plan.planCommitSha],
+        runMode: mode,
+        autoApprovePlan,
+        useDualReviewer,
+        runRedTeam,
+        effectiveRetryBudgets,
       };
+    }
 
     case 'planner_failed':
       return { ...run, state: 'failed', failureReason: ev.reason, failureClass: 'planner_refused', endedAt: Date.now() };
@@ -134,7 +222,7 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
         };
       }
       const next = run.retryCounters.reviewerReject + 1;
-      if (next > REVIEWER_REJECT_BUDGET) {
+      if (next > run.effectiveRetryBudgets.reviewerReject) {
         return {
           ...run,
           state: 'escalated',
@@ -161,7 +249,7 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
     case 'ci_fail': {
       const next = run.retryCounters.ciFail + 1;
       const ciResults = [...run.artifacts.ciResults, ev.result];
-      if (next > CI_FAIL_BUDGET) {
+      if (next > run.effectiveRetryBudgets.ciFail) {
         return {
           ...run,
           state: 'escalated',

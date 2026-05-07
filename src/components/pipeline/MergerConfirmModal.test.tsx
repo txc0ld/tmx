@@ -86,6 +86,13 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
       terminalxVersion: '0.1.0',
     },
     planLineage: [],
+    runMode: 'standard',
+    autoApprovePlan: false,
+    useDualReviewer: false,
+    runRedTeam: false,
+    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    templateDualReviewer: false,
     ...overrides,
   };
 }

@@ -28,6 +28,13 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     tiles: {},
     fingerprint: FP,
     planLineage: [],
+    runMode: 'standard',
+    autoApprovePlan: false,
+    useDualReviewer: false,
+    runRedTeam: false,
+    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    templateDualReviewer: false,
     ...overrides,
   };
 }
@@ -358,6 +365,208 @@ describe('pipeline state machine', () => {
     expect(run.planLineage).toEqual(['sha-v1', 'sha-v2']);
     expect(run.escalationLog).toHaveLength(1);
     expect(run.escalationLog[0].decision).toBe('replan');
+  });
+
+  // ─── Complexity gate (Phase 3c.1) ─────────────────────────────────────
+
+  it('complexity=trivial: planner_done auto-skips awaiting_plan_approval, halves budgets', () => {
+    const run = makeRun({ state: 'planning' });
+    const ev: PipelineEvent = {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
+        tasks: [], summary: 's', planCommitSha: 'sha-trivial',
+        complexity: 'trivial',
+      },
+    };
+    const next = reducer(run, ev);
+    // The whole point: trivial bypasses the human confirm gate.
+    expect(next.state).toBe('building');
+    expect(next.runMode).toBe('trivial');
+    expect(next.autoApprovePlan).toBe(true);
+    expect(next.useDualReviewer).toBe(false);
+    expect(next.runRedTeam).toBe(false);
+    // Halved with floor + min-1: 3 → 1.
+    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 1, ciFail: 1 });
+  });
+
+  it('complexity=standard: planner_done transitions to awaiting_plan_approval, budgets unchanged', () => {
+    const run = makeRun({ state: 'planning' });
+    const ev: PipelineEvent = {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
+        tasks: [], summary: 's', planCommitSha: 'sha-std',
+        complexity: 'standard',
+      },
+    };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('awaiting_plan_approval');
+    expect(next.runMode).toBe('standard');
+    expect(next.autoApprovePlan).toBe(false);
+    expect(next.useDualReviewer).toBe(false);
+    expect(next.runRedTeam).toBe(false);
+    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 3, ciFail: 3 });
+  });
+
+  it('complexity=standard but template.dualReviewer=true → useDualReviewer=true', () => {
+    const run = makeRun({ state: 'planning', templateDualReviewer: true, useDualReviewer: true });
+    const ev: PipelineEvent = {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
+        tasks: [], summary: 's', planCommitSha: 'sha-std-dual',
+        complexity: 'standard',
+      },
+    };
+    const next = reducer(run, ev);
+    expect(next.useDualReviewer).toBe(true);
+    expect(next.runRedTeam).toBe(false); // red-team is complex-only, even with dual template
+  });
+
+  it('complexity=complex: planner_done transitions to awaiting_plan_approval, stamps dual + redTeam, doubles budgets', () => {
+    const run = makeRun({ state: 'planning' });
+    const ev: PipelineEvent = {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
+        tasks: [], summary: 's', planCommitSha: 'sha-complex',
+        complexity: 'complex',
+      },
+    };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('awaiting_plan_approval');
+    expect(next.runMode).toBe('complex');
+    expect(next.autoApprovePlan).toBe(false);
+    expect(next.useDualReviewer).toBe(true);
+    expect(next.runRedTeam).toBe(true);
+    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 6, ciFail: 6 });
+  });
+
+  it('complexity undefined: defaults to standard', () => {
+    const run = makeRun({ state: 'planning' });
+    const ev: PipelineEvent = {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
+        tasks: [], summary: 's', planCommitSha: 'sha-undef',
+        // complexity intentionally omitted
+      },
+    };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('awaiting_plan_approval');
+    expect(next.runMode).toBe('standard');
+    expect(next.autoApprovePlan).toBe(false);
+    expect(next.useDualReviewer).toBe(false);
+    expect(next.runRedTeam).toBe(false);
+    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 3, ciFail: 3 });
+  });
+
+  it('replan re-stamps complexity from the new plan (full reset semantic)', () => {
+    let run = makeRun({ state: 'planning' });
+    // v1: trivial → halved, building.
+    run = reducer(run, {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
+        tasks: [], summary: 's', planCommitSha: 'sha-v1',
+        complexity: 'trivial',
+      },
+    });
+    expect(run.runMode).toBe('trivial');
+    expect(run.state).toBe('building');
+    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 1, ciFail: 1 });
+
+    // Force escalated → replan_requested → planning.
+    run = { ...run, state: 'escalated', failureClass: 'reviewer_irreconcilable', endedAt: 1 };
+    run = reducer(run, { type: 'replan_requested', reason: 'human override' });
+    expect(run.state).toBe('planning');
+    // Note: runMode/effectiveRetryBudgets are not cleared by replan; they
+    // get overwritten by the next planner_done. That's fine — no transitions
+    // read them in 'planning'.
+
+    // v2: complex → re-stamps from the *template* baseline (3,3), not from
+    // the prior trivial-halved (1,1). So budgets should be 6/6.
+    run = reducer(run, {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's-v2', planPath: 'p-v2',
+        tasks: [], summary: 's2', planCommitSha: 'sha-v2',
+        complexity: 'complex',
+      },
+    });
+    expect(run.runMode).toBe('complex');
+    expect(run.state).toBe('awaiting_plan_approval');
+    expect(run.autoApprovePlan).toBe(false);
+    expect(run.useDualReviewer).toBe(true);
+    expect(run.runRedTeam).toBe(true);
+    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 6, ciFail: 6 });
+  });
+
+  it('reducer reads effectiveRetryBudgets (not the legacy constant)', () => {
+    // Construct a complex run with doubled budgets (6/6) directly. Drive
+    // 6 reviewer rejects — all should retry; the 7th should escalate.
+    let run = makeRun({
+      state: 'reviewing',
+      runMode: 'complex',
+      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
+    });
+    for (let i = 1; i <= 6; i++) {
+      run = reducer(run, {
+        type: 'reviewer_done',
+        verdict: {
+          stage: 'reviewer', reviewer: 'opus', verdict: 'reject',
+          round: i, comments: [], summary: `r${i}`,
+        },
+      });
+      expect(run.state).toBe('building'); // still in retry — would have escalated at >3 with the legacy constant
+      run = { ...run, state: 'reviewing' }; // simulate builder→reviewer cycle for the next iteration
+    }
+    expect(run.retryCounters.reviewerReject).toBe(6);
+    // The 7th rejection (next > 6) escalates.
+    run = reducer(run, {
+      type: 'reviewer_done',
+      verdict: {
+        stage: 'reviewer', reviewer: 'opus', verdict: 'reject',
+        round: 7, comments: [], summary: 'r7',
+      },
+    });
+    expect(run.state).toBe('escalated');
+  });
+
+  it('initialRunState seeds complexity-gate defaults', () => {
+    const run = initialRunState({
+      runId: 'r-init',
+      templateId: 'tx.hello',
+      projectId: 'p1',
+      worktreePath: '/tmp/wt/r-init',
+      branch: 'feat/r-init',
+      fingerprint: FP,
+    });
+    expect(run.runMode).toBe('standard');
+    expect(run.autoApprovePlan).toBe(false);
+    expect(run.useDualReviewer).toBe(false);
+    expect(run.runRedTeam).toBe(false);
+    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 3, ciFail: 3 });
+    expect(run.templateRetryBudget).toEqual({ reviewerReject: 3, ciFail: 3 });
+    expect(run.templateDualReviewer).toBe(false);
+  });
+
+  it('initialRunState honors template-derived defaults', () => {
+    const run = initialRunState({
+      runId: 'r-tmpl',
+      templateId: 'tx.custom',
+      projectId: 'p1',
+      worktreePath: '/tmp/wt/r-tmpl',
+      branch: 'feat/r-tmpl',
+      fingerprint: FP,
+      templateRetryBudget: { reviewerReject: 5, ciFail: 4 },
+      templateDualReviewer: true,
+    });
+    expect(run.useDualReviewer).toBe(true);
+    expect(run.templateDualReviewer).toBe(true);
+    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 5, ciFail: 4 });
+    expect(run.templateRetryBudget).toEqual({ reviewerReject: 5, ciFail: 4 });
   });
 
   it('escalated remains terminal for non-replan events (carve-out is narrow)', () => {

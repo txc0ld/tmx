@@ -401,6 +401,57 @@ export interface PipelineRun {
    * `awaiting_clarification`.
    */
   priorActiveState?: PipelineState;
+  /**
+   * Plan complexity gate (Phase 3c.1). Stamped at `planner_done` from
+   * `plan.complexity` (defaulting to `'standard'` when the planner omits
+   * the field). Drives downstream routing — auto-approve, dual-reviewer,
+   * red-team pass, retry budget scaling. Re-stamped when a re-plan lands
+   * a new `planner_done`.
+   *
+   * Required (not optional) so a missing-field bug surfaces at compile
+   * time. `initialRunState` seeds it to `'standard'` so brand-new runs
+   * have sane defaults until the planner reports.
+   */
+  runMode: 'trivial' | 'standard' | 'complex';
+  /**
+   * True when the run skipped (or should skip) the `awaiting_plan_approval`
+   * gate because the plan was self-classified `trivial`. The reducer for
+   * `planner_done` transitions straight to `'building'` in that case;
+   * this flag remains `true` for the rest of the run as an audit trail.
+   */
+  autoApprovePlan: boolean;
+  /**
+   * True when the run should fan out to two reviewers (Opus + Codex)
+   * after the build. Set by `complex` complexity OR by template's
+   * `dualReviewer` flag. Consumed by Phase 3c.4.
+   */
+  useDualReviewer: boolean;
+  /**
+   * True when the run should run a post-reviewer-approval red-team pass.
+   * Set by `complex` complexity. Consumed by Phase 3c.6.
+   */
+  runRedTeam: boolean;
+  /**
+   * Per-run retry budgets, derived from `templateRetryBudget` plus a
+   * complexity scaling factor (trivial = halved, standard = unchanged,
+   * complex = doubled). The reducer reads these instead of the legacy
+   * hardcoded `REVIEWER_REJECT_BUDGET` / `CI_FAIL_BUDGET` constants.
+   */
+  effectiveRetryBudgets: { reviewerReject: number; ciFail: number };
+  /**
+   * The template's structural retry budget — captured at run creation and
+   * never mutated after. Used as the baseline that `planner_done` rescales
+   * against the current `runMode`. Stored on the run (rather than re-read
+   * from the template at dispatch time) so the reducer stays pure and
+   * replans behave deterministically regardless of template edits.
+   */
+  templateRetryBudget: { reviewerReject: number; ciFail: number };
+  /**
+   * The template's `dualReviewer` flag — captured at run creation. The run's
+   * effective `useDualReviewer` is `runMode === 'complex' || templateDualReviewer`,
+   * re-evaluated on each `planner_done`.
+   */
+  templateDualReviewer: boolean;
 }
 
 export interface PipelineControllerTile extends TileBase {

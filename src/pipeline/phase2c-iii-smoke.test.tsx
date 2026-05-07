@@ -128,6 +128,13 @@ function seedRun(runId: string, overrides: Partial<PipelineRun> = {}): PipelineR
     tiles: {},
     fingerprint: FP,
     planLineage: [],
+    runMode: 'standard',
+    autoApprovePlan: false,
+    useDualReviewer: false,
+    runRedTeam: false,
+    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    templateDualReviewer: false,
     ...overrides,
   };
   usePipelineStore.setState((s) => ({

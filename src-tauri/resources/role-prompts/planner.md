@@ -39,10 +39,20 @@ Given a feature request from the user (passed in via your initial message after 
 After committing, emit a single sentinel on its own line at column 0:
 
 ```
-<<<TX_STAGE_DONE>>>{"stage":"planner","branch":"<branch>","specPath":"<path>","planPath":"<path>","tasks":[{"id":"T1","summary":"...","files":["..."],"tests":["..."],"acceptance":"..."}],"summary":"<one-liner>","planCommitSha":"<commit sha>"}
+<<<TX_STAGE_DONE>>>{"stage":"planner","branch":"<branch>","specPath":"<path>","planPath":"<path>","tasks":[{"id":"T1","summary":"...","files":["..."],"tests":["..."],"acceptance":"..."}],"summary":"<one-liner>","complexity":"<trivial|standard|complex>","planCommitSha":"<commit sha>"}
 ```
 
 The `planCommitSha` is the SHA of your `chore(plan)` commit — this binds the plan version to a specific commit, so re-plans (Phase 2c-i) generate `-v2.md` / `-v3.md` files without overwriting v1.
+
+### Required field: `complexity`
+
+Every successful plan emits its complexity in the DONE sentinel. The Controller routes downstream based on this:
+
+- `trivial`: bug fix, dependency bump, doc update, single-file change with obvious correct answer. Auto-approves the plan (skips the human confirm gate), single reviewer, halved retry budgets.
+- `standard`: ordinary feature work, 2–10 files, multiple commits but no architectural decisions. (Default when the field is omitted.)
+- `complex`: architectural decisions, security-sensitive, > 10 files, public API changes. Triggers dual-reviewer (Opus + Codex), red-team pass, doubled retry budgets.
+
+Be honest about complexity. Inflating to `complex` for a typo fix wastes Opus + Codex tokens; understating to `trivial` for a security fix skips the safety nets that exist precisely to catch the mistakes you can't predict. When in genuine doubt between two levels, pick the higher one.
 
 If you cannot proceed (request is incoherent, missing context, environmental failure), emit:
 
