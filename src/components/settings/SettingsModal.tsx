@@ -4,6 +4,7 @@ import {
   useSettingsStore,
   type SettingsCategory,
 } from '@/stores/settingsStore';
+import { ProjectSettings } from './ProjectSettings';
 
 const CATEGORY_LABELS: Record<SettingsCategory, string> = {
   project: 'Project',
@@ -181,17 +182,24 @@ export function SettingsModal() {
 }
 
 /**
- * Renders the body for a given category. Phase 3a.1 ships placeholders only;
- * subsequent tasks (3a.2 / 3a.4 / 3a.5) replace each branch with a real panel.
+ * Renders the body for a given category. Phase 3a.2 wires the `project` panel;
+ * remaining categories (`agents`, `pipeline`, `plugins`, `about`) ship in
+ * 3a.4 / 3a.5 and land here as additional `case` branches.
  */
 function SettingsCategoryBody({ category }: { category: SettingsCategory }) {
   return (
     <div data-testid={`settings-panel-${category}`}>
-      Category: <strong>{CATEGORY_LABELS[category]}</strong>
-      <div style={{ marginTop: 12, color: 'var(--tx-text-muted)' }}>
-        This panel is under construction. Sub-panels for project, pipeline, and
-        plugins land in subsequent Phase-3a tasks.
-      </div>
+      {category === 'project' ? (
+        <ProjectSettings />
+      ) : (
+        <>
+          Category: <strong>{CATEGORY_LABELS[category]}</strong>
+          <div style={{ marginTop: 12, color: 'var(--tx-text-muted)' }}>
+            This panel is under construction. Sub-panels for pipeline, plugins,
+            agents, and about land in subsequent Phase-3a tasks.
+          </div>
+        </>
+      )}
     </div>
   );
 }

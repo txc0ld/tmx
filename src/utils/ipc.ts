@@ -230,6 +230,7 @@ export interface ProjectData {
   cwd: string;
   git_url?: string;
   branch?: string;
+  webhook_url?: string;
 }
 
 export async function loadProjects(): Promise<ProjectData[]> {
@@ -242,6 +243,10 @@ export async function saveProjects(projects: ProjectData[]): Promise<void> {
 
 export async function addProjectToStore(project: ProjectData): Promise<void> {
   return invoke('add_project', { project });
+}
+
+export async function updateProjectInStore(project: ProjectData): Promise<void> {
+  return invoke('update_project', { project });
 }
 
 export async function deleteProjectFromStore(id: string): Promise<void> {

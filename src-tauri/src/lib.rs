@@ -63,6 +63,7 @@ pub fn run() {
             commands::projects::load_projects,
             commands::projects::save_projects,
             commands::projects::add_project,
+            commands::projects::update_project,
             commands::projects::delete_project,
             // Git
             commands::git::git_available,
