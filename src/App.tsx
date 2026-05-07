@@ -4,13 +4,14 @@ import { useProjectStore } from '@/stores/projectStore';
 import { useTimelineStore } from '@/stores/timelineStore';
 import { colors } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
-import { loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite } from '@/utils/ipc';
+import { httpFetch, loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite, secretsMask } from '@/utils/ipc';
 import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter, usePipelineStore } from '@/stores/pipelineStore';
 import { isTerminalState } from '@/pipeline/state-machine';
 import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
 import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capabilities-lifecycle';
 import { startStuckDetector } from '@/pipeline/stuck-detector';
 import { startNotifier } from '@/pipeline/notifications';
+import { startWebhookNotifier } from '@/pipeline/webhook-notifier';
 import { sendNotification } from '@tauri-apps/plugin-notification';
 import { getLastStdoutAt } from '@/pipeline/controller-runtime';
 import type { AgentTile, PipelineRole, PipelineRun } from '@/types';
@@ -195,6 +196,29 @@ export default function App() {
     const stop = startNotifier({
       send: ({ title, body }) => sendNotification({ title, body }),
       now: () => Date.now(),
+      getProjectName: (projectId) =>
+        useProjectStore.getState().projects.find(p => p.id === projectId)?.name,
+    });
+    return stop;
+  }, []);
+
+  // Phase 2c-iii.4: optional outbound webhook on awaiting_* gate entries.
+  // Per-project `webhookUrl` (UI for editing lands in Phase 3); only
+  // `https://` URLs are honored. Body is JSON-stringified then passed
+  // through `secretsMask` before send. Network failures are swallowed.
+  useEffect(() => {
+    const stop = startWebhookNotifier({
+      getWebhookUrl: (projectId) => {
+        const url = useProjectStore.getState().projects.find(p => p.id === projectId)?.webhookUrl;
+        if (!url || !url.startsWith('https://')) return null;
+        return url;
+      },
+      httpFetch: async (opts) => {
+        const res = await httpFetch(opts);
+        return { status: res.status, body: res.body };
+      },
+      secretsMask,
+      deepLink: (runId) => `terminalx://run/${runId}`,
       getProjectName: (projectId) =>
         useProjectStore.getState().projects.find(p => p.id === projectId)?.name,
     });

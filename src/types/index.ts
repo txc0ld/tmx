@@ -413,6 +413,15 @@ export interface Project {
   cwd: string;
   gitUrl?: string;
   branch?: string;
+  /**
+   * Optional outbound webhook URL. When set, pipeline runs in this project
+   * POST a notification on every transition into an `awaiting_*` gate.
+   * Production wiring (App.tsx) only honors `https://` URLs — `http://`
+   * and other schemes are rejected at the deps boundary. UI for editing
+   * this lands in Phase 3; the field exists now so the delivery
+   * infrastructure (see `src/pipeline/webhook-notifier.ts`) is wired.
+   */
+  webhookUrl?: string;
 }
 
 // ─── Wiring ───────────────────────────────────────────────────────────
