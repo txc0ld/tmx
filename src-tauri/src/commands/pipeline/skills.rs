@@ -1,4 +1,6 @@
 //! `pipeline_install_skills` — copy bundled SKILL.md files into ~/.claude/skills/.
+//! `pipeline_skill_status` — list bundled skills with installed + hash-match flags.
+//! `pipeline_force_install_skill` — delete + reinstall a single bundled skill.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -11,6 +13,16 @@ pub struct InstallSkillsResult {
     pub already_present: Vec<String>,
     pub errors: Vec<String>,
     pub stub: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillStatus {
+    pub name: String,
+    /// True iff `~/.claude/skills/<name>/SKILL.md` exists and is readable.
+    pub installed: bool,
+    /// True iff the installed bytes match the build-time hash. Only meaningful
+    /// when `installed` is true; reported as `false` for missing skills.
+    pub hash_ok: bool,
 }
 
 fn skills_dir() -> PathBuf {
@@ -113,6 +125,96 @@ fn install_skills_inner(app: &tauri::AppHandle) -> Result<InstallSkillsResult, S
 #[tauri::command]
 pub fn pipeline_install_skills(app: tauri::AppHandle) -> Result<InstallSkillsResult, String> {
     install_skills_inner(&app)
+}
+
+// ─── Skill status (Phase 3a.4) ────────────────────────────────────────
+
+/// Pure helper for testing: report per-skill installed + hash-match using the
+/// caller-supplied skills root (i.e. `~/.claude/skills/`).
+fn skill_status_with_dir(target_dir: &Path) -> Vec<SkillStatus> {
+    BUNDLED_PIPELINE_SKILLS
+        .iter()
+        .map(|name| {
+            let skill_md = target_dir.join(name).join("SKILL.md");
+            match std::fs::read(&skill_md) {
+                Ok(bytes) => SkillStatus {
+                    name: (*name).to_string(),
+                    installed: true,
+                    hash_ok: super::skill_provenance::verify_skill(name, &bytes).is_ok(),
+                },
+                Err(_) => SkillStatus {
+                    name: (*name).to_string(),
+                    installed: false,
+                    hash_ok: false,
+                },
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn pipeline_skill_status() -> Result<Vec<SkillStatus>, String> {
+    Ok(skill_status_with_dir(&skills_dir()))
+}
+
+// ─── Force-install one skill (Phase 3a.4) ─────────────────────────────
+
+/// Pure helper for testing. Deletes `<target>/<skill>` if present, then copies
+/// the bundle entry across (verifying the hash before copy, identical to
+/// `install_skills_with_paths`).
+fn force_install_skill_with_paths(
+    bundle_dir: &Path,
+    target_dir: &Path,
+    skill: &str,
+) -> Result<(), String> {
+    if !BUNDLED_PIPELINE_SKILLS.iter().any(|s| *s == skill) {
+        return Err(format!("unknown skill '{skill}' (not bundled)"));
+    }
+
+    let target_skill_dir = target_dir.join(skill);
+    let source_skill_dir = bundle_dir.join(skill);
+    let source_skill_md = source_skill_dir.join("SKILL.md");
+
+    // Verify the bundled bytes match the build-time hash before we touch the
+    // user's filesystem. Mirror the order from `install_skills_with_paths` so
+    // a tampered bundle never deletes the user's working copy.
+    let bytes = std::fs::read(&source_skill_md)
+        .map_err(|e| format!("read bundle {skill}/SKILL.md: {e}"))?;
+    super::skill_provenance::verify_skill(skill, &bytes)
+        .map_err(|e| format!("verify {skill}: {e}"))?;
+
+    // Wipe the existing install (if any). `remove_dir_all` returns NotFound
+    // when nothing is there; treat that as a no-op.
+    if target_skill_dir.exists() {
+        std::fs::remove_dir_all(&target_skill_dir)
+            .map_err(|e| format!("remove {skill}: {e}"))?;
+    }
+
+    std::fs::create_dir_all(target_dir)
+        .map_err(|e| format!("create skills dir: {e}"))?;
+
+    copy_dir_recursive(&source_skill_dir, &target_skill_dir)
+        .map_err(|e| format!("install {skill}: {e}"))?;
+
+    Ok(())
+}
+
+fn force_install_skill_inner(app: &tauri::AppHandle, skill: &str) -> Result<(), String> {
+    let bundle_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("resource_dir: {e}"))?
+        .join("resources")
+        .join("skills");
+    force_install_skill_with_paths(&bundle_dir, &skills_dir(), skill)
+}
+
+#[tauri::command]
+pub fn pipeline_force_install_skill(
+    app: tauri::AppHandle,
+    skill_name: String,
+) -> Result<(), String> {
+    force_install_skill_inner(&app, &skill_name)
 }
 
 #[cfg(test)]
@@ -218,6 +320,142 @@ mod tests {
 
         assert_eq!(res.installed, vec!["tx-pipeline-stage-handoff".to_string()]);
         assert_eq!(res.errors.len(), BUNDLED_PIPELINE_SKILLS.len() - 1);
+    }
+
+    // ─── skill_status_with_dir (Phase 3a.4) ───────────────────────────
+
+    #[test]
+    fn skill_status_reports_not_installed_when_dir_empty() {
+        let target = tempdir().unwrap();
+        let res = skill_status_with_dir(target.path());
+        assert_eq!(res.len(), BUNDLED_PIPELINE_SKILLS.len());
+        for s in &res {
+            assert!(!s.installed, "skill {} should be not-installed", s.name);
+            assert!(!s.hash_ok, "skill {} hash_ok must be false when missing", s.name);
+        }
+    }
+
+    #[test]
+    fn skill_status_reports_hash_ok_for_real_bundle_bytes() {
+        let target = tempdir().unwrap();
+        // Seed real bundle bytes into the "installed" location, mirroring what
+        // `pipeline_install_skills` would have produced.
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        for skill in BUNDLED_PIPELINE_SKILLS {
+            let installed = target.path().join(skill);
+            fs::create_dir_all(&installed).unwrap();
+            let src = manifest_dir
+                .join("resources/skills")
+                .join(skill)
+                .join("SKILL.md");
+            fs::copy(&src, installed.join("SKILL.md")).unwrap();
+        }
+
+        let res = skill_status_with_dir(target.path());
+        for s in &res {
+            assert!(s.installed, "{} should be installed", s.name);
+            assert!(s.hash_ok, "{} hash should match bundled", s.name);
+        }
+    }
+
+    #[test]
+    fn skill_status_reports_hash_mismatch_for_user_edited_file() {
+        let target = tempdir().unwrap();
+        let installed = target.path().join("tx-pipeline-stage-handoff");
+        fs::create_dir_all(&installed).unwrap();
+        fs::write(installed.join("SKILL.md"), "user-edited content").unwrap();
+
+        let res = skill_status_with_dir(target.path());
+        let handoff = res
+            .iter()
+            .find(|s| s.name == "tx-pipeline-stage-handoff")
+            .unwrap();
+        assert!(handoff.installed);
+        assert!(!handoff.hash_ok, "user-edited content must trip hash_ok=false");
+    }
+
+    // ─── force_install_skill_with_paths (Phase 3a.4) ──────────────────
+
+    #[test]
+    fn force_install_overwrites_existing_user_edited_skill() {
+        let bundle = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        seed_real_bundle(bundle.path());
+
+        // Pre-existing user-edit at the install target — force-install must
+        // wipe it.
+        let installed = target.path().join("tx-pipeline-stage-handoff");
+        fs::create_dir_all(&installed).unwrap();
+        fs::write(installed.join("SKILL.md"), "user-edit").unwrap();
+
+        force_install_skill_with_paths(
+            bundle.path(),
+            target.path(),
+            "tx-pipeline-stage-handoff",
+        )
+        .expect("force-install should succeed");
+
+        // After force-install, the file content should match the bundle hash.
+        let bytes = fs::read(installed.join("SKILL.md")).unwrap();
+        super::super::skill_provenance::verify_skill("tx-pipeline-stage-handoff", &bytes)
+            .expect("post-install bytes match build hash");
+    }
+
+    #[test]
+    fn force_install_creates_when_not_present() {
+        let bundle = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        seed_real_bundle(bundle.path());
+
+        force_install_skill_with_paths(
+            bundle.path(),
+            target.path(),
+            "tx-pipeline-reviewer",
+        )
+        .expect("force-install should succeed for missing skill");
+
+        assert!(target.path().join("tx-pipeline-reviewer/SKILL.md").exists());
+    }
+
+    #[test]
+    fn force_install_rejects_unknown_skill_name() {
+        let bundle = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let err = force_install_skill_with_paths(
+            bundle.path(),
+            target.path(),
+            "../etc/passwd",
+        )
+        .unwrap_err();
+        assert!(err.contains("unknown skill"), "got: {err}");
+    }
+
+    #[test]
+    fn force_install_refuses_tampered_bundle_and_preserves_target() {
+        let bundle = tempdir().unwrap();
+        let target = tempdir().unwrap();
+
+        // Bundle contains tampered content for the skill.
+        let bundled = bundle.path().join("tx-pipeline-stage-handoff");
+        fs::create_dir_all(&bundled).unwrap();
+        fs::write(bundled.join("SKILL.md"), "tampered").unwrap();
+
+        // Pre-existing target install we want to make sure stays put.
+        let installed = target.path().join("tx-pipeline-stage-handoff");
+        fs::create_dir_all(&installed).unwrap();
+        fs::write(installed.join("SKILL.md"), "existing-good").unwrap();
+
+        let err = force_install_skill_with_paths(
+            bundle.path(),
+            target.path(),
+            "tx-pipeline-stage-handoff",
+        )
+        .unwrap_err();
+        assert!(err.contains("hash mismatch") || err.contains("verify"), "got: {err}");
+
+        // Critically: we must not have wiped the user's existing copy.
+        let preserved = fs::read_to_string(installed.join("SKILL.md")).unwrap();
+        assert_eq!(preserved, "existing-good");
     }
 
     #[test]

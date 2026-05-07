@@ -97,6 +97,8 @@ pub fn run() {
             commands::pipeline::pipeline_guardrails_install,
             commands::pipeline::pipeline_guardrails_uninstall,
             commands::pipeline::pipeline_install_skills,
+            commands::pipeline::pipeline_skill_status,
+            commands::pipeline::pipeline_force_install_skill,
             commands::pipeline::pipeline_merger_request_token,
             commands::pipeline::pipeline_merger_run,
             commands::pipeline::pipeline_preflight,

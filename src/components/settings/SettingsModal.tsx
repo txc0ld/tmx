@@ -5,6 +5,7 @@ import {
   type SettingsCategory,
 } from '@/stores/settingsStore';
 import { ProjectSettings } from './ProjectSettings';
+import { PipelineSkillsSettings } from './PipelineSkillsSettings';
 
 const CATEGORY_LABELS: Record<SettingsCategory, string> = {
   project: 'Project',
@@ -191,12 +192,14 @@ function SettingsCategoryBody({ category }: { category: SettingsCategory }) {
     <div data-testid={`settings-panel-${category}`}>
       {category === 'project' ? (
         <ProjectSettings />
+      ) : category === 'pipeline' ? (
+        <PipelineSkillsSettings />
       ) : (
         <>
           Category: <strong>{CATEGORY_LABELS[category]}</strong>
           <div style={{ marginTop: 12, color: 'var(--tx-text-muted)' }}>
-            This panel is under construction. Sub-panels for pipeline, plugins,
-            agents, and about land in subsequent Phase-3a tasks.
+            This panel is under construction. Sub-panels for plugins, agents,
+            and about land in subsequent Phase-3a tasks.
           </div>
         </>
       )}

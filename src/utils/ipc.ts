@@ -416,6 +416,35 @@ export async function pipelineInstallSkills(): Promise<InstallSkillsResult> {
   return invoke<InstallSkillsResult>('pipeline_install_skills');
 }
 
+export interface SkillStatus {
+  name: string;
+  /** True iff `~/.claude/skills/<name>/SKILL.md` exists. */
+  installed: boolean;
+  /** True iff the installed file's bytes match the build-time SHA-256.
+   *  Always false when `installed` is false. */
+  hash_ok: boolean;
+}
+
+/**
+ * Phase 3a.4 — list bundled pipeline skills with installed + hash-match flags.
+ * The Pipeline settings panel uses this to render per-skill status badges.
+ */
+export async function pipelineSkillStatus(): Promise<SkillStatus[]> {
+  return invoke<SkillStatus[]>('pipeline_skill_status');
+}
+
+/**
+ * Phase 3a.4 — wipe + reinstall a single bundled skill from the app bundle.
+ *
+ * Distinct from `pipelineInstallSkills` (which leaves existing files alone) so
+ * users can repair a hash-mismatch (Restore) or freshen an installed copy
+ * (Update) one skill at a time. `skillName` is validated against the bundled
+ * allowlist server-side; an unknown name returns Err.
+ */
+export async function pipelineForceInstallSkill(skillName: string): Promise<void> {
+  await invoke<void>('pipeline_force_install_skill', { skillName });
+}
+
 /**
  * Read a bundled role-prompt (`planner` / `builder` / `reviewer` /
  * `reviewer-codex`). Returns null if the file is missing or empty —
