@@ -62,21 +62,36 @@ interface MatchedMarker {
 }
 
 /**
- * The protocol requires sentinels on their own line at column 0. Anchoring
- * the search to a line-start guard rejects false positives from sources
- * like role-prompt echoes (Claude's UI renders pasted prompts inside
- * box-drawn frames with leading `│ ` characters, so embedded sentinel
- * examples — including ones with template placeholders that don't parse
- * as JSON, like `"round":<n>` — never appear at column 0).
+ * The protocol asks agents to emit sentinels on their own line. Anchoring
+ * to line-start filters out false positives — most importantly, role-prompt
+ * echoes that get re-rendered inside Claude Code's box-drawn frames (those
+ * lines are prefixed with `│ ` or similar box-drawing chars). The anchor
+ * accepts:
  *
- * A match at buffer-start (index 0) is also valid, since chunk boundaries
- * may split exactly before a sentinel and the previous newline sits in a
- * consumed earlier slice.
+ *  - Buffer start (chunk-boundary split between newline and marker)
+ *  - The previous char is `\n` / `\r`
+ *  - The line up to the marker contains ONLY whitespace (spaces / tabs).
+ *    Claude Code's interactive UI sometimes indents agent output a few
+ *    columns; rejecting strict-column-0 makes legitimate sentinels invisible.
+ *
+ * Rejected: lines whose pre-marker prefix contains box-drawing chars (`│`
+ * `╎` `┃` etc.) or any non-whitespace text. Those are the prompt-echo cases.
  */
+const BOX_DRAWING_CHARS = new Set(['│', '╎', '┃', '|', '>', '*', '#']);
+
 function isAtLineStart(buf: string, index: number): boolean {
   if (index === 0) return true;
-  const prev = buf[index - 1];
-  return prev === '\n' || prev === '\r';
+  // Walk backwards from `index` to the previous newline (or buffer start).
+  // If every char in that span is whitespace (space / tab), accept. If we
+  // hit a box-drawing char or any other non-whitespace, reject.
+  for (let i = index - 1; i >= 0; i--) {
+    const ch = buf[i];
+    if (ch === '\n' || ch === '\r') return true;
+    if (ch === ' ' || ch === '\t') continue;
+    if (BOX_DRAWING_CHARS.has(ch)) return false;
+    return false;
+  }
+  return true; // reached buffer start with only whitespace
 }
 
 function findFirstMarker(buf: string): MatchedMarker | null {

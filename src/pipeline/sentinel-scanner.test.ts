@@ -245,4 +245,32 @@ describe('scanForSentinel', () => {
     const event = scanForSentinel(mixed);
     expect(event?.kind).toBe('done');
   });
+
+  it('finds sentinels indented with spaces (Claude UI render padding)', () => {
+    // Claude Code's interactive UI sometimes renders agent output with a
+    // few leading spaces. Strict column-0 rejected those legitimate emits;
+    // line-start-with-only-whitespace allows them.
+    const indented =
+      'thinking aloud about the plan...\n' +
+      '  <<<TX_STAGE_DONE>>>{"stage":"planner","specPath":"a","planPath":"b","tasks":[],"summary":"x","planCommitSha":"abc","confidence":"verified"}\n';
+    const event = scanForSentinel(indented);
+    expect(event?.kind).toBe('done');
+  });
+
+  it('still rejects sentinels inside box-drawn role-prompt echo frames', () => {
+    const echoed =
+      'Some context.\n' +
+      '│   <<<TX_STAGE_DONE>>>{"stage":"reviewer","verdict":"approve","round":1}\n' +
+      'More text.\n';
+    expect(scanForSentinel(echoed)).toBeNull();
+  });
+
+  it('rejects sentinels prefixed with quote/comment markers', () => {
+    const quoted = '> <<<TX_STAGE_DONE>>>{"x":1}\n';
+    expect(scanForSentinel(quoted)).toBeNull();
+    const commented = '* <<<TX_STAGE_DONE>>>{"x":1}\n';
+    expect(scanForSentinel(commented)).toBeNull();
+    const headed = '# <<<TX_STAGE_DONE>>>{"x":1}\n';
+    expect(scanForSentinel(headed)).toBeNull();
+  });
 });
