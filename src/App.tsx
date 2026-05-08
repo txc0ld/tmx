@@ -30,6 +30,10 @@ import { CommandPalette } from '@/components/palette/CommandPalette';
 import { SearchOverlay } from '@/components/canvas/SearchOverlay';
 import { SessionTimeline } from '@/components/timeline/SessionTimeline';
 import { SettingsModal } from '@/components/settings/SettingsModal';
+import { SensitivePathsModal } from '@/components/pipeline/SensitivePathsModal';
+import { StartPipelineRunModal } from '@/components/pipeline/StartPipelineRunModal';
+import { launchPipelineRun } from '@/pipeline/launch';
+import { useToastStore } from '@/stores/toastStore';
 import type { TileType, Tile } from '@/types';
 import type { TileTemplate } from '@/stores/templateStore';
 import '@/stores/clipboardStore'; // Initialize clipboard listener
@@ -133,6 +137,22 @@ export default function App() {
   const setActiveProject = useProjectStore(s => s.setActive);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // Pipeline launch UX. Two modals interlock:
+  //
+  //   StartPipelineRunModal — collects goal + branch from the user.
+  //   SensitivePathsModal   — opens mid-launch when preflight finds .env / *.pem / etc.
+  //
+  // The launch flow (`src/pipeline/launch.ts`) is UI-framework-free; it
+  // accepts a `confirmSensitivePaths` callback. We wire that callback to a
+  // promise-resolver pattern: stash the resolver in state, render the modal,
+  // resolve from the modal's button clicks. Keeps the launch flow synchronous-
+  // looking while still gating on user input.
+  const [pipelineRunOpen, setPipelineRunOpen] = useState(false);
+  const [sensitivePathsState, setSensitivePathsState] = useState<{
+    paths: string[];
+    resolve: (proceed: boolean) => void;
+  } | null>(null);
 
   // Install per-app subscriptions at mount (not module import). Avoids
   // leaking a duplicate subscription if the module is re-loaded under HMR
@@ -561,6 +581,40 @@ export default function App() {
     spawnTileAtCenter(template.category, template.config);
   }, []);
 
+  // Pipeline run launch — invoked by StartPipelineRunModal's submit button.
+  // Returns the launch flow's structured result so the modal can surface
+  // the error inline instead of via a toast (faster feedback loop).
+  const handleStartPipelineRun = useCallback(
+    async (input: { goal: string; branch: string }) => {
+      const result = await launchPipelineRun({
+        goal: input.goal,
+        branch: input.branch,
+        confirmSensitivePaths: (paths) =>
+          new Promise<boolean>((resolve) => {
+            setSensitivePathsState({ paths, resolve });
+          }),
+      });
+      if (result.ok) {
+        setPipelineRunOpen(false);
+        useToastStore.getState().addToast(
+          `Pipeline run started — branch ${input.branch}`,
+          'success',
+        );
+        return { ok: true };
+      }
+      // Toast non-cancellation errors so they're visible even after the
+      // modal is closed; cancellations are silent (user-initiated).
+      if (result.reason !== 'cancelled') {
+        useToastStore.getState().addToast(
+          `Pipeline launch failed: ${result.error}`,
+          'error',
+        );
+      }
+      return { ok: false, error: result.error };
+    },
+    [],
+  );
+
   const project = projects.find(p => p.id === activeProject);
 
   return (
@@ -581,6 +635,7 @@ export default function App() {
           onAddTile={handleAddTile}
           onAddFromTemplate={handleAddFromTemplate}
           onOpenPalette={() => setPaletteOpen(true)}
+          onStartPipelineRun={() => setPipelineRunOpen(true)}
         />
         <InfiniteCanvas />
         <SessionTimeline onClose={() => useTimelineStore.getState().setOpen(false)} />
@@ -600,6 +655,28 @@ export default function App() {
       )}
 
       <SettingsModal />
+
+      {pipelineRunOpen && (
+        <StartPipelineRunModal
+          defaultBranch={`pipeline/run-${new Date().toISOString().slice(0, 10)}`}
+          onSubmit={handleStartPipelineRun}
+          onCancel={() => setPipelineRunOpen(false)}
+        />
+      )}
+
+      {sensitivePathsState && (
+        <SensitivePathsModal
+          paths={sensitivePathsState.paths}
+          onAcknowledge={() => {
+            sensitivePathsState.resolve(true);
+            setSensitivePathsState(null);
+          }}
+          onCancel={() => {
+            sensitivePathsState.resolve(false);
+            setSensitivePathsState(null);
+          }}
+        />
+      )}
 
       <ToastContainer />
     </div>

@@ -14,9 +14,10 @@ interface TopBarProps {
   onAddTile: (type: TileType) => void;
   onAddFromTemplate: (template: TileTemplate) => void;
   onOpenPalette: () => void;
+  onStartPipelineRun: () => void;
 }
 
-export function TopBar({ project, onAddFromTemplate, onOpenPalette }: TopBarProps) {
+export function TopBar({ project, onAddFromTemplate, onOpenPalette, onStartPipelineRun }: TopBarProps) {
   const templates = useTemplateStore(s => s.templates);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -136,6 +137,39 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette }: TopBarProp
             ))}
           </div>
         )}
+      </div>
+
+      {/* Pipeline run launcher — opens StartPipelineRunModal. Disabled when
+          no project is selected (the launch flow needs a cwd). */}
+      <div style={{
+        // @ts-expect-error webkit
+        WebkitAppRegion: 'no-drag',
+      }}>
+        <button
+          onClick={onStartPipelineRun}
+          disabled={!project}
+          title={project ? 'Start a pipeline run (Plan → Build → Review)' : 'Select a project first'}
+          style={{
+            height: 28,
+            padding: `0 ${spacing.sm}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            background: project ? 'var(--tx-accent)' : 'var(--tx-outline-ghost)',
+            border: `1px solid ${project ? 'var(--tx-accent)' : colors.outlineGhost}`,
+            borderRadius: radius.md,
+            color: project ? 'var(--tx-accent-fg, #000)' : colors.secondary,
+            ...typography.labelSm,
+            cursor: project ? 'pointer' : 'not-allowed',
+            opacity: project ? 1 : 0.5,
+            transition: `all ${motion.hover}`,
+            fontWeight: 600,
+          }}
+          onMouseEnter={(e) => { if (project) e.currentTarget.style.filter = 'brightness(1.1)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.filter = ''; }}
+        >
+          <span style={{ fontSize: 14, lineHeight: 1 }}>▶</span> Pipeline
+        </button>
       </div>
 
       {/* Settings gear — sits to the left of layout/clear, the action group */}
