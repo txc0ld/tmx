@@ -10,6 +10,7 @@ import { isTerminalState } from '@/pipeline/state-machine';
 import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
 import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capabilities-lifecycle';
 import { handleFailureBundleLifecycle } from '@/pipeline/failure-bundle-lifecycle';
+import { handleBuilderKickLifecycle } from '@/pipeline/builder-kick-lifecycle';
 import { startRedTeamDispatcher } from '@/pipeline/red-team-dispatcher';
 import { startDualReviewerDispatcher } from '@/pipeline/dual-reviewer-dispatcher';
 import { buildOneshotBrief } from '@/pipeline/brief-builder';
@@ -18,6 +19,7 @@ import { startNotifier } from '@/pipeline/notifications';
 import { startWebhookNotifier } from '@/pipeline/webhook-notifier';
 import { sendNotification } from '@tauri-apps/plugin-notification';
 import { getLastStdoutAt, ingestOneshotResult, clearRunBuffers } from '@/pipeline/controller-runtime';
+import { startPipelinePtyRouter } from '@/pipeline/pty-router';
 import type { PipelineState } from '@/types';
 import { resumeFromClarification } from '@/pipeline/scratchpad-watcher';
 import type { AgentTile, PipelineRole, PipelineRun } from '@/types';
@@ -189,6 +191,11 @@ export default function App() {
     const offGuardrails = setPipelineLifecycleEmitter(handleGuardrailsLifecycle);
     const offCapabilities = setPipelineLifecycleEmitter(handleCapabilitiesLifecycle);
     const offFailureBundle = setPipelineLifecycleEmitter(handleFailureBundleLifecycle);
+    // Builder kick: deterministic handoff prompt to the Builder PTY when
+    // the run enters `building`. The agent-chain wire pipes the planner's
+    // tail output too, but it races the state transition; this kick makes
+    // the handoff observable and idempotent (per-plan-path dedup).
+    const offBuilderKick = setPipelineLifecycleEmitter(handleBuilderKickLifecycle);
     // Phase 3b.2: when a run leaves `awaiting_clarification`, reset the
     // scratchpad-watcher's pendingProbe debounce so the next stagnation
     // window can fire one fresh synthetic clarification (rather than being
@@ -202,6 +209,7 @@ export default function App() {
       offGuardrails();
       offCapabilities();
       offFailureBundle();
+      offBuilderKick();
       offScratchpadResume();
     };
   }, []);
@@ -223,6 +231,13 @@ export default function App() {
     });
     return off;
   }, []);
+
+  // Global PTY → controller-runtime router. Without this, every sentinel
+  // an agent emits goes nowhere — `ingestPtyChunk` was previously only
+  // called from tests. The router maintains a ptyId→{runId,role} map by
+  // subscribing to canvasStore (so the lookup is O(1) per chunk) and
+  // forwards matching `pty-output` events into the sentinel parser.
+  useEffect(() => startPipelinePtyRouter(), []);
 
   // Polish.1: red-team dispatcher. Closes the spawn-side gap from Phase
   // 3c.6 — without this, complex runs reaching `awaiting_red_team` after

@@ -67,6 +67,22 @@ export function PipelineControllerTile({ tile }: Props) {
             Start
           </button>
         )}
+        {!isTerminal && run.state === 'awaiting_plan_approval' && (
+          <button
+            type="button"
+            onClick={() => dispatch(run.id, { type: 'approve_plan' })}
+            style={{
+              ...BUTTON_BASE,
+              background: 'var(--tx-accent)',
+              borderColor: 'var(--tx-accent)',
+              color: 'var(--tx-accent-fg)',
+              fontWeight: 600,
+              padding: '4px 14px',
+            }}
+          >
+            Approve plan
+          </button>
+        )}
         {!isTerminal && (
           <button
             type="button"

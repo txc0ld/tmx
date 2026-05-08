@@ -46,6 +46,13 @@ export interface AgentTile extends TileBase {
   autoPipe?: boolean;             // default false
   autoPipeIdleMs?: number;        // silence required before auto-pipe fires — default 2000
   autoPromptTemplate?: string;    // prompt appended after the piped context (empty = pipe only)
+
+  // Pipeline binding — set on agent tiles spawned by `launchPipelineRun`.
+  // The global PTY router in App.tsx uses these to forward chunks into
+  // `ingestPtyChunk` so the controller-runtime sentinel parser can drive
+  // the state machine. Absent on stand-alone agent tiles.
+  pipelineRunId?: string;
+  pipelineRole?: 'planner' | 'builder' | 'reviewer';
 }
 
 export interface TerminalTile extends TileBase {
