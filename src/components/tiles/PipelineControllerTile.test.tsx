@@ -272,3 +272,57 @@ describe('PipelineControllerTile — Delete worktree', () => {
     expect(screen.getByRole('alert').textContent).toContain('git worktree busy');
   });
 });
+
+// Phase 3b: hydrated runs with dead PTYs surface a yellow banner so the
+// user knows approve/abort still works but Builder/Reviewer won't auto-resume.
+describe('PipelineControllerTile — Agents-disconnected banner', () => {
+  beforeEach(() => {
+    resetStores();
+  });
+  afterEach(() => {
+    cleanup();
+    resetStores();
+  });
+
+  it('renders the banner when run.agentsDisconnected === true', () => {
+    const run = makeRun({ state: 'awaiting_plan_approval', agentsDisconnected: true });
+    seedStores(run);
+
+    render(<PipelineControllerTile tile={makeTile(run.id)} />);
+
+    const banner = screen.getByTestId('agents-disconnected-banner');
+    expect(banner).toBeTruthy();
+    expect(banner.textContent).toContain('Agents disconnected');
+    expect(banner.textContent).toContain('restored after a reload');
+    expect(banner.textContent).toContain('Launch a fresh run');
+    expect(banner.getAttribute('role')).toBe('alert');
+  });
+
+  it('does not render the banner when agentsDisconnected is undefined', () => {
+    const run = makeRun({ state: 'awaiting_plan_approval' });
+    expect(run.agentsDisconnected).toBeUndefined();
+    seedStores(run);
+
+    render(<PipelineControllerTile tile={makeTile(run.id)} />);
+    expect(screen.queryByTestId('agents-disconnected-banner')).toBeNull();
+  });
+
+  it('does not render the banner when agentsDisconnected is explicitly false', () => {
+    const run = makeRun({ state: 'awaiting_plan_approval', agentsDisconnected: false });
+    seedStores(run);
+
+    render(<PipelineControllerTile tile={makeTile(run.id)} />);
+    expect(screen.queryByTestId('agents-disconnected-banner')).toBeNull();
+  });
+
+  it('still renders the banner on terminal runs (no auto-clear)', () => {
+    // Once disconnected, stays disconnected for the run's life. A user
+    // could abort a hydrated run; the banner should remain visible until
+    // they Clear/Delete the tile (which removes the run from the store).
+    const run = makeRun({ state: 'failed', agentsDisconnected: true });
+    seedStores(run);
+
+    render(<PipelineControllerTile tile={makeTile(run.id)} />);
+    expect(screen.getByTestId('agents-disconnected-banner')).toBeTruthy();
+  });
+});

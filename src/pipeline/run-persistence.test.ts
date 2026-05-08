@@ -227,6 +227,60 @@ describe('reconcileHydratedRun', () => {
       expect(out.state).toBe(state);
     },
   );
+
+  // Phase 3b: the agentsDisconnected flag drives the controller-tile
+  // banner + the builder-kick lifecycle short-circuit. Hydrated awaiting_*
+  // runs get it set; everything else is left alone.
+  it.each<PipelineState>([
+    'awaiting_plan_approval',
+    'awaiting_clarification',
+    'awaiting_merge_approval',
+  ])('flags hydrated awaiting state %s with agentsDisconnected = true', (state) => {
+    const run = makeRun({ state });
+    expect(run.agentsDisconnected).toBeUndefined();
+    const out = reconcileHydratedRun(run);
+    expect(out.agentsDisconnected).toBe(true);
+    expect(out.state).toBe(state);
+  });
+
+  it('does not flag idle runs with agentsDisconnected', () => {
+    const out = reconcileHydratedRun(makeRun({ state: 'idle' }));
+    expect(out.agentsDisconnected).toBeUndefined();
+  });
+
+  it.each<PipelineState>(['done', 'failed', 'escalated'])(
+    'does not flag terminal state %s with agentsDisconnected',
+    (state) => {
+      const out = reconcileHydratedRun(makeRun({ state }));
+      expect(out.agentsDisconnected).toBeUndefined();
+    },
+  );
+
+  it('active-state runs reclassified to failed are not flagged disconnected', () => {
+    // The reclassified record is terminal — no banner needed.
+    const out = reconcileHydratedRun(makeRun({ state: 'building' }));
+    expect(out.state).toBe('failed');
+    expect(out.agentsDisconnected).toBeUndefined();
+  });
+});
+
+describe('createRun', () => {
+  it('newly created runs do not have agentsDisconnected set', () => {
+    const id = usePipelineStore.getState().createRun({
+      runId: 'fresh-1',
+      templateId: 'tx.pipeline.test',
+      projectId: 'p-1',
+      worktreePath: '/wt',
+      branch: 'feat/x',
+      fingerprint: FINGERPRINT,
+    });
+    const run = usePipelineStore.getState().runs[id];
+    expect(run).toBeDefined();
+    // Must default to falsy/undefined so the controller banner doesn't
+    // render on brand-new runs and the builder-kick lifecycle proceeds
+    // normally.
+    expect(run.agentsDisconnected).toBeUndefined();
+  });
 });
 
 describe('hydrateRunsFromDisk', () => {

@@ -32,6 +32,12 @@ interface KickDeps {
    * actual `planPath`.
    */
   getLatestPlanPath?: (runId: string) => string | undefined;
+  /**
+   * Inject for tests. Defaults to a `pipelineStore.runs[runId]` lookup —
+   * used to short-circuit when the run was restored from disk and has dead
+   * PTYs (`agentsDisconnected === true`).
+   */
+  isAgentsDisconnected?: (runId: string) => boolean;
 }
 
 /**
@@ -62,6 +68,11 @@ function defaultGetLatestPlanPath(runId: string): string | undefined {
   return run?.artifacts.plan?.planPath;
 }
 
+function defaultIsAgentsDisconnected(runId: string): boolean {
+  const run = usePipelineStore.getState().runs[runId];
+  return run?.agentsDisconnected === true;
+}
+
 /**
  * Lifecycle handler signature matches the rest of the pipeline lifecycle
  * stack: receives a `TelemetryEvent` and acts on `state_change` events
@@ -72,10 +83,19 @@ export function makeBuilderKickLifecycle(deps: KickDeps = {}) {
   const resolveBuilderPty = deps.resolveBuilderPty ?? defaultResolveBuilderPty;
   const write = deps.write ?? ptyWrite;
   const getLatestPlanPath = deps.getLatestPlanPath ?? defaultGetLatestPlanPath;
+  const isAgentsDisconnected = deps.isAgentsDisconnected ?? defaultIsAgentsDisconnected;
 
   return function handleBuilderKickLifecycle(ev: LifecycleEvent): void {
     if (ev.to !== 'building') return;
     if (ev.from === 'building') return;
+
+    // Restored-after-reload runs have dead PTYs. Writing to a stale id is a
+    // silent no-op for the user; the controller banner already informs them
+    // they need to launch a fresh run. Skip the kick.
+    if (isAgentsDisconnected(ev.runId)) {
+      console.info(`[pipeline] builder-kick skipped for ${ev.runId}: agents disconnected (run restored after reload)`);
+      return;
+    }
 
     const latestPlanPath = getLatestPlanPath(ev.runId);
     if (!latestPlanPath) return;

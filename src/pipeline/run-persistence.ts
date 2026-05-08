@@ -165,7 +165,11 @@ export function reconcileHydratedRun(run: PipelineRun): PipelineRun {
   }
   // awaiting_* (incl. awaiting_clarification, awaiting_plan_approval, etc.)
   // and `idle` survive untouched. The controller renders a "agents
-  // disconnected" banner for awaiting_* runs.
+  // disconnected" banner for awaiting_* runs, and the builder-kick lifecycle
+  // short-circuits so we don't write to dead PTY ids on the next transition.
+  if (run.state.startsWith('awaiting_')) {
+    return { ...run, agentsDisconnected: true };
+  }
   return run;
 }
 

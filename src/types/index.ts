@@ -526,6 +526,19 @@ export interface PipelineRun {
    * re-evaluated on each `planner_done`.
    */
   templateDualReviewer: boolean;
+  /**
+   * Transient runtime flag (not part of the state-machine). True when this
+   * run was hydrated from disk after an app reload — its agent PTYs died with
+   * the app process, so any approve/abort still works but Builder/Reviewer
+   * cannot auto-resume. The controller tile renders a banner; the
+   * builder-kick lifecycle short-circuits to avoid writing to dead PTY ids.
+   *
+   * Set by `reconcileHydratedRun` for hydrated `awaiting_*` runs. Never
+   * cleared automatically — once disconnected, stays disconnected for the
+   * remainder of the run's life. Optional so existing fixtures and the
+   * `initialRunState` factory don't have to set `false` everywhere.
+   */
+  agentsDisconnected?: boolean;
 }
 
 export interface PipelineControllerTile extends TileBase {

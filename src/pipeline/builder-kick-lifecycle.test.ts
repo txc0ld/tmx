@@ -109,6 +109,24 @@ describe('builder-kick lifecycle', () => {
     expect(write.mock.calls[2][1]).toContain('plan-v2.md');
   });
 
+  it('skips when the run has agentsDisconnected = true (restored after reload)', async () => {
+    const write = vi.fn();
+    const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const handler = makeBuilderKickLifecycle({
+      resolveBuilderPty: () => 'pty-builder',
+      getLatestPlanPath: () => 'plan.md',
+      isAgentsDisconnected: () => true,
+      write,
+    });
+    handler(ev({}));
+    await Promise.resolve();
+    expect(write).not.toHaveBeenCalled();
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('agents disconnected'),
+    );
+    consoleSpy.mockRestore();
+  });
+
   it('swallows write errors without throwing', async () => {
     const write = vi.fn().mockRejectedValue(new Error('PTY closed'));
     const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
