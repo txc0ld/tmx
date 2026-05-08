@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { usePipelineStore } from '@/stores/pipelineStore';
 import { isTerminalState } from '@/pipeline/state-machine';
 import { MergerConfirmModal } from '@/components/pipeline/MergerConfirmModal';
 import { ClarificationModal } from '@/components/pipeline/ClarificationModal';
+import { PlanPreviewModal } from '@/components/pipeline/PlanPreviewModal';
 import type { PipelineControllerTile as Tile } from '@/types';
 
 interface Props {
@@ -20,6 +22,7 @@ export function PipelineControllerTile({ tile }: Props) {
   const run = usePipelineStore(s => s.runs[tile.runId]);
   const dispatch = usePipelineStore(s => s.dispatch);
   const removeRun = usePipelineStore(s => s.removeRun);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   if (!run) {
     return (
@@ -70,7 +73,9 @@ export function PipelineControllerTile({ tile }: Props) {
         {!isTerminal && run.state === 'awaiting_plan_approval' && (
           <button
             type="button"
-            onClick={() => dispatch(run.id, { type: 'approve_plan' })}
+            onClick={() => setPreviewOpen(true)}
+            disabled={!run.artifacts.plan}
+            title={run.artifacts.plan ? undefined : 'No plan yet'}
             style={{
               ...BUTTON_BASE,
               background: 'var(--tx-accent)',
@@ -78,9 +83,11 @@ export function PipelineControllerTile({ tile }: Props) {
               color: 'var(--tx-accent-fg)',
               fontWeight: 600,
               padding: '4px 14px',
+              opacity: run.artifacts.plan ? 1 : 0.5,
+              cursor: run.artifacts.plan ? 'pointer' : 'not-allowed',
             }}
           >
-            Approve plan
+            Review plan
           </button>
         )}
         {!isTerminal && (
@@ -105,6 +112,9 @@ export function PipelineControllerTile({ tile }: Props) {
       {run.state === 'awaiting_merge_approval' && <MergerConfirmModal run={run} />}
       {run.state === 'awaiting_clarification' && run.artifacts.questions.length > 0 && (
         <ClarificationModal run={run} />
+      )}
+      {previewOpen && (
+        <PlanPreviewModal run={run} onClose={() => setPreviewOpen(false)} />
       )}
     </div>
   );
