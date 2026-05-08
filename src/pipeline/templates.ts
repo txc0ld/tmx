@@ -57,25 +57,26 @@ export function anthropicTrioTemplate(): PipelineTemplate {
     isBuiltin: true,
 
     // Agent tiles need real estate for Claude Code's full UI (welcome
-    // banner + idle tip carousel + status bar). At 480x380 the tip box
-    // would clip / wrap mid-frame and look "messy". 620x520 fits cleanly
-    // on a 1440-wide layout (3 × 620 + 2 × 20 gap = 1900) and gives the
-    // PTY ~80 cols × ~30 rows.
+    // banner + idle tip carousel + status bar + tool-permission gates).
+    // At 720x540 with 12px xterm font we get ~95 cols × ~33 rows, which
+    // matches Claude Code's preferred layout — the box-drawing frames
+    // and tip carousel render without overflow / wrap-mangling. AgentTile
+    // also calls `ptyResize` post-spawn so the PTY's cols match xterm.
     tiles: [
-      { role: 'planner', type: 'agent', position: { x: 0, y: 0, w: 620, h: 520 },
+      { role: 'planner', type: 'agent', position: { x: 0, y: 0, w: 720, h: 540 },
         config: {
           agent: 'claude', model: 'opus-4-7', effort: 'high', mode: 'planner',
         } },
-      { role: 'builder', type: 'agent', position: { x: 660, y: 0, w: 620, h: 520 },
+      { role: 'builder', type: 'agent', position: { x: 760, y: 0, w: 720, h: 540 },
         config: {
           agent: 'claude', model: 'sonnet-4-6', effort: 'medium', mode: 'builder',
         } },
-      { role: 'reviewer', type: 'agent', position: { x: 1320, y: 0, w: 620, h: 520 },
+      { role: 'reviewer', type: 'agent', position: { x: 1520, y: 0, w: 720, h: 540 },
         config: {
           agent: 'claude', model: 'opus-4-7', effort: 'high', mode: 'reviewer',
           oneshot: true,
         } },
-      { role: 'controller', type: 'pipeline-controller', position: { x: 0, y: 560, w: 1940, h: 220 },
+      { role: 'controller', type: 'pipeline-controller', position: { x: 0, y: 580, w: 2240, h: 220 },
         config: {} },
     ],
 

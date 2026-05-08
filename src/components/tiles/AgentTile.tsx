@@ -156,8 +156,11 @@ export function AgentTile({ tile }: AgentTileProps) {
     const terminal = new Terminal({
       theme: getXtermTheme(),
       fontFamily: fonts.mono,
-      fontSize: 13,
-      lineHeight: 1.3,
+      // 12px gives ~92 cols at the Anthropic Trio template's 720-wide
+      // tile — enough headroom for Claude Code's status bar + tip box
+      // without the box-frame overflowing into mangled wraps.
+      fontSize: 12,
+      lineHeight: 1.25,
       cursorBlink: true,
       cursorStyle: 'bar',
     });
@@ -226,6 +229,24 @@ export function AgentTile({ tile }: AgentTileProps) {
       ...(tile.command ? { customCommand: tile.command } : {}),
     }).then(async (id) => {
       useCanvasStore.getState().updateTile(tile.id, { ptyId: id, status: 'working' } as Partial<AgentTileType>);
+      // Sync PTY size with xterm BEFORE the agent paints anything. The
+      // PTY default is 80x24 but xterm fits to the tile (~92x40 at the
+      // template size). Without this, Claude Code positions cursor for
+      // its assumed cols, xterm renders at actual cols, and you get
+      // overlapping text + mangled box-drawing — exactly the "glitchy
+      // consoles" the user reported.
+      if (termRef.current && fitRef.current) {
+        try { fitRef.current.fit(); } catch { /* container detached */ }
+        const cols = termRef.current.cols;
+        const rows = termRef.current.rows;
+        if (cols > 0 && rows > 0) {
+          // The Rust IPC for ptyResize lives on `usePty`'s `resize` callback.
+          // Lazy import to avoid a circular initialization order with the
+          // hook's effect chain.
+          const { ptyResize } = await import('@/utils/ipc');
+          ptyResize(id, cols, rows).catch(() => { /* PTY may have raced */ });
+        }
+      }
       // Pipeline role-prompt injection (Phase 2c-iii post-script): if the
       // tile's mode is one of the four pipeline roles, write the bundled
       // role prompt as the agent's first input. Skipped for stub modes
