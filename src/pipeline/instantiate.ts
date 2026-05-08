@@ -34,6 +34,18 @@ export function instantiatePipelineTemplate(
   const tiles: Tile[] = [];
 
   for (const spec of template.tiles) {
+    // One-shot agent tiles (e.g. Reviewer in the Anthropic Trio template)
+    // run via `agent_run_oneshot` headlessly — no live tile on the canvas.
+    // Skip both the tile and the roleToTileId entry so wires referencing
+    // this role gracefully degrade through the existing missing-endpoint
+    // skip path below. The matching dispatcher
+    // (`single-reviewer-dispatcher.ts`) fires the one-shot on transition
+    // into `reviewing`.
+    const cfgUnknown = spec.config as { oneshot?: unknown };
+    if (spec.type === 'agent' && cfgUnknown.oneshot === true) {
+      continue;
+    }
+
     const id = uid();
     roleToTileId[spec.role] = id;
 

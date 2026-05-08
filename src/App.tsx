@@ -13,6 +13,7 @@ import { handleFailureBundleLifecycle } from '@/pipeline/failure-bundle-lifecycl
 import { handleBuilderKickLifecycle } from '@/pipeline/builder-kick-lifecycle';
 import { startRedTeamDispatcher } from '@/pipeline/red-team-dispatcher';
 import { startDualReviewerDispatcher } from '@/pipeline/dual-reviewer-dispatcher';
+import { startSingleReviewerDispatcher } from '@/pipeline/single-reviewer-dispatcher';
 import { buildOneshotBrief } from '@/pipeline/brief-builder';
 import { startStuckDetector } from '@/pipeline/stuck-detector';
 import { startNotifier } from '@/pipeline/notifications';
@@ -306,6 +307,41 @@ export default function App() {
         ingestOneshotResult({
           runId,
           role,
+          stdout: result.stdout,
+          exitCode: result.exit_code,
+        });
+      },
+    });
+    return stop;
+  }, []);
+
+  // Single-reviewer dispatcher (STANDARD-run companion to the dual variant).
+  // The Anthropic Trio template marks Reviewer with `config.oneshot: true`,
+  // so instantiate.ts skips spawning a live Reviewer tile. On entry into
+  // `reviewing`, this dispatcher fires `agent_run_oneshot` with the
+  // assembled brief and pipes the captured stdout back through
+  // `ingestOneshotResult` so the existing controller-runtime parser
+  // dispatches the `reviewer_done` / `abort` events.
+  useEffect(() => {
+    const stop = startSingleReviewerDispatcher({
+      runOneShotReviewer: async ({ runId }) => {
+        const run = usePipelineStore.getState().runs[runId];
+        if (!run) return;
+        const project = useProjectStore.getState().projects.find(p => p.id === run.projectId);
+        const brief = await buildOneshotBrief({ role: 'reviewer', run, projectDir: project?.cwd });
+        if (!brief) {
+          console.warn(`[single-reviewer] role-prompt for reviewer missing — skipping spawn`);
+          return;
+        }
+        const result = await agentRunOneshot({
+          agent: 'claude',
+          args: ['--print'],
+          stdin: brief,
+          timeoutSecs: 600,
+        });
+        ingestOneshotResult({
+          runId,
+          role: 'reviewer',
           stdout: result.stdout,
           exitCode: result.exit_code,
         });
@@ -678,7 +714,7 @@ export default function App() {
           inline error pre-filled. */}
       {pipelineRunOpen && (
         <StartPipelineRunModal
-          defaultBranch={`pipeline/run-${new Date().toISOString().slice(0, 10)}`}
+          defaultBranch={`pipeline/run-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 4)}`}
           onSubmit={handleStartPipelineRun}
           onCancel={() => setPipelineRunOpen(false)}
           hidden={sensitivePathsState !== null}
