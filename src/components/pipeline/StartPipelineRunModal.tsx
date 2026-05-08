@@ -14,10 +14,24 @@ import { useEffect, useMemo, useRef, useState } from 'react';
  * scaffolding can find both with the same selectors pattern.
  */
 
+/** IDs of the templates the launch UI exposes. Kept in lockstep with the
+ *  `id` field on the matching template factory in `src/pipeline/templates.ts`
+ *  so the launch flow can switch on the value without a separate registry. */
+export const TEMPLATE_OPTIONS = [
+  { id: 'tx.pipeline.anthropic-trio', label: 'Anthropic Trio (default)' },
+  { id: 'tx.pipeline.hello-world', label: 'Hello World (smoke test)' },
+] as const;
+
+export type TemplateOptionId = typeof TEMPLATE_OPTIONS[number]['id'];
+
 interface Props {
   defaultBranch: string;
   /** Resolves once the launch attempt finishes (success or error). */
-  onSubmit(input: { goal: string; branch: string }): Promise<{ ok: boolean; error?: string }>;
+  onSubmit(input: {
+    goal: string;
+    branch: string;
+    templateId: TemplateOptionId;
+  }): Promise<{ ok: boolean; error?: string }>;
   onCancel(): void;
   /**
    * Visually hide the modal without unmounting. Used by App.tsx to stack
@@ -109,6 +123,7 @@ const button: React.CSSProperties = {
 export function StartPipelineRunModal({ defaultBranch, onSubmit, onCancel, hidden = false }: Props) {
   const [goal, setGoal] = useState('');
   const [branch, setBranch] = useState(defaultBranch);
+  const [templateId, setTemplateId] = useState<TemplateOptionId>(TEMPLATE_OPTIONS[0].id);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const goalRef = useRef<HTMLTextAreaElement>(null);
@@ -135,7 +150,7 @@ export function StartPipelineRunModal({ defaultBranch, onSubmit, onCancel, hidde
     if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
-    const result = await onSubmit({ goal: goal.trim(), branch: branch.trim() });
+    const result = await onSubmit({ goal: goal.trim(), branch: branch.trim(), templateId });
     if (!result.ok) {
       setError(result.error ?? 'Unknown error');
       setSubmitting(false);
@@ -162,6 +177,21 @@ export function StartPipelineRunModal({ defaultBranch, onSubmit, onCancel, hidde
         </div>
 
         <div style={body}>
+          <div>
+            <div style={label}>Template</div>
+            <select
+              data-testid="start-pipeline-run-template"
+              value={templateId}
+              onChange={(e) => setTemplateId(e.target.value as TemplateOptionId)}
+              style={input}
+              disabled={submitting}
+            >
+              {TEMPLATE_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <div style={label}>Goal</div>
             <textarea

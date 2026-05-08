@@ -40,7 +40,7 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { screenToCanvas } from '@/utils/layout';
 import { createRunFromTemplate, defaultRunFactoryDeps } from './run-factory';
 import { instantiatePipelineTemplate } from './instantiate';
-import { anthropicTrioTemplate } from './templates';
+import { anthropicTrioTemplate, helloWorldTemplate } from './templates';
 import { defaultRoleCapabilities } from './role-capabilities';
 import { persistRun, defaultRunPersistenceDeps } from './run-persistence';
 import { usePipelineStore } from '@/stores/pipelineStore';
@@ -55,6 +55,14 @@ const BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
 export interface LaunchPipelineRunInput {
   goal: string;
   branch: string;
+  /**
+   * Template id chosen in the launch modal. Currently one of:
+   *   - `tx.pipeline.anthropic-trio` (production default)
+   *   - `tx.pipeline.hello-world`    (smoke test)
+   * Unknown ids fall through to Anthropic Trio (with a console.warn) so a
+   * stale persisted choice can never block a launch.
+   */
+  templateId: string;
   /**
    * UI-side gate — invoked when preflight reports any sensitive paths.
    * Resolves true → proceed, false → abort. Wired by App.tsx to mount
@@ -180,11 +188,23 @@ export async function launchPipelineRun(
   const baseDeps = defaultRunFactoryDeps({ projectDir, homeDir: home });
   const { preflight: _omit, ...deps } = baseDeps;
   void _omit;
+
+  // Resolve template by id. Default to Anthropic Trio for unknown ids; we
+  // never want a misbehaving persisted choice to block a launch.
+  let template = anthropicTrioTemplate();
+  if (input.templateId === 'tx.pipeline.hello-world') {
+    template = helloWorldTemplate();
+  } else if (input.templateId !== 'tx.pipeline.anthropic-trio') {
+    console.warn(
+      `[pipeline] unknown templateId "${input.templateId}", falling back to Anthropic Trio.`,
+    );
+  }
+
   let factoryResult;
   try {
     factoryResult = await createRunFromTemplate({
       runId,
-      template: anthropicTrioTemplate(),
+      template,
       projectId,
       worktreePath,
       branch,
@@ -227,7 +247,7 @@ export async function launchPipelineRun(
   //    canvas viewport's top-left. (Anchor at screen 40,60 → canvas coords.)
   const transform = useCanvasStore.getState().transforms[projectId] ?? { x: 0, y: 0, scale: 1 };
   const origin = screenToCanvas(40, 60, transform);
-  const { tiles, wires } = instantiatePipelineTemplate(anthropicTrioTemplate(), {
+  const { tiles, wires } = instantiatePipelineTemplate(template, {
     runId,
     originX: origin.x,
     originY: origin.y,
