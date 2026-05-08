@@ -61,13 +61,38 @@ interface MatchedMarker {
   marker: string;
 }
 
+/**
+ * The protocol requires sentinels on their own line at column 0. Anchoring
+ * the search to a line-start guard rejects false positives from sources
+ * like role-prompt echoes (Claude's UI renders pasted prompts inside
+ * box-drawn frames with leading `│ ` characters, so embedded sentinel
+ * examples — including ones with template placeholders that don't parse
+ * as JSON, like `"round":<n>` — never appear at column 0).
+ *
+ * A match at buffer-start (index 0) is also valid, since chunk boundaries
+ * may split exactly before a sentinel and the previous newline sits in a
+ * consumed earlier slice.
+ */
+function isAtLineStart(buf: string, index: number): boolean {
+  if (index === 0) return true;
+  const prev = buf[index - 1];
+  return prev === '\n' || prev === '\r';
+}
+
 function findFirstMarker(buf: string): MatchedMarker | null {
   let earliest: MatchedMarker | null = null;
   for (const { marker, kind } of MARKERS) {
-    const idx = buf.indexOf(marker);
-    if (idx === -1) continue;
-    if (earliest === null || idx < earliest.index) {
-      earliest = { index: idx, kind, marker };
+    let from = 0;
+    while (from < buf.length) {
+      const idx = buf.indexOf(marker, from);
+      if (idx === -1) break;
+      if (isAtLineStart(buf, idx)) {
+        if (earliest === null || idx < earliest.index) {
+          earliest = { index: idx, kind, marker };
+        }
+        break;
+      }
+      from = idx + 1;
     }
   }
   return earliest;

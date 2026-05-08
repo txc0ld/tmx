@@ -278,12 +278,14 @@ describe('Phase 3b smoke: scratchpad + compaction + sub-agent + invariants + tel
     await flushMicrotasks();
     expect(_isPendingForTest(RUN_ID)).toBe(true);
 
-    // Now ingest TX_COMPACTION_DONE.
+    // Now ingest TX_COMPACTION_DONE. Prefix `\n` so the sentinel is at
+    // column 0 of its line — the protocol requires this and the scanner
+    // rejects mid-line markers (defends against role-prompt echo).
     const summary = 'Wrapped tasks 1-3; on task 4 next.';
     ingestPtyChunk({
       runId: RUN_ID,
       role: 'builder',
-      chunk: `<<<TX_COMPACTION_DONE>>>{"summary":${JSON.stringify(summary)}}\n`,
+      chunk: `\n<<<TX_COMPACTION_DONE>>>{"summary":${JSON.stringify(summary)}}\n`,
     });
     await flushMicrotasks();
 
@@ -401,12 +403,13 @@ describe('Phase 3b smoke: scratchpad + compaction + sub-agent + invariants + tel
     expect((trig as { bytesAccumulated: number }).bytesAccumulated)
       .toBeGreaterThanOrEqual(COMPACTION_THRESHOLD_BYTES);
 
-    // Step 2: Builder responds with summary.
+    // Step 2: Builder responds with summary. Prefix `\n` so the sentinel
+    // sits at column 0 — the scanner now requires line-start anchoring.
     const summary = 'Phase 1 complete; starting phase 2.';
     ingestPtyChunk({
       runId: RUN_ID,
       role: 'builder',
-      chunk: `<<<TX_COMPACTION_DONE>>>{"summary":${JSON.stringify(summary)}}\n`,
+      chunk: `\n<<<TX_COMPACTION_DONE>>>{"summary":${JSON.stringify(summary)}}\n`,
     });
     await flushMicrotasks();
 
