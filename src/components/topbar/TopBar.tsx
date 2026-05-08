@@ -1,13 +1,14 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useProjectStore } from '@/stores/projectStore';
 import { useTemplateStore, type TileTemplate } from '@/stores/templateStore';
+import { usePipelineStore } from '@/stores/pipelineStore';
 import { colors, spacing, typography, glass, radius, motion, tileColors, fonts, alpha } from '@/design/tokens';
 import { isMac, modShortcut } from '@/utils/platform';
 import { isTemplatePinned, toggleTemplatePin } from '@/components/canvas/TileDock';
 import { useSettingsStore } from '@/stores/settingsStore';
-import type { Project, TileType, Tile } from '@/types';
+import type { Project, TileType, Tile, PipelineRun } from '@/types';
 
 interface TopBarProps {
   project: Project | undefined;
@@ -140,37 +141,10 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette, onStartPipel
       </div>
 
       {/* Pipeline run launcher — opens StartPipelineRunModal. Disabled when
-          no project is selected (the launch flow needs a cwd). */}
-      <div style={{
-        // @ts-expect-error webkit
-        WebkitAppRegion: 'no-drag',
-      }}>
-        <button
-          onClick={onStartPipelineRun}
-          disabled={!project}
-          title={project ? 'Start a pipeline run (Plan → Build → Review)' : 'Select a project first'}
-          style={{
-            height: 28,
-            padding: `0 ${spacing.sm}`,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            background: project ? 'var(--tx-accent)' : 'var(--tx-outline-ghost)',
-            border: `1px solid ${project ? 'var(--tx-accent)' : colors.outlineGhost}`,
-            borderRadius: radius.md,
-            color: project ? 'var(--tx-accent-fg, #000)' : colors.secondary,
-            ...typography.labelSm,
-            cursor: project ? 'pointer' : 'not-allowed',
-            opacity: project ? 1 : 0.5,
-            transition: `all ${motion.hover}`,
-            fontWeight: 600,
-          }}
-          onMouseEnter={(e) => { if (project) e.currentTarget.style.filter = 'brightness(1.1)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.filter = ''; }}
-        >
-          <span style={{ fontSize: 14, lineHeight: 1 }}>▶</span> Pipeline
-        </button>
-      </div>
+          no project is selected (the launch flow needs a cwd). When any run
+          on the active project is in an `awaiting_*` gate, badges with the
+          count and routes the click to focus the controller tile instead. */}
+      <PipelineButton project={project} onStartPipelineRun={onStartPipelineRun} />
 
       {/* Settings gear — sits to the left of layout/clear, the action group */}
       <SettingsGearButton />
@@ -298,6 +272,146 @@ function TemplateRow({ template, onAdd }: { template: TileTemplate; onAdd: () =>
       >
         {pinned ? '★' : '☆'}
       </button>
+    </div>
+  );
+}
+
+/**
+ * Pipeline button + attention badge.
+ *
+ * Two interaction modes by `pendingRuns.length`:
+ *  - 0 pending → original behavior: clicking opens `StartPipelineRunModal`.
+ *  - ≥1 pending → click focuses the most recent pending run's controller
+ *    tile (so the user lands on the gate instead of starting a fresh run).
+ *    If the run has no `tiles.controller`, fall back to the launch modal.
+ *
+ * The badge itself is a small accent-painted pill on the top-right of the
+ * button with the count, lifted off the button surface via a 2px halo
+ * matching the topbar background. Pulses subtly via a 2s keyframe so it
+ * draws the eye without becoming distracting.
+ *
+ * Dependency-injected pieces (`getStore`, `getPipelineStore`) keep the
+ * component testable without rendering the whole canvas. Production
+ * defaults route through the live Zustand stores.
+ */
+export interface PipelineButtonDeps {
+  /**
+   * Returns a snapshot of the canvas store. Tests stub this with a fake
+   * store containing `setFocusedTile` and `bringToFront` spies.
+   */
+  getCanvasStore?: () => Pick<ReturnType<typeof useCanvasStore.getState>, 'setFocusedTile' | 'bringToFront'>;
+}
+
+export function PipelineButton({
+  project,
+  onStartPipelineRun,
+  deps,
+}: {
+  project: Project | undefined;
+  onStartPipelineRun: () => void;
+  deps?: PipelineButtonDeps;
+}) {
+  const runs = usePipelineStore(s => s.runs);
+
+  const pendingRuns = useMemo<PipelineRun[]>(() => {
+    if (!project) return [];
+    return Object.values(runs)
+      .filter(r => r.projectId === project.id && r.state.startsWith('awaiting_'))
+      // Most-recently started first, so a click targets the freshest gate.
+      .sort((a, b) => b.startedAt - a.startedAt);
+  }, [runs, project]);
+
+  const pendingCount = pendingRuns.length;
+  const hasPending = pendingCount > 0;
+
+  const handleClick = useCallback(() => {
+    if (!project) return;
+    if (hasPending) {
+      const target = pendingRuns[0];
+      const controllerTileId = target.tiles?.controller;
+      if (controllerTileId) {
+        const cs = deps?.getCanvasStore?.() ?? useCanvasStore.getState();
+        cs.bringToFront(controllerTileId);
+        cs.setFocusedTile(controllerTileId);
+        return;
+      }
+      // Fall through to launch modal if the controller tile is gone (e.g.
+      // user closed it). Better than swallowing the click.
+    }
+    onStartPipelineRun();
+  }, [project, hasPending, pendingRuns, onStartPipelineRun, deps]);
+
+  const baseTitle = project
+    ? 'Start a pipeline run (Plan → Build → Review)'
+    : 'Select a project first';
+  const title = hasPending
+    ? `${pendingCount} run${pendingCount === 1 ? '' : 's'} need attention`
+    : baseTitle;
+
+  return (
+    <div style={{
+      // @ts-expect-error webkit
+      WebkitAppRegion: 'no-drag',
+      position: 'relative',
+    }}>
+      <button
+        onClick={handleClick}
+        disabled={!project}
+        title={title}
+        data-testid="topbar-pipeline-button"
+        style={{
+          height: 28,
+          padding: `0 ${spacing.sm}`,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          background: project ? 'var(--tx-accent)' : 'var(--tx-outline-ghost)',
+          border: `1px solid ${project ? 'var(--tx-accent)' : colors.outlineGhost}`,
+          borderRadius: radius.md,
+          color: project ? 'var(--tx-accent-fg, #000)' : colors.secondary,
+          ...typography.labelSm,
+          cursor: project ? 'pointer' : 'not-allowed',
+          opacity: project ? 1 : 0.5,
+          transition: `all ${motion.hover}`,
+          fontWeight: 600,
+        }}
+        onMouseEnter={(e) => { if (project) e.currentTarget.style.filter = 'brightness(1.1)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.filter = ''; }}
+      >
+        <span style={{ fontSize: 14, lineHeight: 1 }}>▶</span> Pipeline
+      </button>
+      {hasPending && (
+        <>
+          <span
+            data-testid="topbar-pipeline-badge"
+            aria-label={`${pendingCount} pipeline run${pendingCount === 1 ? '' : 's'} awaiting input`}
+            style={{
+              position: 'absolute',
+              top: -6,
+              right: -6,
+              minWidth: 16,
+              height: 16,
+              padding: '0 4px',
+              borderRadius: 8,
+              background: 'var(--tx-accent)',
+              color: 'var(--tx-accent-fg, #000)',
+              fontSize: 10,
+              fontWeight: 700,
+              lineHeight: '16px',
+              textAlign: 'center',
+              boxShadow: '0 0 0 2px var(--tx-bg)',
+              pointerEvents: 'none',
+              animation: 'tx-pipeline-pulse 2s ease-in-out infinite',
+            }}
+          >
+            {pendingCount}
+          </span>
+          <style>{`@keyframes tx-pipeline-pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.12); }
+          }`}</style>
+        </>
+      )}
     </div>
   );
 }
