@@ -65,7 +65,7 @@ describe('instantiatePipelineTemplate', () => {
         { fromRole: 'reviewer' as const, toRole: 'builder' as const, wireType: 'task-assign' as const },
       ],
       pipeline: {
-        retryBudget: { reviewerReject: 3, ciFail: 3 },
+        retryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
         dualReviewer: false,
         requireMergeGate: true,
         skillBindings: {},
@@ -103,7 +103,7 @@ describe('instantiatePipelineTemplate', () => {
         { fromRole: 'reviewer' as const, toRole: 'planner' as const, wireType: 'task-assign' as const },
       ],
       pipeline: {
-        retryBudget: { reviewerReject: 3, ciFail: 3 },
+        retryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
         dualReviewer: false,
         requireMergeGate: true,
         skillBindings: {},

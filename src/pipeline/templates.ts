@@ -26,7 +26,7 @@ export function helloWorldTemplate(): PipelineTemplate {
     ],
 
     pipeline: {
-      retryBudget: { reviewerReject: 3, ciFail: 3 },
+      retryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
       dualReviewer: false,
       requireMergeGate: true,
       skillBindings: {
@@ -87,7 +87,7 @@ export function anthropicTrioTemplate(): PipelineTemplate {
     ],
 
     pipeline: {
-      retryBudget: { reviewerReject: 3, ciFail: 3 },
+      retryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
       dualReviewer: false,
       requireMergeGate: true,
       skillBindings: {

@@ -12,6 +12,7 @@ import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
 import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capabilities-lifecycle';
 import { handleFailureBundleLifecycle } from '@/pipeline/failure-bundle-lifecycle';
 import { handleBuilderKickLifecycle } from '@/pipeline/builder-kick-lifecycle';
+import { handlePlannerRerunLifecycle } from '@/pipeline/planner-rerun-lifecycle';
 import { makeRunPersistenceLifecycleHandler, hydrateRunsFromDisk } from '@/pipeline/run-persistence';
 import { startRedTeamDispatcher } from '@/pipeline/red-team-dispatcher';
 import { startDualReviewerDispatcher } from '@/pipeline/dual-reviewer-dispatcher';
@@ -240,6 +241,10 @@ export default function App() {
     // tail output too, but it races the state transition; this kick makes
     // the handoff observable and idempotent (per-plan-path dedup).
     const offBuilderKick = setPipelineLifecycleEmitter(handleBuilderKickLifecycle);
+    // Planner re-run kick: when a run loops `awaiting_plan_approval → planning`
+    // after a `reject_plan` event, write the user's feedback to the live
+    // Planner PTY so it can revise the plan in-place (no role-prompt churn).
+    const offPlannerRerun = setPipelineLifecycleEmitter(handlePlannerRerunLifecycle);
     // Phase 3b.2: when a run leaves `awaiting_clarification`, reset the
     // scratchpad-watcher's pendingProbe debounce so the next stagnation
     // window can fire one fresh synthetic clarification (rather than being
@@ -255,6 +260,7 @@ export default function App() {
       offFailureBundle();
       offRunPersistence();
       offBuilderKick();
+      offPlannerRerun();
       offScratchpadResume();
     };
   }, []);

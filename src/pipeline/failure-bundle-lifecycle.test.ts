@@ -56,7 +56,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
       questions: [],
       redTeamReports: [],
     },
-    retryCounters: { reviewerReject: 0, ciFail: 0 },
+    retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
     startedAt: 0,
     escalationLog: [],
     tiles: {},

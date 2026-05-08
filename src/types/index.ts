@@ -247,6 +247,7 @@ export type FailureClass =
   | 'subagent_failed'
   | 'external_dep'
   | 'secrets_violation'
+  | 'plan_reject_exhausted'
   | 'unknown';
 
 export interface RunFingerprint {
@@ -414,7 +415,7 @@ export interface RedTeamReport {
 export interface EscalationEntry {
   at: number;
   reason: string;
-  exhaustedCounter?: 'reviewerReject' | 'ciFail';
+  exhaustedCounter?: 'reviewerReject' | 'ciFail' | 'planReject';
   decision: 'replan' | 'escalate' | 'manual_resolve';
   newPlanRef?: string;
 }
@@ -451,7 +452,7 @@ export interface PipelineRun {
   baseBranch: string;
   state: PipelineState;
   artifacts: PipelineRunArtifacts;
-  retryCounters: { reviewerReject: number; ciFail: number };
+  retryCounters: { reviewerReject: number; ciFail: number; planReject: number };
   startedAt: number;
   endedAt?: number;
   failureReason?: string;
@@ -511,7 +512,7 @@ export interface PipelineRun {
    * complex = doubled). The reducer reads these instead of the legacy
    * hardcoded `REVIEWER_REJECT_BUDGET` / `CI_FAIL_BUDGET` constants.
    */
-  effectiveRetryBudgets: { reviewerReject: number; ciFail: number };
+  effectiveRetryBudgets: { reviewerReject: number; ciFail: number; planReject: number };
   /**
    * The template's structural retry budget — captured at run creation and
    * never mutated after. Used as the baseline that `planner_done` rescales
@@ -519,7 +520,7 @@ export interface PipelineRun {
    * from the template at dispatch time) so the reducer stays pure and
    * replans behave deterministically regardless of template edits.
    */
-  templateRetryBudget: { reviewerReject: number; ciFail: number };
+  templateRetryBudget: { reviewerReject: number; ciFail: number; planReject: number };
   /**
    * The template's `dualReviewer` flag — captured at run creation. The run's
    * effective `useDualReviewer` is `runMode === 'complex' || templateDualReviewer`,

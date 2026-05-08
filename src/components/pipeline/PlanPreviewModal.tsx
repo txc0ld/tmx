@@ -233,6 +233,13 @@ export function PlanPreviewModal({
 
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Two-step reject UX: clicking "Reject plan" reveals an inline textarea
+  // (kept inside this modal so the user has full plan context while
+  // composing feedback). `Send rejection` then validates min-length and
+  // dispatches `reject_plan` with the feedback string.
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectFeedback, setRejectFeedback] = useState('');
+  const REJECT_MIN_CHARS = 10;
 
   // Escape → close (sibling-modal convention).
   useEffect(() => {
@@ -272,6 +279,16 @@ export function PlanPreviewModal({
     dispatch(run.id, { type: 'approve_plan' });
     onClose();
   }
+
+  function handleSendRejection() {
+    const trimmed = rejectFeedback.trim();
+    if (trimmed.length < REJECT_MIN_CHARS) return;
+    dispatch(run.id, { type: 'reject_plan', feedback: trimmed });
+    onClose();
+  }
+
+  const trimmedFeedback = rejectFeedback.trim();
+  const sendDisabled = trimmedFeedback.length < REJECT_MIN_CHARS;
 
   return (
     <div
@@ -332,6 +349,76 @@ export function PlanPreviewModal({
           )}
         </div>
 
+        {rejectOpen && (
+          <div
+            data-testid="plan-preview-reject-panel"
+            style={{
+              padding: '12px 18px',
+              borderTop: '1px solid var(--tx-border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              background: 'var(--tx-surface-3, rgba(255,255,255,0.02))',
+            }}
+          >
+            <label
+              htmlFor="plan-preview-reject-textarea"
+              style={{ color: 'var(--tx-text-muted)', fontSize: 12 }}
+            >
+              Why is this plan unsuitable? (Required — sent to planner for the next pass)
+            </label>
+            <textarea
+              id="plan-preview-reject-textarea"
+              data-testid="plan-preview-reject-textarea"
+              value={rejectFeedback}
+              onChange={(e) => setRejectFeedback(e.target.value)}
+              autoFocus
+              rows={4}
+              style={{
+                resize: 'vertical',
+                padding: 8,
+                background: 'var(--tx-surface-1, var(--tx-surface-2))',
+                color: 'var(--tx-text)',
+                border: '1px solid var(--tx-border)',
+                borderRadius: 3,
+                fontFamily: 'var(--tx-font-mono)',
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <span
+                data-testid="plan-preview-reject-validation"
+                style={{
+                  fontSize: 11,
+                  color: sendDisabled ? 'var(--tx-text-muted)' : 'var(--tx-text)',
+                }}
+              >
+                {sendDisabled
+                  ? `${trimmedFeedback.length}/${REJECT_MIN_CHARS} chars min`
+                  : `${trimmedFeedback.length} chars`}
+              </span>
+              <button
+                type="button"
+                data-testid="plan-preview-send-rejection"
+                onClick={handleSendRejection}
+                disabled={sendDisabled}
+                style={{
+                  ...buttonBase,
+                  background: 'var(--tx-warn, #b08400)',
+                  borderColor: 'var(--tx-warn, #b08400)',
+                  color: 'var(--tx-accent-fg)',
+                  fontWeight: 600,
+                  opacity: sendDisabled ? 0.5 : 1,
+                  cursor: sendDisabled ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Send rejection
+              </button>
+            </div>
+          </div>
+        )}
+
         <div style={footerStyle}>
           <button
             type="button"
@@ -340,6 +427,21 @@ export function PlanPreviewModal({
             style={{ ...buttonBase, background: 'var(--tx-surface-2)' }}
           >
             Cancel
+          </button>
+          <button
+            type="button"
+            data-testid="plan-preview-reject"
+            onClick={() => setRejectOpen((v) => !v)}
+            disabled={!plan}
+            aria-expanded={rejectOpen}
+            style={{
+              ...buttonBase,
+              background: 'var(--tx-surface-2)',
+              opacity: plan ? 1 : 0.5,
+              cursor: plan ? 'pointer' : 'not-allowed',
+            }}
+          >
+            {rejectOpen ? 'Hide rejection' : 'Reject plan'}
           </button>
           <button
             type="button"

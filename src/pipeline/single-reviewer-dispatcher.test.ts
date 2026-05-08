@@ -32,7 +32,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     baseBranch: 'main',
     state: 'reviewing',
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
-    retryCounters: { reviewerReject: 0, ciFail: 0 },
+    retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
     startedAt: 0,
     escalationLog: [],
     tiles: {},
@@ -42,8 +42,8 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     autoApprovePlan: false,
     useDualReviewer: false,
     runRedTeam: false,
-    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
-    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3, planReject: 3 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
     templateDualReviewer: false,
     ...overrides,
   };
@@ -104,7 +104,7 @@ describe('single-reviewer dispatcher', () => {
   });
 
   it('re-fires on a new round (reviewerReject counter bumped)', () => {
-    seedRun(makeRun({ retryCounters: { reviewerReject: 0, ciFail: 0 } }));
+    seedRun(makeRun({ retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 } }));
     const fire = vi.fn();
     const deps: SingleReviewerDeps = { runOneShotReviewer: fire };
 
@@ -112,7 +112,7 @@ describe('single-reviewer dispatcher', () => {
     expect(fire).toHaveBeenCalledTimes(1);
 
     // Reviewer rejects → counter bumps → run re-enters reviewing on next builder_done.
-    seedRun(makeRun({ retryCounters: { reviewerReject: 1, ciFail: 0 } }));
+    seedRun(makeRun({ retryCounters: { reviewerReject: 1, ciFail: 0, planReject: 1 } }));
     handleSingleReviewerLifecycle(ev({ from: 'building', to: 'reviewing' }), deps);
     expect(fire).toHaveBeenCalledTimes(2);
   });

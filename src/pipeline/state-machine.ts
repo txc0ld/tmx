@@ -17,28 +17,35 @@ import type {
  * green. Per-run effective budgets live on `PipelineRun.effectiveRetryBudgets`
  * and are scaled by the complexity gate at `planner_done` (see `scaleBudgets`).
  */
-export const DEFAULT_RETRY_BUDGETS = { reviewerReject: 3, ciFail: 3 } as const;
+export const DEFAULT_RETRY_BUDGETS = { reviewerReject: 3, ciFail: 3, planReject: 3 } as const;
 
 /**
  * Complexity scaling for retry budgets:
  *  - trivial: halved (min 1) — small changes shouldn't loop forever
  *  - standard: unchanged
  *  - complex: doubled — architectural work earns more retries
+ *
+ * `planReject` (user-driven plan rejections) scales the same way as the
+ * agent-driven counters: trivial gets a tighter loop, complex gets a wider
+ * one. The user's "I don't like this plan" feedback is the same kind of
+ * loop-amplifying signal as a reviewer reject — calibrate accordingly.
  */
 function scaleBudgets(
-  base: { reviewerReject: number; ciFail: number },
+  base: { reviewerReject: number; ciFail: number; planReject: number },
   mode: 'trivial' | 'standard' | 'complex',
-): { reviewerReject: number; ciFail: number } {
+): { reviewerReject: number; ciFail: number; planReject: number } {
   switch (mode) {
     case 'trivial':
       return {
         reviewerReject: Math.max(1, Math.floor(base.reviewerReject / 2)),
         ciFail: Math.max(1, Math.floor(base.ciFail / 2)),
+        planReject: Math.max(1, Math.floor(base.planReject / 2)),
       };
     case 'complex':
       return {
         reviewerReject: base.reviewerReject * 2,
         ciFail: base.ciFail * 2,
+        planReject: base.planReject * 2,
       };
     case 'standard':
     default:
@@ -122,6 +129,7 @@ export type PipelineEvent =
   | { type: 'merge_done' }
   | { type: 'merge_failed'; reason: string }
   | { type: 'replan_requested'; reason: string }
+  | { type: 'reject_plan'; feedback: string }
   | { type: 'heartbeat' }
   | { type: 'red_team_done'; report: RedTeamReport }
   | { type: 'red_team_failed'; reason: string }
@@ -148,7 +156,7 @@ export interface InitialRunInputs {
    * `templateDualReviewer = false`. The reducer's `planner_done` case
    * re-stamps these with complexity-scaled values once the planner reports.
    */
-  templateRetryBudget?: { reviewerReject: number; ciFail: number };
+  templateRetryBudget?: { reviewerReject: number; ciFail: number; planReject: number };
   templateDualReviewer?: boolean;
 }
 
@@ -164,7 +172,7 @@ export function initialRunState(input: InitialRunInputs): PipelineRun {
     baseBranch: input.baseBranch ?? 'main',
     state: 'idle',
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
-    retryCounters: { reviewerReject: 0, ciFail: 0 },
+    retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
     startedAt: Date.now(),
     escalationLog: [],
     tiles: {},
@@ -528,6 +536,53 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
         failureReason: ev.reason,
         failureClass: 'red_team_blocker',
         endedAt: Date.now(),
+      };
+    }
+
+    case 'reject_plan': {
+      // User rejected the plan from the approval gate. Distinct from
+      // `replan_requested` (which is the `escalated`-only carve-out that
+      // re-enters a previously-failed run). `reject_plan` is the
+      // operator's "I don't like this plan, planner please redo" lever
+      // from `awaiting_plan_approval` and is the only legal entry point.
+      //
+      // The user's feedback is captured as a QuestionArtifact-shaped record
+      // appended to `artifacts.questions` so it survives serialization and
+      // shows up in failure-bundle telemetry. We use the existing array
+      // (rather than a new `rejections[]`) because QuestionArtifact already
+      // carries everything we need (stage + free-text + context) and the
+      // semantic — "user wants the planner to revise" — is a question by
+      // any other name.
+      //
+      // Counter increment + budget gate: same shape as reviewerReject /
+      // ciFail. Exhausting the budget transitions to `escalated` so the
+      // operator can `replan_requested` from there if they want one more
+      // shot, or accept the failure and abort.
+      if (run.state !== 'awaiting_plan_approval') return run;
+      const next = run.retryCounters.planReject + 1;
+      const rejection: QuestionArtifact = {
+        stage: 'planner',
+        question: 'User rejected the plan; revise it.',
+        context: ev.feedback,
+        blocking: true,
+      };
+      const questions = [...run.artifacts.questions, rejection];
+      if (next > run.effectiveRetryBudgets.planReject) {
+        return {
+          ...run,
+          state: 'escalated',
+          retryCounters: { ...run.retryCounters, planReject: next },
+          artifacts: { ...run.artifacts, questions },
+          failureClass: 'plan_reject_exhausted',
+          failureReason: `plan rejected ${next} times (budget ${run.effectiveRetryBudgets.planReject})`,
+          endedAt: Date.now(),
+        };
+      }
+      return {
+        ...run,
+        state: 'planning',
+        retryCounters: { ...run.retryCounters, planReject: next },
+        artifacts: { ...run.artifacts, questions },
       };
     }
 

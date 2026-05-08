@@ -173,6 +173,60 @@ describe('PlanPreviewModal', () => {
     expect(screen.queryByTestId('plan-preview-content')).toBeNull();
   });
 
+  it('Reject button reveals the feedback textarea (collapsed by default)', async () => {
+    const run = makeRun();
+    usePipelineStore.setState({ runs: { [run.id]: run }, activeRunIds: [run.id] });
+    const readFileText = vi.fn().mockResolvedValue('body');
+
+    render(
+      <PlanPreviewModal run={run} onClose={vi.fn()} readFileText={readFileText} />,
+    );
+
+    expect(screen.queryByTestId('plan-preview-reject-panel')).toBeNull();
+    fireEvent.click(screen.getByTestId('plan-preview-reject'));
+    expect(screen.getByTestId('plan-preview-reject-panel')).toBeTruthy();
+    expect(screen.getByTestId('plan-preview-reject-textarea')).toBeTruthy();
+    // Send button is disabled until min-length feedback is typed.
+    const send = screen.getByTestId('plan-preview-send-rejection') as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+  });
+
+  it('Send rejection: short feedback is rejected, long feedback dispatches reject_plan + closes', async () => {
+    const run = makeRun();
+    usePipelineStore.setState({ runs: { [run.id]: run }, activeRunIds: [run.id] });
+    const onClose = vi.fn();
+    const readFileText = vi.fn().mockResolvedValue('body');
+
+    render(
+      <PlanPreviewModal run={run} onClose={onClose} readFileText={readFileText} />,
+    );
+
+    fireEvent.click(screen.getByTestId('plan-preview-reject'));
+    const textarea = screen.getByTestId('plan-preview-reject-textarea') as HTMLTextAreaElement;
+    const send = screen.getByTestId('plan-preview-send-rejection') as HTMLButtonElement;
+
+    // Below the min-length threshold — click is a no-op.
+    fireEvent.change(textarea, { target: { value: 'short' } });
+    expect(send.disabled).toBe(true);
+    fireEvent.click(send);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(usePipelineStore.getState().runs[run.id].state).toBe('awaiting_plan_approval');
+
+    // Above threshold — dispatches and closes.
+    fireEvent.change(textarea, {
+      target: { value: 'Scope is too broad. Please focus on auth flow only.' },
+    });
+    expect(send.disabled).toBe(false);
+    fireEvent.click(send);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    // Reducer transitions awaiting_plan_approval → planning on reject_plan.
+    const stored = usePipelineStore.getState().runs[run.id];
+    expect(stored.state).toBe('planning');
+    expect(stored.retryCounters.planReject).toBe(1);
+    expect(stored.artifacts.questions).toHaveLength(1);
+    expect(stored.artifacts.questions[0].context).toContain('auth flow');
+  });
+
   it('disables the Approve button and shows the no-plan body when plan is missing', () => {
     const run = makeRun(null);
     usePipelineStore.setState({ runs: { [run.id]: run }, activeRunIds: [run.id] });

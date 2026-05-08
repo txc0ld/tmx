@@ -33,7 +33,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     baseBranch: 'main',
     state: 'awaiting_dual_reviewer',
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
-    retryCounters: { reviewerReject: 0, ciFail: 0 },
+    retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
     startedAt: 0,
     escalationLog: [],
     tiles: {},
@@ -43,8 +43,8 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     autoApprovePlan: false,
     useDualReviewer: true,
     runRedTeam: true,
-    effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
-    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6, planReject: 6 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
     templateDualReviewer: false,
     ...overrides,
   };
@@ -111,7 +111,7 @@ describe('dual-reviewer dispatcher (Phase 3c.4)', () => {
   });
 
   it('re-fires on a new round (counter changed → new dual gate)', () => {
-    seedRun(makeRun({ retryCounters: { reviewerReject: 0, ciFail: 0 } }));
+    seedRun(makeRun({ retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 } }));
     const fire = vi.fn();
     const deps: DualReviewerDeps = { runOneShotReviewer: fire };
 
@@ -119,7 +119,7 @@ describe('dual-reviewer dispatcher (Phase 3c.4)', () => {
     expect(fire).toHaveBeenCalledTimes(2);
 
     // Round increments after a both-reject + retry.
-    seedRun(makeRun({ retryCounters: { reviewerReject: 1, ciFail: 0 } }));
+    seedRun(makeRun({ retryCounters: { reviewerReject: 1, ciFail: 0, planReject: 1 } }));
     handleDualReviewerLifecycle(ev({ from: 'building', to: 'awaiting_dual_reviewer' }), deps);
     expect(fire).toHaveBeenCalledTimes(4);
   });
