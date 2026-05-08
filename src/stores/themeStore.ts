@@ -85,9 +85,14 @@ function applyThemeToDOM(theme: Theme) {
   s.setProperty('--tx-text', light ? '#FFFFFF' : theme.fg);
   s.setProperty('--tx-text-muted', light ? 'rgba(255,255,255,0.77)' : rgba(theme.fg, 0.77));
   s.setProperty('--tx-border', light ? 'rgba(255,255,255,0.18)' : rgba(theme.fg, 0.15));
-  // Modal card surface — one step more elevated than `--tx-surface-high` so
-  // it stands out from the canvas dim overlay (rgba 0,0,0,0.6).
-  s.setProperty('--tx-surface-2', light ? 'rgba(60,66,52,0.96)' : rgba(theme.fg, 0.18));
+  // Modal card surface — must be FULLY OPAQUE so stacked modals don't
+  // bleed text through each other. Avoid alpha-based mixes here.
+  // On dark themes: a solid grey 18% along the bg→fg axis (≈ #2e2e2e on
+  // Electric) — clearly elevated above the canvas dim overlay
+  // (rgba(0,0,0,0.75)) without competing with the accent.
+  s.setProperty('--tx-surface-2', light ? '#3c4234' : mixHex(theme.bg, theme.fg, 0.18));
+  // Slightly lighter inputs so fields are distinguishable inside the card.
+  s.setProperty('--tx-input-bg', light ? '#2c3025' : mixHex(theme.bg, theme.fg, 0.10));
   // Foreground colour for buttons painted in `--tx-accent`. Light accents
   // (Electric / Snow) get black text; dark accents (Phantom / Ember) keep
   // theme.fg.

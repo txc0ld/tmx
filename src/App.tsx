@@ -656,11 +656,17 @@ export default function App() {
 
       <SettingsModal />
 
+      {/* Launch + sensitive-paths gate are visually mutually exclusive.
+          The launch modal stays mounted (so the user's typed goal isn't
+          lost) but is hidden while the gate is up. On gate cancel the
+          launch flow returns; the user re-sees the launch modal with the
+          inline error pre-filled. */}
       {pipelineRunOpen && (
         <StartPipelineRunModal
           defaultBranch={`pipeline/run-${new Date().toISOString().slice(0, 10)}`}
           onSubmit={handleStartPipelineRun}
           onCancel={() => setPipelineRunOpen(false)}
+          hidden={sensitivePathsState !== null}
         />
       )}
 

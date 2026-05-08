@@ -19,13 +19,19 @@ interface Props {
   /** Resolves once the launch attempt finishes (success or error). */
   onSubmit(input: { goal: string; branch: string }): Promise<{ ok: boolean; error?: string }>;
   onCancel(): void;
+  /**
+   * Visually hide the modal without unmounting. Used by App.tsx to stack
+   * the SensitivePathsModal in front while preserving this modal's
+   * goal/branch/error state for when the gate cancel returns control.
+   */
+  hidden?: boolean;
 }
 
 const overlay: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
   zIndex: 10_000,
-  background: 'rgba(0, 0, 0, 0.6)',
+  background: 'rgba(0, 0, 0, 0.75)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -81,7 +87,7 @@ const label: React.CSSProperties = {
 const input: React.CSSProperties = {
   width: '100%',
   padding: '8px 10px',
-  background: 'var(--tx-bg)',
+  background: 'var(--tx-input-bg, var(--tx-bg))',
   border: '1px solid var(--tx-border)',
   borderRadius: 3,
   color: 'var(--tx-text)',
@@ -100,7 +106,7 @@ const button: React.CSSProperties = {
   fontSize: 12,
 };
 
-export function StartPipelineRunModal({ defaultBranch, onSubmit, onCancel }: Props) {
+export function StartPipelineRunModal({ defaultBranch, onSubmit, onCancel, hidden = false }: Props) {
   const [goal, setGoal] = useState('');
   const [branch, setBranch] = useState(defaultBranch);
   const [submitting, setSubmitting] = useState(false);
@@ -141,7 +147,8 @@ export function StartPipelineRunModal({ defaultBranch, onSubmit, onCancel }: Pro
     <div
       data-canvas-overlay
       data-testid="start-pipeline-run-modal"
-      style={overlay}
+      aria-hidden={hidden}
+      style={{ ...overlay, ...(hidden ? { display: 'none' } : null) }}
       onClick={(e) => e.stopPropagation()}
       onWheel={(e) => e.stopPropagation()}
     >
