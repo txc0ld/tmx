@@ -44,8 +44,17 @@ fn token_store() -> &'static Mutex<HashMap<String, TokenEntry>> {
 
 /// Sweep expired tokens. Called on every consume so the map stays small without
 /// a background reaper.
+///
+/// `now` is injectable so tests can simulate elapsed time without constructing
+/// an in-the-past `Instant` via subtraction (`Instant::now() - large_duration`
+/// panics on Windows when the QPC counter hasn't yet advanced past the
+/// duration's value).
+fn gc_tokens_at(store: &mut HashMap<String, TokenEntry>, now: Instant) {
+    store.retain(|_, e| now.saturating_duration_since(e.issued_at) < TOKEN_TTL);
+}
+
 fn gc_tokens(store: &mut HashMap<String, TokenEntry>) {
-    store.retain(|_, e| e.issued_at.elapsed() < TOKEN_TTL);
+    gc_tokens_at(store, Instant::now())
 }
 
 /// Issue a fresh confirm-token bound to `run_id`. Returns the token (UUID v4).
@@ -84,16 +93,26 @@ fn issue_token_inner(run_id: String) -> String {
 /// Consume a token: must exist, match `run_id`, and not be older than `TOKEN_TTL`.
 /// On success the entry is removed (one-shot). Stale entries are GC'd as a side
 /// effect even on failure paths.
-fn consume_token(token: &str, run_id: &str) -> bool {
+///
+/// `now` is injectable for the same Windows-`Instant`-subtraction reason as
+/// `gc_tokens_at`.
+fn consume_token_at(token: &str, run_id: &str, now: Instant) -> bool {
     let mut store = token_store().lock();
-    gc_tokens(&mut store);
+    gc_tokens_at(&mut store, now);
     match store.get(token) {
-        Some(entry) if entry.run_id == run_id && entry.issued_at.elapsed() < TOKEN_TTL => {
+        Some(entry)
+            if entry.run_id == run_id
+                && now.saturating_duration_since(entry.issued_at) < TOKEN_TTL =>
+        {
             store.remove(token);
             true
         }
         _ => false,
     }
+}
+
+fn consume_token(token: &str, run_id: &str) -> bool {
+    consume_token_at(token, run_id, Instant::now())
 }
 
 #[tauri::command]
@@ -357,19 +376,6 @@ pub async fn pipeline_merger_run(input: MergerInput) -> Result<MergerResult, Str
 mod tests {
     use super::*;
 
-    // Test helper — directly stuff a token entry with a specific issued_at so
-    // we can simulate expiry without sleeping for 5 minutes.
-    fn insert_token_with_age(token: &str, run_id: &str, age: Duration) {
-        let mut store = token_store().lock();
-        store.insert(
-            token.into(),
-            TokenEntry {
-                run_id: run_id.into(),
-                issued_at: Instant::now() - age,
-            },
-        );
-    }
-
     fn make_input(
         run_id: &str,
         token: &str,
@@ -410,13 +416,19 @@ mod tests {
         token_store().lock().remove(&token);
     }
 
-    #[tokio::test]
-    async fn invalid_token_when_expired_and_gc_runs() {
-        let token = "expired-token-zzz".to_string();
-        insert_token_with_age(&token, "run-expired", Duration::from_secs(400));
-        let input = make_input("run-expired", &token, "/tmp", MergerBinOverride::default());
-        let res = run_merger_inner(input).await;
-        assert_eq!(res.status, "invalid_token");
+    #[test]
+    fn invalid_token_when_expired_and_gc_runs() {
+        // Issue a real token via the production path (so `issued_at` is set
+        // by `Instant::now()`), then simulate elapsed time by passing a future
+        // `now` to the internal consume helper. Avoids `Instant::now() -
+        // large_duration`, which panics on Windows when QPC hasn't advanced
+        // past the duration's value (observed flake on freshly-booted
+        // GitHub-hosted Windows runners).
+        let token = issue_token_inner("run-expired".into());
+        let future_now = Instant::now()
+            .checked_add(TOKEN_TTL + Duration::from_secs(60))
+            .expect("Instant + ~6min should not overflow");
+        assert!(!consume_token_at(&token, "run-expired", future_now));
         // GC sweeps expired entries on every consume.
         assert!(!token_store().lock().contains_key(&token));
     }
