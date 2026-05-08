@@ -4,6 +4,7 @@ import { useProjectStore } from '@/stores/projectStore';
 import { useTimelineStore } from '@/stores/timelineStore';
 import { colors } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
+import { isPipelineLaunchShortcut } from '@/utils/keyboardShortcuts';
 import { agentRunOneshot, httpFetch, loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite, secretsMask } from '@/utils/ipc';
 import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter, usePipelineStore } from '@/stores/pipelineStore';
 import { isTerminalState } from '@/pipeline/state-machine';
@@ -603,6 +604,14 @@ export default function App() {
         e.preventDefault();
         setPaletteOpen(p => !p);
       }
+      // Cmd/Ctrl+Shift+P — open the pipeline launch modal. Guard against
+      // re-open from a held-key repeat (the functional setter no-ops if
+      // already true, but preventDefault still needs to run once).
+      if (isPipelineLaunchShortcut(e)) {
+        e.preventDefault();
+        setPipelineRunOpen(prev => prev ? prev : true);
+        return;
+      }
       // Ctrl+F — global search across tiles
       if ((e.metaKey || e.ctrlKey) && e.key === 'f' && !inTile) {
         e.preventDefault();
@@ -701,10 +710,11 @@ export default function App() {
   // Returns the launch flow's structured result so the modal can surface
   // the error inline instead of via a toast (faster feedback loop).
   const handleStartPipelineRun = useCallback(
-    async (input: { goal: string; branch: string }) => {
+    async (input: { goal: string; branch: string; templateId: string }) => {
       const result = await launchPipelineRun({
         goal: input.goal,
         branch: input.branch,
+        templateId: input.templateId,
         confirmSensitivePaths: (paths) =>
           new Promise<boolean>((resolve) => {
             setSensitivePathsState({ paths, resolve });

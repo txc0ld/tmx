@@ -347,8 +347,9 @@ export function PipelineButton({
     onStartPipelineRun();
   }, [project, hasPending, pendingRuns, onStartPipelineRun, deps]);
 
+  const shortcutLabel = isMac() ? '⌘⇧P' : 'Ctrl+Shift+P';
   const baseTitle = project
-    ? 'Start a pipeline run (Plan → Build → Review)'
+    ? `Start a pipeline run (Plan → Build → Review) (${shortcutLabel})`
     : 'Select a project first';
   const title = hasPending
     ? `${pendingCount} run${pendingCount === 1 ? '' : 's'} need attention`

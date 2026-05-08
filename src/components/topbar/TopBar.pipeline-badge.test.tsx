@@ -27,7 +27,7 @@ function makeRun(over: Partial<PipelineRun> = {}): PipelineRun {
     baseBranch: 'main',
     state: 'awaiting_plan_approval' as PipelineState,
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
-    retryCounters: { reviewerReject: 0, ciFail: 0 },
+    retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
     startedAt: 100,
     escalationLog: [],
     tiles: { controller: 'tile-controller-1' },
@@ -45,8 +45,8 @@ function makeRun(over: Partial<PipelineRun> = {}): PipelineRun {
     autoApprovePlan: false,
     useDualReviewer: false,
     runRedTeam: false,
-    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
-    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3, planReject: 3 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
     templateDualReviewer: false,
     ...over,
   };
@@ -73,8 +73,11 @@ describe('PipelineButton attention badge', () => {
     render(<PipelineButton project={project} onStartPipelineRun={onStart} />);
 
     expect(screen.queryByTestId('topbar-pipeline-badge')).toBeNull();
+    // Title now includes the keyboard shortcut hint (Ctrl+Shift+P on
+    // non-mac, ⌘⇧P on mac). The test runs in happy-dom which doesn't
+    // simulate macOS, so isMac() returns false → "Ctrl+Shift+P".
     expect(screen.getByTestId('topbar-pipeline-button').getAttribute('title')).toBe(
-      'Start a pipeline run (Plan → Build → Review)',
+      'Start a pipeline run (Plan → Build → Review) (Ctrl+Shift+P)',
     );
   });
 
