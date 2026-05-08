@@ -192,6 +192,8 @@ export function SensitivePathsModal({ paths, onAcknowledge, onCancel }: Props) {
               ...buttonBase,
               background: 'var(--tx-accent)',
               borderColor: 'var(--tx-accent)',
+              color: 'var(--tx-accent-fg)',
+              fontWeight: 600,
             }}
           >
             Acknowledge & proceed

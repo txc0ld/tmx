@@ -235,6 +235,8 @@ export function StartPipelineRunModal({ defaultBranch, onSubmit, onCancel }: Pro
               ...button,
               background: canSubmit ? 'var(--tx-accent)' : 'var(--tx-surface-2)',
               borderColor: canSubmit ? 'var(--tx-accent)' : 'var(--tx-border)',
+              color: canSubmit ? 'var(--tx-accent-fg)' : 'var(--tx-text)',
+              fontWeight: canSubmit ? 600 : 400,
               opacity: canSubmit ? 1 : 0.5,
               cursor: canSubmit ? 'pointer' : 'not-allowed',
             }}

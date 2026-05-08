@@ -326,6 +326,8 @@ export function ClarificationModal({ run }: Props) {
               ...buttonBase,
               background: 'var(--tx-accent)',
               borderColor: 'var(--tx-accent)',
+              color: 'var(--tx-accent-fg)',
+              fontWeight: 600,
               opacity: submitDisabled ? 0.5 : 1,
             }}
           >
