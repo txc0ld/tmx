@@ -317,7 +317,11 @@ export function AgentTile({ tile }: AgentTileProps) {
       resizeTimerRef.current = window.setTimeout(() => {
         if (fitRef.current && termRef.current) {
           fitRef.current.fit();
-          resize(termRef.current.cols, termRef.current.rows);
+          const cols = termRef.current.cols;
+          const rows = termRef.current.rows;
+          if (cols > 0 && rows > 0) {
+            resize(cols, rows);
+          }
         }
       }, 100);
     });
@@ -325,6 +329,39 @@ export function AgentTile({ tile }: AgentTileProps) {
     return () => {
       observer.disconnect();
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+    };
+  }, [resize]);
+
+  // Zoom-refit — when the canvas transform.scale changes (pinch / wheel zoom),
+  // the tile's logical pixel size doesn't change so ResizeObserver never fires,
+  // but the visual size does — and Claude Code's box-drawing assumes the
+  // pre-zoom col count, producing overlapping text. Subscribe directly to the
+  // store (not a selector hook) so we don't re-render the tile on every
+  // transform tick. Debounce 120ms so a rapid wheel-zoom gesture coalesces
+  // into one fit + ptyResize at the final scale.
+  const zoomTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    let lastScale = useCanvasStore.getState().transforms[
+      useCanvasStore.getState().activeProject
+    ]?.scale;
+    const unsub = useCanvasStore.subscribe((s) => {
+      const scale = s.transforms[s.activeProject]?.scale;
+      if (scale === lastScale) return;
+      lastScale = scale;
+      if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+      zoomTimerRef.current = window.setTimeout(() => {
+        if (!fitRef.current || !termRef.current) return;
+        try { fitRef.current.fit(); } catch { /* container detached */ }
+        const cols = termRef.current.cols;
+        const rows = termRef.current.rows;
+        if (cols > 0 && rows > 0) {
+          resize(cols, rows);
+        }
+      }, 120);
+    });
+    return () => {
+      unsub();
+      if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
     };
   }, [resize]);
 
