@@ -6,6 +6,7 @@ import { MergerConfirmModal } from '@/components/pipeline/MergerConfirmModal';
 import { ClarificationModal } from '@/components/pipeline/ClarificationModal';
 import { PlanPreviewModal } from '@/components/pipeline/PlanPreviewModal';
 import { RunLogsModal } from '@/components/pipeline/RunLogsModal';
+import { ConfirmableButton } from '@/components/pipeline/ConfirmableButton';
 import type { PipelineControllerTile as Tile } from '@/types';
 
 interface Props {
@@ -95,22 +96,20 @@ export function PipelineControllerTile({ tile }: Props) {
           </button>
         )}
         {!isTerminal && (
-          <button
-            type="button"
-            onClick={() => dispatch(run.id, { type: 'abort', reason: 'user clicked abort' })}
-            style={{ ...BUTTON_BASE, background: 'var(--tx-surface-2)' }}
-          >
-            Abort
-          </button>
+          <ConfirmableButton
+            label="Abort"
+            confirmLabel="Confirm abort?"
+            variant="danger"
+            onConfirm={() => dispatch(run.id, { type: 'abort', reason: 'user clicked abort' })}
+          />
         )}
         {isTerminal && (
-          <button
-            type="button"
-            onClick={() => removeRun(run.id)}
-            style={{ ...BUTTON_BASE, background: 'var(--tx-surface-2)' }}
-          >
-            Clear
-          </button>
+          <ConfirmableButton
+            label="Clear"
+            confirmLabel="Confirm clear?"
+            variant="neutral"
+            onConfirm={() => removeRun(run.id)}
+          />
         )}
         <button
           type="button"
