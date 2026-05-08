@@ -55,7 +55,14 @@ export function PipelineControllerTile({ tile }: Props) {
           <button
             type="button"
             onClick={() => dispatch(run.id, { type: 'start' })}
-            style={{ ...BUTTON_BASE, background: 'var(--tx-accent)' }}
+            style={{
+              ...BUTTON_BASE,
+              background: 'var(--tx-accent)',
+              borderColor: 'var(--tx-accent)',
+              color: 'var(--tx-accent-fg)',
+              fontWeight: 600,
+              padding: '4px 14px',
+            }}
           >
             Start
           </button>

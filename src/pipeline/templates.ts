@@ -56,21 +56,26 @@ export function anthropicTrioTemplate(): PipelineTemplate {
     description: 'Plan → Build → Review with Opus Planner, Sonnet Builder, and Opus Reviewer. Bundled skills enforce stage-handoff protocol and reviewer discipline.',
     isBuiltin: true,
 
+    // Agent tiles need real estate for Claude Code's full UI (welcome
+    // banner + idle tip carousel + status bar). At 480x380 the tip box
+    // would clip / wrap mid-frame and look "messy". 620x520 fits cleanly
+    // on a 1440-wide layout (3 × 620 + 2 × 20 gap = 1900) and gives the
+    // PTY ~80 cols × ~30 rows.
     tiles: [
-      { role: 'planner', type: 'agent', position: { x: 0, y: 0, w: 480, h: 380 },
+      { role: 'planner', type: 'agent', position: { x: 0, y: 0, w: 620, h: 520 },
         config: {
           agent: 'claude', model: 'opus-4-7', effort: 'high', mode: 'planner',
         } },
-      { role: 'builder', type: 'agent', position: { x: 520, y: 0, w: 480, h: 380 },
+      { role: 'builder', type: 'agent', position: { x: 660, y: 0, w: 620, h: 520 },
         config: {
           agent: 'claude', model: 'sonnet-4-6', effort: 'medium', mode: 'builder',
         } },
-      { role: 'reviewer', type: 'agent', position: { x: 1040, y: 0, w: 480, h: 380 },
+      { role: 'reviewer', type: 'agent', position: { x: 1320, y: 0, w: 620, h: 520 },
         config: {
           agent: 'claude', model: 'opus-4-7', effort: 'high', mode: 'reviewer',
           oneshot: true,
         } },
-      { role: 'controller', type: 'pipeline-controller', position: { x: 0, y: 420, w: 1520, h: 200 },
+      { role: 'controller', type: 'pipeline-controller', position: { x: 0, y: 560, w: 1940, h: 220 },
         config: {} },
     ],
 
