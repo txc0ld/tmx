@@ -27,6 +27,8 @@
 
 import { homeDir } from '@tauri-apps/api/path';
 import {
+  pipelineCapabilitiesInstall,
+  pipelineGuardrailsInstall,
   pipelinePreflight,
   pipelineWorktreeCreate,
   pipelineWorktreeDestroy,
@@ -39,6 +41,7 @@ import { screenToCanvas } from '@/utils/layout';
 import { createRunFromTemplate, defaultRunFactoryDeps } from './run-factory';
 import { instantiatePipelineTemplate } from './instantiate';
 import { anthropicTrioTemplate } from './templates';
+import { defaultRoleCapabilities } from './role-capabilities';
 import type { Tile, AgentTile } from '@/types';
 
 const TX_VERSION = '0.1.0';
@@ -130,6 +133,35 @@ export async function launchPipelineRun(
     await pipelineWorktreeCreate({ projectDir, branch, worktreePath, baseBranch });
   } catch (e) {
     return { ok: false, error: `Worktree create failed: ${stringifyErr(e)}`, reason: 'worktree' };
+  }
+
+  // 6.5. Pre-install planner capabilities + guardrails into the worktree's
+  //     `.claude/settings.json` BEFORE the AgentTile mounts and spawns the
+  //     Claude Code process. Claude Code reads `.claude/settings.json` once
+  //     at session start; if the file is missing/empty when the agent boots,
+  //     no allow/deny scoping applies and every Bash invocation triggers a
+  //     "Do you want to proceed?" prompt — even when our capabilities-
+  //     lifecycle handler eventually writes the same content seconds later
+  //     (the agent doesn't re-read mid-session).
+  //
+  //     The capabilities-lifecycle handler still runs on the
+  //     `idle → planning` transition (when the user clicks Start); since the
+  //     Rust IPC is idempotent and the marker round-trips, that becomes a
+  //     no-op for the planner role. Builder/Reviewer caps still install via
+  //     the lifecycle handler on their respective state transitions.
+  try {
+    await pipelineGuardrailsInstall(worktreePath);
+  } catch (e) {
+    console.warn('[pipeline] pre-spawn guardrails install failed (non-fatal):', e);
+  }
+  try {
+    await pipelineCapabilitiesInstall({
+      worktreeDir: worktreePath,
+      role: 'planner',
+      capabilities: defaultRoleCapabilities('planner'),
+    });
+  } catch (e) {
+    console.warn('[pipeline] pre-spawn planner capabilities install failed (non-fatal):', e);
   }
 
   // 7. Drive the factory. Skill / role-prompt / capability / invariants reads
