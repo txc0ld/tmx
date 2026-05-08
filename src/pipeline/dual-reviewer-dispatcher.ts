@@ -26,6 +26,7 @@
  */
 
 import type { PipelineRole, PipelineState } from '@/types';
+import { TERMINAL_STATES } from '@/pipeline/state-machine';
 import {
   usePipelineStore,
   setPipelineLifecycleEmitter,
@@ -108,6 +109,13 @@ export function handleDualReviewerLifecycle(
     entry.tiebreakerLastReject = -1;
     fireSafely(deps, { runId: ev.runId, role: 'reviewer', provider: 'opus' });
     fireSafely(deps, { runId: ev.runId, role: 'reviewer-codex', provider: 'codex' });
+    return;
+  }
+
+  // Audit fix: prune bookkeeping when the run reaches a terminal state.
+  // Without this, the Map grows by one entry per run forever.
+  if (TERMINAL_STATES.has(toState)) {
+    bookkeeping.delete(ev.runId);
     return;
   }
 
