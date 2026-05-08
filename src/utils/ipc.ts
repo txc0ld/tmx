@@ -52,12 +52,26 @@ export async function agentSpawn(opts: {
   cwd: string;
   task?: string;
   customCommand?: string;
+  /**
+   * When true AND `agentType === 'Claude'`, the Rust spawn appends the
+   * hardcoded `--dangerously-skip-permissions` flag so pipeline-spawned
+   * Claude Code processes don't hit the interactive tool-permission prompt
+   * on every `git add` / `npm install` / `Write(...)`. Pipeline runs are
+   * isolated inside `<projectDir>/.tx-worktrees/<runId>/` (fresh worktree
+   * + branch) and the `tx-pipeline-managed` PreToolUse guardrails hook +
+   * per-role capabilities lists in `.claude/settings.json` form the actual
+   * safety boundary. Stand-alone (manual) agent tiles must omit this flag.
+   * The Rust side ignores it for Codex / Gemini until we hardcode the
+   * provider-specific equivalents.
+   */
+  pipelineRun?: boolean;
 }): Promise<string> {
   return invoke('agent_spawn', {
     agentType: opts.agentType,
     cwd: opts.cwd,
     task: opts.task,
     customCommand: opts.customCommand,
+    pipelineRun: opts.pipelineRun ?? false,
   });
 }
 

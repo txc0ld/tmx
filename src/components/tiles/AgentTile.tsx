@@ -227,6 +227,14 @@ export function AgentTile({ tile }: AgentTileProps) {
       agentType: agentType as 'Claude' | 'Codex' | 'Gemini',
       cwd: tile.cwd || '~',
       ...(tile.command ? { customCommand: tile.command } : {}),
+      // Pipeline-spawned tiles carry `pipelineRunId` (set by `instantiate.ts`).
+      // The flag tells Rust to append `--dangerously-skip-permissions` to
+      // Claude Code so the run can `git add`, `npm install`, `Write(...)`,
+      // etc., without hitting the interactive consent prompt. The worktree
+      // boundary + guardrails hook + capabilities lists are the safety net.
+      // Manual user-spawned agent tiles omit `pipelineRunId` and keep the
+      // prompt — that's a normal interactive session.
+      ...(tile.pipelineRunId ? { pipelineRun: true } : {}),
     }).then(async (id) => {
       useCanvasStore.getState().updateTile(tile.id, { ptyId: id, status: 'working' } as Partial<AgentTileType>);
       // Sync PTY size with xterm BEFORE the agent paints anything. The
