@@ -292,6 +292,66 @@ describe('hydrateRunsFromDisk', () => {
     warn.mockRestore();
   });
 
+  it('is idempotent across two hydration calls for the same projectDir', async () => {
+    // Per-session dedup is enforced in App.tsx by `hydratedProjectIds`, but
+    // hydrateRunsFromDisk itself must also be safe to call repeatedly: a
+    // second call re-reads the same JSON, _hydrateForTest merges by id, so
+    // existing runs are simply replaced with the same value. No throw, no
+    // loss of other runs already in the store.
+    const runA = makeRun({ id: 'r-a', state: 'awaiting_plan_approval' });
+    const tree: FileTreeNode[] = [
+      { name: 'r-a.json', path: '/proj/fixture/.terminalx/pipeline-runs/r-a.json', node_type: 'File', children: null },
+    ];
+    const deps = makeDeps({
+      readFileTree: makeTreeMock(async () => tree),
+      readFileText: makeReadMock(async () => serializeRun(runA)),
+    });
+
+    const c1 = await hydrateRunsFromDisk('/proj/fixture', deps);
+    const c2 = await hydrateRunsFromDisk('/proj/fixture', deps);
+
+    expect(c1).toBe(1);
+    expect(c2).toBe(1);
+    const runs = usePipelineStore.getState().runs;
+    expect(Object.keys(runs)).toEqual(['r-a']);
+    expect(runs['r-a'].state).toBe('awaiting_plan_approval');
+  });
+
+  it('hydrating two different project dirs in sequence keeps both projects runs', async () => {
+    // Cross-project storage by run id is the contract: switching projects
+    // mid-session must not clobber the previous project's runs. This test
+    // mirrors the App.tsx project-switch hydration flow.
+    const runA = makeRun({ id: 'r-projA', projectId: 'p-a', state: 'awaiting_plan_approval' });
+    const runB = makeRun({ id: 'r-projB', projectId: 'p-b', state: 'awaiting_clarification' });
+
+    const treeA: FileTreeNode[] = [
+      { name: 'r-projA.json', path: '/proj/a/.terminalx/pipeline-runs/r-projA.json', node_type: 'File', children: null },
+    ];
+    const treeB: FileTreeNode[] = [
+      { name: 'r-projB.json', path: '/proj/b/.terminalx/pipeline-runs/r-projB.json', node_type: 'File', children: null },
+    ];
+
+    const depsA = makeDeps({
+      readFileTree: makeTreeMock(async () => treeA),
+      readFileText: makeReadMock(async () => serializeRun(runA)),
+    });
+    const depsB = makeDeps({
+      readFileTree: makeTreeMock(async () => treeB),
+      readFileText: makeReadMock(async () => serializeRun(runB)),
+    });
+
+    await hydrateRunsFromDisk('/proj/a', depsA);
+    await hydrateRunsFromDisk('/proj/b', depsB);
+
+    const runs = usePipelineStore.getState().runs;
+    expect(runs['r-projA']).toBeDefined();
+    expect(runs['r-projB']).toBeDefined();
+    expect(runs['r-projA'].projectId).toBe('p-a');
+    expect(runs['r-projB'].projectId).toBe('p-b');
+    // Both runs survive — neither hydration call clobbered the other.
+    expect(Object.keys(runs).sort()).toEqual(['r-projA', 'r-projB']);
+  });
+
   it('persists the reconciled-failed state back to disk', async () => {
     const runActive = makeRun({ id: 'r-active', state: 'building' });
     const tree: FileTreeNode[] = [

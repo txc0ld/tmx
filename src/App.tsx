@@ -108,6 +108,36 @@ function findActiveRolePtyId(run: PipelineRun): string | undefined {
   return undefined;
 }
 
+/**
+ * Project IDs whose pipeline runs have already been hydrated from disk this
+ * session. Module-level so HMR-driven re-mounts don't re-hydrate (which
+ * could race with the lifecycle-handler writes happening for the same
+ * runs). The set is intentionally never cleared — once a project's runs
+ * are in pipelineStore, they stay there for the session's lifetime.
+ */
+const hydratedProjectIds = new Set<string>();
+
+/** Test-only: clear the hydration tracker between tests. */
+export function _resetHydratedProjectIdsForTest(): void {
+  hydratedProjectIds.clear();
+}
+
+/**
+ * Hydrate one project's persisted runs into pipelineStore if we haven't
+ * already done so this session. Pulled out so the boot effect and the
+ * project-switch subscription share the same dedup + warning behavior.
+ */
+function maybeHydrateProject(projectId: string): void {
+  if (!projectId) return;
+  if (hydratedProjectIds.has(projectId)) return;
+  const proj = useProjectStore.getState().projects.find(p => p.id === projectId);
+  if (!proj?.cwd) return;
+  hydratedProjectIds.add(projectId);
+  hydrateRunsFromDisk(proj.cwd).catch(err => {
+    console.warn('[pipeline] run hydration failed:', err);
+  });
+}
+
 function spawnTileAtCenter(type: TileType, overrides: Record<string, unknown> = {}): void {
   const state = useCanvasStore.getState();
   const pid = state.activeProject;
@@ -488,18 +518,9 @@ export default function App() {
       // Pipeline run-record hydration: walk
       // <projectCwd>/.terminalx/pipeline-runs/*.json for the active project,
       // deserialize, apply the active-state-on-reload policy, and load into
-      // pipelineStore.runs. Per-project — only the active project's runs are
-      // hydrated; switching projects later is handled by the run-history
-      // panel (out of scope here).
-      const activePid = storeActive ?? useProjectStore.getState().active;
-      if (activePid) {
-        const proj = useProjectStore.getState().projects.find(p => p.id === activePid);
-        if (proj?.cwd) {
-          hydrateRunsFromDisk(proj.cwd).catch(err => {
-            console.warn('[pipeline] run hydration failed:', err);
-          });
-        }
-      }
+      // pipelineStore.runs. The project-switch subscription below picks up
+      // any subsequent project changes during the session.
+      maybeHydrateProject(storeActive ?? useProjectStore.getState().active);
 
       // Restore workspace — try IPC (disk) first, fall back to localStorage cache
       const pid = useCanvasStore.getState().activeProject;
@@ -547,6 +568,21 @@ export default function App() {
       }
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Project-switch hydration: the boot effect above only loads runs for the
+  // initially-active project. When the user switches via the sidebar, the
+  // newly-active project's `<projectCwd>/.terminalx/pipeline-runs/*.json`
+  // snapshots need to land in pipelineStore so the run-history panel + the
+  // pipeline-pending badge stop being silent. Per-session dedup via the
+  // module-level `hydratedProjectIds` Set so we don't race with the
+  // single-writer lifecycle handler if the user toggles projects rapidly.
+  useEffect(() => {
+    return useProjectStore.subscribe((state, prev) => {
+      if (state.active && state.active !== prev.active) {
+        maybeHydrateProject(state.active);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
