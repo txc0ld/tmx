@@ -202,6 +202,28 @@ export async function launchPipelineRun(
   for (const t of placedTiles) canvas.addTile(t);
   for (const w of wires) canvas.addWire(w);
 
+  // Auto-fit: zoom + pan so the three agent tiles + controller fit the
+  // viewport. The pipeline template's 3-wide layout overflows most
+  // laptop screens at 100%, so we land at whatever scale fits with a
+  // 60px margin on each side. Capped at 1.0 so we never zoom IN past
+  // native pixels (which would just blur the text).
+  if (placedTiles.length > 0) {
+    const minX = Math.min(...placedTiles.map((t) => t.x));
+    const minY = Math.min(...placedTiles.map((t) => t.y));
+    const maxX = Math.max(...placedTiles.map((t) => t.x + t.w));
+    const maxY = Math.max(...placedTiles.map((t) => t.y + t.h));
+    const bboxW = maxX - minX;
+    const bboxH = maxY - minY;
+    const margin = 60;
+    const scaleX = (window.innerWidth - margin * 2) / bboxW;
+    const scaleY = (window.innerHeight - margin * 2) / bboxH;
+    const scale = Math.min(1, scaleX, scaleY);
+    // Center the bbox in the viewport, then translate to canvas origin.
+    const tx = (window.innerWidth - bboxW * scale) / 2 - minX * scale;
+    const ty = (window.innerHeight - bboxH * scale) / 2 - minY * scale;
+    canvas.setTransform({ x: tx, y: ty, scale });
+  }
+
   return { ok: true, runId, worktreePath };
 }
 
