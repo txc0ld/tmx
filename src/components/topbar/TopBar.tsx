@@ -16,9 +16,10 @@ interface TopBarProps {
   onAddFromTemplate: (template: TileTemplate) => void;
   onOpenPalette: () => void;
   onStartPipelineRun: () => void;
+  onOpenRunHistory: () => void;
 }
 
-export function TopBar({ project, onAddFromTemplate, onOpenPalette, onStartPipelineRun }: TopBarProps) {
+export function TopBar({ project, onAddFromTemplate, onOpenPalette, onStartPipelineRun, onOpenRunHistory }: TopBarProps) {
   const templates = useTemplateStore(s => s.templates);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -145,6 +146,11 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette, onStartPipel
           on the active project is in an `awaiting_*` gate, badges with the
           count and routes the click to focus the controller tile instead. */}
       <PipelineButton project={project} onStartPipelineRun={onStartPipelineRun} />
+
+      {/* Run history — opens the always-on register of pipeline runs for the
+          active project. Disabled when there is no active project (the panel
+          would have nothing to scope to). */}
+      <RunHistoryButton project={project} onOpenRunHistory={onOpenRunHistory} />
 
       {/* Settings gear — sits to the left of layout/clear, the action group */}
       <SettingsGearButton />
@@ -767,6 +773,46 @@ const slotIconBtnStyle: React.CSSProperties = {
   flexShrink: 0,
   padding: 0,
 };
+
+function RunHistoryButton({
+  project,
+  onOpenRunHistory,
+}: {
+  project: Project | undefined;
+  onOpenRunHistory: () => void;
+}) {
+  const title = project ? 'Run history (all pipeline runs)' : 'Select a project first';
+  return (
+    <button
+      onClick={onOpenRunHistory}
+      disabled={!project}
+      title={title}
+      aria-label="Open run history"
+      data-testid="topbar-run-history-button"
+      style={{
+        // @ts-expect-error webkit property
+        WebkitAppRegion: 'no-drag',
+        height: 28,
+        padding: `0 ${spacing.sm}`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4,
+        background: 'var(--tx-outline-ghost)',
+        border: `1px solid ${colors.outlineGhost}`,
+        borderRadius: radius.md,
+        color: project ? colors.onSurfaceVariant : colors.secondary,
+        ...typography.labelSm,
+        cursor: project ? 'pointer' : 'not-allowed',
+        opacity: project ? 1 : 0.5,
+        transition: `all ${motion.hover}`,
+      }}
+      onMouseEnter={(e) => { if (project) e.currentTarget.style.background = 'var(--tx-outline-variant)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--tx-outline-ghost)'; }}
+    >
+      <span style={{ fontSize: 12, lineHeight: 1 }}>🕘</span> Runs
+    </button>
+  );
+}
 
 function SettingsGearButton() {
   const handleClick = useCallback(() => {

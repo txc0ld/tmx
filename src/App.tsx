@@ -35,6 +35,8 @@ import { SessionTimeline } from '@/components/timeline/SessionTimeline';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { SensitivePathsModal } from '@/components/pipeline/SensitivePathsModal';
 import { StartPipelineRunModal } from '@/components/pipeline/StartPipelineRunModal';
+import { RunHistoryPanel } from '@/components/pipeline/RunHistoryPanel';
+import { RunLogsModal } from '@/components/pipeline/RunLogsModal';
 import { launchPipelineRun } from '@/pipeline/launch';
 import { useToastStore } from '@/stores/toastStore';
 import type { TileType, Tile } from '@/types';
@@ -156,6 +158,11 @@ export default function App() {
     paths: string[];
     resolve: (proceed: boolean) => void;
   } | null>(null);
+  // Run history register + drill-through to logs. The history panel only
+  // selects a run; rendering the actual logs modal lives at the App level
+  // so the panel stays a thin lister.
+  const [runHistoryOpen, setRunHistoryOpen] = useState(false);
+  const [logsTarget, setLogsTarget] = useState<PipelineRun | null>(null);
 
   // Install per-app subscriptions at mount (not module import). Avoids
   // leaking a duplicate subscription if the module is re-loaded under HMR
@@ -687,6 +694,7 @@ export default function App() {
           onAddFromTemplate={handleAddFromTemplate}
           onOpenPalette={() => setPaletteOpen(true)}
           onStartPipelineRun={() => setPipelineRunOpen(true)}
+          onOpenRunHistory={() => setRunHistoryOpen(true)}
         />
         <InfiniteCanvas />
         <SessionTimeline onClose={() => useTimelineStore.getState().setOpen(false)} />
@@ -732,6 +740,26 @@ export default function App() {
             sensitivePathsState.resolve(false);
             setSensitivePathsState(null);
           }}
+        />
+      )}
+
+      {/* Run history register + drill-through. The panel reads runs from
+          pipelineStore directly; clicking a row stages a logs target which
+          mounts RunLogsModal in front. Closing logs falls back to history. */}
+      {runHistoryOpen && (
+        <RunHistoryPanel
+          onClose={() => setRunHistoryOpen(false)}
+          onOpenLogs={(run) => setLogsTarget(run)}
+        />
+      )}
+
+      {logsTarget && (
+        <RunLogsModal
+          run={logsTarget}
+          projectDir={
+            projects.find((p) => p.id === logsTarget.projectId)?.cwd ?? ''
+          }
+          onClose={() => setLogsTarget(null)}
         />
       )}
 
