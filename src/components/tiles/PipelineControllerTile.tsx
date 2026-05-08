@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { usePipelineStore } from '@/stores/pipelineStore';
+import { useProjectStore } from '@/stores/projectStore';
 import { isTerminalState } from '@/pipeline/state-machine';
 import { MergerConfirmModal } from '@/components/pipeline/MergerConfirmModal';
 import { ClarificationModal } from '@/components/pipeline/ClarificationModal';
 import { PlanPreviewModal } from '@/components/pipeline/PlanPreviewModal';
+import { RunLogsModal } from '@/components/pipeline/RunLogsModal';
 import type { PipelineControllerTile as Tile } from '@/types';
 
 interface Props {
@@ -22,7 +24,9 @@ export function PipelineControllerTile({ tile }: Props) {
   const run = usePipelineStore(s => s.runs[tile.runId]);
   const dispatch = usePipelineStore(s => s.dispatch);
   const removeRun = usePipelineStore(s => s.removeRun);
+  const project = useProjectStore(s => s.projects.find(p => p.id === run?.projectId));
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
 
   if (!run) {
     return (
@@ -108,6 +112,14 @@ export function PipelineControllerTile({ tile }: Props) {
             Clear
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => setLogsOpen(true)}
+          style={{ ...BUTTON_BASE, background: 'var(--tx-surface-2)' }}
+          title="View telemetry, plan/spec, and failure bundle for this run"
+        >
+          View logs
+        </button>
       </div>
       {run.state === 'awaiting_merge_approval' && <MergerConfirmModal run={run} />}
       {run.state === 'awaiting_clarification' && run.artifacts.questions.length > 0 && (
@@ -115,6 +127,13 @@ export function PipelineControllerTile({ tile }: Props) {
       )}
       {previewOpen && (
         <PlanPreviewModal run={run} onClose={() => setPreviewOpen(false)} />
+      )}
+      {logsOpen && (
+        <RunLogsModal
+          run={run}
+          projectDir={project?.cwd ?? ''}
+          onClose={() => setLogsOpen(false)}
+        />
       )}
     </div>
   );
