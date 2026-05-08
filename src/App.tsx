@@ -11,6 +11,7 @@ import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
 import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capabilities-lifecycle';
 import { handleFailureBundleLifecycle } from '@/pipeline/failure-bundle-lifecycle';
 import { handleBuilderKickLifecycle } from '@/pipeline/builder-kick-lifecycle';
+import { makeRunPersistenceLifecycleHandler, hydrateRunsFromDisk } from '@/pipeline/run-persistence';
 import { startRedTeamDispatcher } from '@/pipeline/red-team-dispatcher';
 import { startDualReviewerDispatcher } from '@/pipeline/dual-reviewer-dispatcher';
 import { startSingleReviewerDispatcher } from '@/pipeline/single-reviewer-dispatcher';
@@ -199,6 +200,10 @@ export default function App() {
     const offGuardrails = setPipelineLifecycleEmitter(handleGuardrailsLifecycle);
     const offCapabilities = setPipelineLifecycleEmitter(handleCapabilitiesLifecycle);
     const offFailureBundle = setPipelineLifecycleEmitter(handleFailureBundleLifecycle);
+    // Run-record persistence: writes <projectDir>/.terminalx/pipeline-runs/<id>.json
+    // on every state transition so reload/crash/HMR don't wipe the run state.
+    // Hydration on boot is wired below in the project-load effect.
+    const offRunPersistence = setPipelineLifecycleEmitter(makeRunPersistenceLifecycleHandler());
     // Builder kick: deterministic handoff prompt to the Builder PTY when
     // the run enters `building`. The agent-chain wire pipes the planner's
     // tail output too, but it races the state transition; this kick makes
@@ -217,6 +222,7 @@ export default function App() {
       offGuardrails();
       offCapabilities();
       offFailureBundle();
+      offRunPersistence();
       offBuilderKick();
       offScratchpadResume();
     };
@@ -477,6 +483,22 @@ export default function App() {
 
       if (!canvasActive && storeActive) {
         useCanvasStore.getState().switchProject(storeActive);
+      }
+
+      // Pipeline run-record hydration: walk
+      // <projectCwd>/.terminalx/pipeline-runs/*.json for the active project,
+      // deserialize, apply the active-state-on-reload policy, and load into
+      // pipelineStore.runs. Per-project — only the active project's runs are
+      // hydrated; switching projects later is handled by the run-history
+      // panel (out of scope here).
+      const activePid = storeActive ?? useProjectStore.getState().active;
+      if (activePid) {
+        const proj = useProjectStore.getState().projects.find(p => p.id === activePid);
+        if (proj?.cwd) {
+          hydrateRunsFromDisk(proj.cwd).catch(err => {
+            console.warn('[pipeline] run hydration failed:', err);
+          });
+        }
       }
 
       // Restore workspace — try IPC (disk) first, fall back to localStorage cache

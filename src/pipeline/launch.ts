@@ -42,6 +42,8 @@ import { createRunFromTemplate, defaultRunFactoryDeps } from './run-factory';
 import { instantiatePipelineTemplate } from './instantiate';
 import { anthropicTrioTemplate } from './templates';
 import { defaultRoleCapabilities } from './role-capabilities';
+import { persistRun, defaultRunPersistenceDeps } from './run-persistence';
+import { usePipelineStore } from '@/stores/pipelineStore';
 import type { Tile, AgentTile } from '@/types';
 
 const TX_VERSION = '0.1.0';
@@ -201,6 +203,15 @@ export async function launchPipelineRun(
     // gate at that layer, but if a future caller adds it back, behave correctly.
     await safeDestroyWorktree({ projectDir, worktreePath, branch });
     return { ok: false, error: 'Cancelled by factory gate.', reason: 'cancelled' };
+  }
+
+  // 7.5. One-shot persist: the lifecycle handler only fires on STATE
+  //      transitions, but a freshly-created run sitting in `idle` has had
+  //      no transition yet. Without this write, a reload between create-
+  //      and-start would lose the run record entirely.
+  const newRun = usePipelineStore.getState().runs[factoryResult.runId];
+  if (newRun) {
+    void persistRun(newRun, defaultRunPersistenceDeps());
   }
 
   // 8. Persist the goal so the planner can read it as a file. Non-fatal —
