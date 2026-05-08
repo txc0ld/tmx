@@ -7,6 +7,8 @@ import { ClarificationModal } from '@/components/pipeline/ClarificationModal';
 import { PlanPreviewModal } from '@/components/pipeline/PlanPreviewModal';
 import { RunLogsModal } from '@/components/pipeline/RunLogsModal';
 import { ConfirmableButton } from '@/components/pipeline/ConfirmableButton';
+import { pipelineWorktreeDestroy, deleteFile } from '@/utils/ipc';
+import { snapshotPath } from '@/pipeline/run-persistence';
 import type { PipelineControllerTile as Tile } from '@/types';
 
 interface Props {
@@ -28,6 +30,8 @@ export function PipelineControllerTile({ tile }: Props) {
   const project = useProjectStore(s => s.projects.find(p => p.id === run?.projectId));
   const [previewOpen, setPreviewOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   if (!run) {
     return (
@@ -39,6 +43,45 @@ export function PipelineControllerTile({ tile }: Props) {
 
   const isTerminal = isTerminalState(run.state);
 
+  // Worktree cleanup is only meaningful in terminal states. We:
+  //   1. tear down the on-disk worktree + branch via the existing IPC,
+  //   2. delete the persisted run JSON so reload doesn't resurrect a
+  //      ghost run pointing at a missing path,
+  //   3. drop the run from the in-memory store.
+  // Errors at step 1 surface inline; step 2/3 still run because the
+  // worktree may already be partially gone (idempotent IPCs).
+  const handleDeleteWorktree = async () => {
+    if (!isTerminal || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    const projectDir = project?.cwd ?? '';
+    try {
+      if (projectDir) {
+        await pipelineWorktreeDestroy({
+          projectDir,
+          worktreePath: run.worktreePath,
+          branch: run.branch,
+        });
+      }
+    } catch (err) {
+      // Don't bail — the JSON snapshot deletion below is still useful so
+      // the user can retry from a cleaner state. Surface the worktree
+      // error message so they can see why git failed.
+      setDeleteError(err instanceof Error ? err.message : String(err));
+    }
+    if (projectDir) {
+      try {
+        await deleteFile(snapshotPath(projectDir, run.id));
+      } catch (err) {
+        // Snapshot deletion failure is non-fatal; the next launch won't
+        // see it as an active run anyway (terminal state).
+        console.warn('[pipeline] failed to delete run snapshot:', err);
+      }
+    }
+    removeRun(run.id);
+    setDeleting(false);
+  };
+
   return (
     <div style={{
       padding: 12,
@@ -47,6 +90,23 @@ export function PipelineControllerTile({ tile }: Props) {
       fontFamily: 'var(--tx-font-mono)',
       fontSize: 12,
     }}>
+      {run.agentsDisconnected && (
+        <div
+          role="alert"
+          data-testid="agents-disconnected-banner"
+          style={{
+            background: 'rgba(234, 179, 8, 0.18)',
+            border: '1px solid rgba(234, 179, 8, 0.55)',
+            color: 'var(--tx-text)',
+            padding: '6px 10px',
+            borderRadius: 3,
+            lineHeight: 1.4,
+          }}
+        >
+          <strong style={{ color: '#facc15' }}>{'⚠'} Agents disconnected</strong>
+          {' — this run was restored after a reload. Approve/abort actions still work, but Builder/Reviewer won’t auto-resume. Launch a fresh run to continue.'}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
         <strong>Pipeline</strong>
         <span style={{ color: 'var(--tx-text-muted)' }}>{run.id}</span>
@@ -111,6 +171,18 @@ export function PipelineControllerTile({ tile }: Props) {
             onConfirm={() => removeRun(run.id)}
           />
         )}
+        {isTerminal && (
+          <ConfirmableButton
+            label={deleting ? 'Deleting…' : 'Delete worktree'}
+            confirmLabel="Confirm delete worktree?"
+            variant="danger"
+            disabled={deleting}
+            title="Tear down the on-disk worktree + branch and remove this run from the store"
+            onConfirm={() => {
+              void handleDeleteWorktree();
+            }}
+          />
+        )}
         <button
           type="button"
           onClick={() => setLogsOpen(true)}
@@ -120,6 +192,11 @@ export function PipelineControllerTile({ tile }: Props) {
           View logs
         </button>
       </div>
+      {deleteError && (
+        <div style={{ color: 'var(--tx-error)' }} role="alert">
+          delete failed: {deleteError}
+        </div>
+      )}
       {run.state === 'awaiting_merge_approval' && <MergerConfirmModal run={run} />}
       {run.state === 'awaiting_clarification' && run.artifacts.questions.length > 0 && (
         <ClarificationModal run={run} />

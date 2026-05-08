@@ -283,6 +283,52 @@ pub async fn write_file_text(path: String, contents: String) -> Result<(), Strin
     fs::write(&final_path, contents).map_err(|e| format!("Write error: {}", e))
 }
 
+/// Delete a single file, validated against the same allowed-roots list as
+/// `read_file_text`/`write_file_text`. Used by the pipeline-controller
+/// "Delete worktree" action to remove the persisted run JSON snapshot at
+/// `<projectDir>/.terminalx/pipeline-runs/<runId>.json` after the worktree
+/// has been destroyed.
+///
+/// Refuses directories, refuses to follow symlinks, and resolves cleanly
+/// to `Ok(())` when the file is already missing (idempotent — the caller
+/// shouldn't have to special-case "already cleaned up").
+#[tauri::command]
+pub async fn delete_file(path: String) -> Result<(), String> {
+    if path.contains('\0') {
+        return Err("Invalid path".to_string());
+    }
+    let raw = PathBuf::from(shellexpand::tilde(&path).to_string());
+    // Resolve via the parent dir so a missing file still validates against
+    // the allowlist (and returns Ok cleanly on the NotFound branch below).
+    let parent = raw.parent().ok_or_else(|| "Path has no parent".to_string())?;
+    let file_name = raw.file_name().ok_or_else(|| "Path has no file name".to_string())?;
+    let canonical_parent_raw = parent
+        .canonicalize()
+        .map_err(|e| format!("Path error: {}", e))?;
+    let canonical_parent = strip_verbatim_prefix(&canonical_parent_raw);
+    if !is_path_allowed(&canonical_parent) {
+        return Err("Path is outside the allowed roots".to_string());
+    }
+    let final_path = canonical_parent.join(file_name);
+    match fs::symlink_metadata(&final_path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                return Err("Refusing to delete a symlink".to_string());
+            }
+            if metadata.is_dir() {
+                return Err("Path is a directory".to_string());
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("Stat error: {}", e)),
+    }
+    match fs::remove_file(&final_path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("Delete error: {}", e)),
+    }
+}
+
 /// Start watching a directory for changes
 #[tauri::command]
 pub async fn watch_directory(
@@ -432,6 +478,86 @@ mod tests {
         assert!(is_path_allowed(&tmp), "temp_dir must be inside allowed roots");
         let result = read_file_mtime(tmp.to_string_lossy().to_string()).await;
         assert!(matches!(result, Ok(None)), "missing file must be Ok(None), got {:?}", result);
+    }
+
+    /// Phase 3b.4: the pipeline-controller "Delete worktree" cleanup
+    /// removes the persisted run-snapshot JSON via this command. Happy
+    /// path: an existing file under an allowed root is removed and the
+    /// call resolves Ok.
+    #[tokio::test]
+    async fn delete_file_removes_existing_file() {
+        let tmp_file = std::env::temp_dir().join(format!(
+            "tx-test-delete-present-{}-{}.json",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        ));
+        std::fs::write(&tmp_file, b"{\"id\":\"x\"}").expect("write tmp file");
+        assert!(tmp_file.exists(), "fixture file should exist before delete");
+        let res = delete_file(tmp_file.to_string_lossy().to_string()).await;
+        assert!(res.is_ok(), "delete_file failed: {:?}", res);
+        assert!(!tmp_file.exists(), "file should be gone after delete");
+    }
+
+    /// Idempotent: deleting a file that's already missing is Ok(()), not
+    /// Err. The cleanup flow may run twice (race between user clicks and
+    /// hydration); the second call shouldn't blow up.
+    #[tokio::test]
+    async fn delete_file_is_idempotent_for_missing_file() {
+        let tmp_file = std::env::temp_dir().join(format!(
+            "tx-test-delete-missing-{}-{}.json",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        ));
+        assert!(!tmp_file.exists(), "fixture must not exist");
+        let res = delete_file(tmp_file.to_string_lossy().to_string()).await;
+        assert!(res.is_ok(), "delete on missing file should be Ok, got {:?}", res);
+    }
+
+    /// Path-allowlist enforcement: a path resolving outside the allowed
+    /// roots must be rejected before any filesystem mutation. We use
+    /// `/proc/self/environ` on Linux and `/dev/null` on macOS — both are
+    /// in the deny set per the existing `is_path_allowed` rules.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn delete_file_rejects_path_outside_allowed_roots() {
+        // /proc and /dev are not in the allowlist.
+        let res = delete_file("/proc/self/environ".to_string()).await;
+        assert!(res.is_err(), "delete on /proc must be rejected, got {:?}", res);
+        let msg = res.unwrap_err();
+        assert!(
+            msg.contains("outside the allowed roots") || msg.contains("Path error"),
+            "expected scope rejection or canonicalize failure, got: {}",
+            msg,
+        );
+    }
+
+    /// Path-allowlist enforcement: refuse directory deletes outright (this
+    /// command is for single-file cleanup; worktree dirs go through
+    /// `pipeline_worktree_destroy`).
+    #[tokio::test]
+    async fn delete_file_refuses_directory() {
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "tx-test-delete-dir-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        ));
+        std::fs::create_dir_all(&tmp_dir).expect("create tmp dir");
+        let res = delete_file(tmp_dir.to_string_lossy().to_string()).await;
+        let _ = std::fs::remove_dir(&tmp_dir);
+        assert!(res.is_err(), "delete on a directory must Err, got {:?}", res);
+        assert!(
+            res.unwrap_err().contains("directory"),
+            "error should mention directory",
+        );
+    }
+
+    /// Refuses null bytes (defense-in-depth — same posture as the rest of
+    /// the filesystem commands).
+    #[tokio::test]
+    async fn delete_file_rejects_null_bytes() {
+        let res = delete_file("/tmp/has\0null.txt".to_string()).await;
+        assert!(res.is_err(), "null-byte path must be rejected");
+        assert_eq!(res.unwrap_err(), "Invalid path");
     }
 
     /// Phase 3b.2: when the file exists, mtime is returned in ms-since-epoch.

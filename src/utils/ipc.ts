@@ -118,6 +118,20 @@ export async function getFileSize(path: string): Promise<number> {
 }
 
 /**
+ * Delete a single file under the same allowed-roots list as
+ * `read_file_text`/`write_file_text`. Idempotent — resolves cleanly when
+ * the file is already missing. Refuses directories and symlinks.
+ *
+ * Used by the pipeline-controller "Delete worktree" cleanup to remove the
+ * persisted run-snapshot at
+ * `<projectDir>/.terminalx/pipeline-runs/<runId>.json` after the worktree
+ * has been destroyed.
+ */
+export async function deleteFile(path: string): Promise<void> {
+  return invoke('delete_file', { path });
+}
+
+/**
  * Last-modified time of a file in ms since epoch, or `null` when missing.
  * Used by the pipeline scratchpad-watcher (Phase 3b.2) to detect Builder
  * stagnation on `<worktree>/.tx-builder-notes.md`. Unlike `read_file_text`,
