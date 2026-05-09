@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Project } from '@/types';
+import type { Project, WebhookCadence } from '@/types';
 import { useCanvasStore } from './canvasStore';
 import {
   loadProjects,
@@ -55,6 +55,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           gitUrl: p.git_url,
           branch: p.branch,
           webhookUrl: p.webhook_url,
+          webhookCadence: ipcCadenceToTs(p.webhook_cadence),
         }));
         // Pick the previously-active project if it's still on disk; otherwise
         // fall back to the first. Use `setActive` so localStorage stays in
@@ -153,7 +154,30 @@ function toIpc(p: Project) {
     git_url: p.gitUrl,
     branch: p.branch,
     webhook_url: p.webhookUrl,
+    webhook_cadence: p.webhookCadence,
   };
+}
+
+const VALID_CADENCES: ReadonlySet<WebhookCadence> = new Set([
+  'entry-only',
+  '15min',
+  '1hr',
+  '4hr',
+  'daily',
+]);
+
+/**
+ * Defensive parse for `webhook_cadence` coming off disk: anything outside
+ * the known `WebhookCadence` variants becomes `undefined` (== entry-only),
+ * matching the validation in `commands/projects.rs::validate_project`.
+ * Keeps a hand-edited projects.json with junk from corrupting in-memory
+ * state.
+ */
+function ipcCadenceToTs(value: string | undefined): WebhookCadence | undefined {
+  if (value === undefined || value === null) return undefined;
+  return VALID_CADENCES.has(value as WebhookCadence)
+    ? (value as WebhookCadence)
+    : undefined;
 }
 
 function extractRepoName(url: string): string {

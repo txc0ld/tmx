@@ -50,7 +50,8 @@ describe('validateWebhookUrl', () => {
   it('rejects non-URL garbage', () => {
     const v = validateWebhookUrl('not a url');
     expect(v.ok).toBe(false);
-    expect(v.error).toMatch(/valid URL/);
+    // Both garbage and http:// surface the same actionable message.
+    expect(v.error).toMatch(/https/);
   });
 
   it('treats empty as ok (clear-the-field)', () => {

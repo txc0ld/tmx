@@ -141,8 +141,9 @@ describe('Phase 3a smoke: settings modal + factory gate + skills + webhook caden
       target: { value: 'https://hooks.example.com/3a-typed' },
     });
 
-    // Status flips to ready (validation ok + non-empty draft).
-    expect(screen.getByTestId('project-webhook-status').textContent || '').toMatch(/ready/);
+    // Status flips to the helper-text variant (validation ok + non-empty
+    // draft → no error, just the JSON-stringified / secrets-masked hint).
+    expect(screen.getByTestId('project-webhook-status').textContent || '').toMatch(/https only/);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('project-settings-save'));
