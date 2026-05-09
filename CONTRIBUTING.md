@@ -53,7 +53,15 @@ Read [CLAUDE.md](./CLAUDE.md). It covers architecture, data flows, and the criti
 npx tsc --noEmit        # Must pass
 npx vite build          # Must succeed
 cd src-tauri && cargo check  # Must succeed
+pnpm test               # Vitest unit + component tests (~5s, ~790 tests)
+pnpm test:e2e           # Playwright E2E (browser-only, mocks Tauri IPCs)
 ```
+
+`pnpm test:e2e` runs Playwright against the Vite dev server with a
+mock-Tauri bridge in place of the Rust backend (no PTY spawn, no agent
+process). The bridge lives at `e2e/setup/mockTauri.init.js`; tests live
+at `e2e/*.spec.ts`. First-time setup needs `npx playwright install
+chromium` (~92 MiB, one-time per machine).
 
 ---
 
