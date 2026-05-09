@@ -146,3 +146,6 @@ Two project-root files steer the run:
   an issue.
 - **Webhook silently not firing** — must be `https://`. http URLs are
   rejected at the deps boundary in `App.tsx`.
+- **"Already have a pipeline run in X"** — abort or finish the existing
+  run first. Two concurrent runs on the same project would fight over
+  `.claude/settings.json` and telemetry; the launch flow refuses by design.

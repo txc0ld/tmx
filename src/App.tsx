@@ -821,6 +821,14 @@ export default function App() {
         );
         return { ok: true };
       }
+      // Concurrent-run guard: close the modal and toast — user has to
+      // act on the existing run (abort or wait), no point re-opening
+      // the launch form with the same inputs.
+      if (result.reason === 'already-active') {
+        setPipelineRunOpen(false);
+        useToastStore.getState().addToast(result.error, 'error');
+        return { ok: false, error: result.error };
+      }
       // Toast non-cancellation errors so they're visible even after the
       // modal is closed; cancellations are silent (user-initiated).
       if (result.reason !== 'cancelled') {

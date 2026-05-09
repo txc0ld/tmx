@@ -50,7 +50,7 @@ import { launchPipelineRun } from './launch';
 import { useProjectStore } from '@/stores/projectStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { usePipelineStore } from '@/stores/pipelineStore';
-import type { AgentTile } from '@/types';
+import type { AgentTile, PipelineRun, PipelineState } from '@/types';
 
 const PROJECT_ID = 'proj-launch-test';
 const PROJECT_CWD = '/tmp/proj-launch-test';
@@ -122,5 +122,92 @@ describe('launchPipelineRun template selection', () => {
       expect.stringContaining('unknown templateId "tx.pipeline.does-not-exist"'),
     );
     warn.mockRestore();
+  });
+});
+
+
+describe('launchPipelineRun concurrent-run guard', () => {
+  beforeEach(() => {
+    seedProject();
+    useCanvasStore.setState({ tiles: {}, wires: {}, activeProject: PROJECT_ID });
+    usePipelineStore.setState({ runs: {} });
+  });
+
+  function fakeRun(overrides: Partial<PipelineRun> & { state: PipelineState }): PipelineRun {
+    return {
+      id: 'run-existing',
+      templateId: 'tx.pipeline.anthropic-trio',
+      projectId: PROJECT_ID,
+      worktreePath: '/tmp/wt-existing',
+      branch: 'feat/existing',
+      baseBranch: 'main',
+      artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
+      retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
+      startedAt: Date.now(),
+      escalationLog: [],
+      tiles: {},
+      fingerprint: {
+        templateId: 'tx',
+        templateVersion: '1',
+        terminalxVersion: '0.1.0',
+        hash: 'h',
+      } as unknown as PipelineRun['fingerprint'],
+      planLineage: [],
+      runMode: 'standard',
+      autoApprovePlan: false,
+      useDualReviewer: false,
+      runRedTeam: false,
+      effectiveRetryBudgets: { reviewerReject: 1, ciFail: 1, planReject: 1 },
+      templateRetryBudget: { reviewerReject: 1, ciFail: 1, planReject: 1 },
+      templateDualReviewer: false,
+      ...overrides,
+    };
+  }
+
+  it('rejects a second concurrent run on the same project', async () => {
+    const existing = fakeRun({ state: 'building' });
+    const result = await launchPipelineRun(
+      {
+        goal: 'second',
+        branch: 'feat/second',
+        templateId: 'tx.pipeline.hello-world',
+        confirmSensitivePaths: async () => true,
+      },
+      { getStoreState: () => ({ runs: { [existing.id]: existing } }) },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('already-active');
+    expect(result.error).toMatch(/Already have a pipeline run in building/);
+    expect(result.error).toContain(existing.id);
+  });
+
+  it('allows a launch when the only run on the project is terminal', async () => {
+    const existing = fakeRun({ state: 'done', endedAt: Date.now() });
+    const result = await launchPipelineRun(
+      {
+        goal: 'next',
+        branch: 'feat/next',
+        templateId: 'tx.pipeline.hello-world',
+        confirmSensitivePaths: async () => true,
+      },
+      { getStoreState: () => ({ runs: { [existing.id]: existing } }) },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it('bypasses the guard when force: true', async () => {
+    const existing = fakeRun({ state: 'planning' });
+    const result = await launchPipelineRun(
+      {
+        goal: 'forced',
+        branch: 'feat/forced',
+        templateId: 'tx.pipeline.hello-world',
+        confirmSensitivePaths: async () => true,
+        force: true,
+      },
+      { getStoreState: () => ({ runs: { [existing.id]: existing } }) },
+    );
+    expect(result.ok).toBe(true);
   });
 });

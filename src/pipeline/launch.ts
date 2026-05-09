@@ -45,7 +45,8 @@ import { anthropicTrioTemplate, helloWorldTemplate } from './templates';
 import { defaultRoleCapabilities } from './role-capabilities';
 import { persistRun, defaultRunPersistenceDeps } from './run-persistence';
 import { usePipelineStore } from '@/stores/pipelineStore';
-import type { Tile, AgentTile } from '@/types';
+import { isTerminalState } from './state-machine';
+import type { Tile, AgentTile, PipelineRun } from '@/types';
 
 const TX_VERSION = '0.1.0';
 
@@ -70,11 +71,43 @@ export interface LaunchPipelineRunInput {
    * SensitivePathsModal and resolve on its button clicks.
    */
   confirmSensitivePaths(paths: string[]): Promise<boolean>;
+  /**
+   * Power-user / scripted launches: bypass the concurrent-run guard.
+   * Two active runs on the same project share `.claude/settings.json`,
+   * so capability lifecycle handlers will fight to overwrite. Default
+   * `false` (or omitted) protects the common path; callers that know
+   * what they're doing can opt in. NOT exposed in UI.
+   */
+  force?: boolean;
 }
 
 export type LaunchPipelineRunResult =
   | { ok: true; runId: string; worktreePath: string }
-  | { ok: false; error: string; reason: 'no-project' | 'invalid-input' | 'preflight' | 'cancelled' | 'worktree' | 'factory' | 'unknown' };
+  | {
+      ok: false;
+      error: string;
+      reason:
+        | 'no-project'
+        | 'invalid-input'
+        | 'preflight'
+        | 'cancelled'
+        | 'worktree'
+        | 'factory'
+        | 'already-active'
+        | 'unknown';
+    };
+
+/** Subset of `pipelineStore` state we read for the concurrent-run guard.
+ *  Lifted to an interface so tests can dep-inject a fake without touching
+ *  the real Zustand store. */
+export interface PipelineStoreSnapshot {
+  runs: Record<string, PipelineRun>;
+}
+
+export interface LaunchPipelineRunDeps {
+  /** Defaults to `usePipelineStore.getState`. */
+  getStoreState?: () => PipelineStoreSnapshot;
+}
 
 /**
  * Default implementation. Pure imperative orchestration over Zustand stores
@@ -82,7 +115,10 @@ export type LaunchPipelineRunResult =
  */
 export async function launchPipelineRun(
   input: LaunchPipelineRunInput,
+  launchDeps: LaunchPipelineRunDeps = {},
 ): Promise<LaunchPipelineRunResult> {
+  const getStoreState = launchDeps.getStoreState ?? (() => usePipelineStore.getState());
+
   // 1. Active project.
   const { active, projects } = useProjectStore.getState();
   const project = projects.find((p) => p.id === active);
@@ -94,6 +130,25 @@ export async function launchPipelineRun(
     return { ok: false, error: `Active project "${project.name}" has no cwd configured.`, reason: 'no-project' };
   }
   const projectId = project.id;
+
+  // 1.5. Concurrent-run guard. Two non-terminal runs on the same project
+  //      share `.claude/settings.json` — capability lifecycle handlers
+  //      from each fight to overwrite, telemetry conflicts, persistence
+  //      assumes one-active-run-per-project. Power users can pass
+  //      `force: true` to bypass.
+  if (!input.force) {
+    const runs = getStoreState().runs;
+    const active = Object.values(runs).find(
+      (r) => r.projectId === projectId && !isTerminalState(r.state),
+    );
+    if (active) {
+      return {
+        ok: false,
+        error: `Already have a pipeline run in ${active.state} on this project (run ${active.id}). Abort or finish that one first.`,
+        reason: 'already-active',
+      };
+    }
+  }
 
   // 2. Validate inputs.
   const goal = input.goal.trim();
