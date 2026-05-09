@@ -31,6 +31,41 @@ describe('StartPipelineRunModal', () => {
     });
   });
 
+  it('pre-fills the goal textarea when defaultGoal is provided', () => {
+    render(
+      <StartPipelineRunModal
+        defaultBranch="feature/foo"
+        defaultGoal="rerun this exact goal"
+        onSubmit={vi.fn().mockResolvedValue({ ok: true })}
+        onCancel={vi.fn()}
+      />,
+    );
+    const goal = screen.getByTestId('start-pipeline-run-goal') as HTMLTextAreaElement;
+    expect(goal.value).toBe('rerun this exact goal');
+  });
+
+  it('still allows the user to edit the pre-filled goal before submit', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <StartPipelineRunModal
+        defaultBranch="feature/foo"
+        defaultGoal="prior goal"
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+    const goal = screen.getByTestId('start-pipeline-run-goal') as HTMLTextAreaElement;
+    fireEvent.change(goal, { target: { value: 'edited goal' } });
+    fireEvent.click(screen.getByTestId('start-pipeline-run-submit'));
+    await Promise.resolve();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith({
+      goal: 'edited goal',
+      branch: 'feature/foo',
+      templateId: 'tx.pipeline.anthropic-trio',
+    });
+  });
+
   it('selecting a template passes the id through onSubmit', async () => {
     const onSubmit = vi.fn().mockResolvedValue({ ok: true });
     render(

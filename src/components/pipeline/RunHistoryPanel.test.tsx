@@ -172,6 +172,28 @@ describe('RunHistoryPanel', () => {
     expect(within(rows[2]).getByTestId('run-history-row-pill').textContent).toBe('failed');
   });
 
+  it('each row has a Re-run button that calls onRerun with the run (and does not call onOpenLogs)', () => {
+    const onRerun = vi.fn();
+    const onOpenLogs = vi.fn();
+    const target = makeRun({ id: 'pick-rerun', state: 'failed' });
+    render(
+      <RunHistoryPanel
+        onClose={vi.fn()}
+        onOpenLogs={onOpenLogs}
+        onRerun={onRerun}
+        runs={asMap([target])}
+        activeProjectId="proj-1"
+      />,
+    );
+    const btn = screen.getByTestId('run-history-row-rerun');
+    fireEvent.click(btn);
+    expect(onRerun).toHaveBeenCalledTimes(1);
+    expect(onRerun.mock.calls[0][0].id).toBe('pick-rerun');
+    // Row click would normally open logs; verify the rerun button stops
+    // propagation so a single click doesn't ALSO open logs.
+    expect(onOpenLogs).not.toHaveBeenCalled();
+  });
+
   it('clicking the All chip clears any existing filter', () => {
     const runs = asMap([
       makeRun({ id: 'wait', startedAt: 100, state: 'awaiting_plan_approval' }),

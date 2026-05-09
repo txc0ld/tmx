@@ -179,6 +179,23 @@ export function PipelineControllerTile({ tile }: Props) {
           />
         )}
         {isTerminal && (
+          <button
+            type="button"
+            onClick={() => {
+              // Bubble up via a window event so App.tsx can resolve the
+              // project + read PIPELINE_GOAL.md without us having to thread
+              // a callback prop through every controller-tile callsite.
+              window.dispatchEvent(
+                new CustomEvent('tx-pipeline-rerun', { detail: { run } }),
+              );
+            }}
+            style={{ ...BUTTON_BASE, background: 'var(--tx-surface-2)' }}
+            title="Open the launch modal pre-filled with this run's goal on a fresh branch"
+          >
+            Re-run
+          </button>
+        )}
+        {isTerminal && (
           <ConfirmableButton
             label={deleting ? 'Deleting…' : 'Delete worktree'}
             confirmLabel="Confirm delete worktree?"

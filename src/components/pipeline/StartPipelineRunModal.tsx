@@ -26,6 +26,13 @@ export type TemplateOptionId = typeof TEMPLATE_OPTIONS[number]['id'];
 
 interface Props {
   defaultBranch: string;
+  /**
+   * Optional pre-fill for the goal textarea. Used by the "Re-run" action
+   * on terminal-state runs so the user doesn't have to retype a goal that
+   * already lives in `<worktreePath>/PIPELINE_GOAL.md`. Treated as the
+   * initial textarea value only — the user can still edit before submit.
+   */
+  defaultGoal?: string;
   /** Resolves once the launch attempt finishes (success or error). */
   onSubmit(input: {
     goal: string;
@@ -120,8 +127,8 @@ const button: React.CSSProperties = {
   fontSize: 12,
 };
 
-export function StartPipelineRunModal({ defaultBranch, onSubmit, onCancel, hidden = false }: Props) {
-  const [goal, setGoal] = useState('');
+export function StartPipelineRunModal({ defaultBranch, defaultGoal = '', onSubmit, onCancel, hidden = false }: Props) {
+  const [goal, setGoal] = useState(defaultGoal);
   const [branch, setBranch] = useState(defaultBranch);
   const [templateId, setTemplateId] = useState<TemplateOptionId>(TEMPLATE_OPTIONS[0].id);
   const [submitting, setSubmitting] = useState(false);

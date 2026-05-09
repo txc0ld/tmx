@@ -5,7 +5,7 @@ import { useTimelineStore } from '@/stores/timelineStore';
 import { colors } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
 import { isPipelineLaunchShortcut } from '@/utils/keyboardShortcuts';
-import { agentRunOneshot, httpFetch, loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite, secretsMask } from '@/utils/ipc';
+import { agentRunOneshot, httpFetch, loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite, readFileText, secretsMask } from '@/utils/ipc';
 import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter, usePipelineStore } from '@/stores/pipelineStore';
 import { isTerminalState } from '@/pipeline/state-machine';
 import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
@@ -187,6 +187,12 @@ export default function App() {
   // resolve from the modal's button clicks. Keeps the launch flow synchronous-
   // looking while still gating on user input.
   const [pipelineRunOpen, setPipelineRunOpen] = useState(false);
+  // Re-run pre-fill: when the user clicks Re-run on a terminal-state run,
+  // we read PIPELINE_GOAL.md off the original worktree and pass it down to
+  // StartPipelineRunModal as `defaultGoal`. Cleared whenever the modal
+  // closes so a subsequent fresh launch starts with an empty textarea.
+  const [pipelineDefaultGoal, setPipelineDefaultGoal] = useState<string>('');
+  const [pipelineDefaultBranch, setPipelineDefaultBranch] = useState<string>('');
   const [sensitivePathsState, setSensitivePathsState] = useState<{
     paths: string[];
     resolve: (proceed: boolean) => void;
@@ -712,6 +718,75 @@ export default function App() {
     spawnTileAtCenter(template.category, template.config);
   }, []);
 
+  // Fresh auto-suffixed branch name. Always generates a NEW one — the
+  // re-run flow deliberately does not reuse the prior run's branch (terminal
+  // runs already own their branch on disk; reuse would collide).
+  const freshBranchName = useCallback(
+    () => `pipeline/run-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 4)}`,
+    [],
+  );
+
+  // Re-run with this goal. Wired to:
+  //   1. The PipelineControllerTile's "Re-run" button via a window event
+  //      (so the tile doesn't have to thread a callback prop through every
+  //      controller-tile callsite).
+  //   2. The RunHistoryPanel's per-row Re-run button via the `onRerun` prop.
+  //
+  // Reads `<run.worktreePath>/PIPELINE_GOAL.md` off disk, strips the
+  // `# Pipeline goal\n\n` header that `launch.ts` writes, and opens the
+  // launch modal pre-filled. If the file is missing (worktree was deleted)
+  // we toast a warning and STILL open the modal — never block the user on a
+  // missing artifact. Switches the active project first if the run belongs
+  // to a different one so the launch flow's `useProjectStore.getState()`
+  // resolves to the right project.
+  const handleRerunWithGoal = useCallback(
+    async (run: PipelineRun) => {
+      const setActive = useProjectStore.getState().setActive;
+      const activeProjectId = useProjectStore.getState().active;
+      if (run.projectId !== activeProjectId) {
+        setActive(run.projectId);
+      }
+      let goal = '';
+      try {
+        const raw = await readFileText(`${run.worktreePath}/PIPELINE_GOAL.md`);
+        // Strip the leading `# Pipeline goal\n\n` header that launch.ts
+        // writes. Defensive: tolerate either CRLF or LF line endings, and
+        // a missing trailing blank line. Anything that doesn't match the
+        // expected prefix is passed through verbatim — better to show the
+        // raw file than silently lose content.
+        const stripped = raw
+          .replace(/^# Pipeline goal\r?\n\r?\n?/, '')
+          .replace(/\r?\n+$/, '');
+        goal = stripped;
+      } catch {
+        useToastStore
+          .getState()
+          .addToast(
+            "Couldn't read prior goal — file missing. Opening launch modal with empty goal.",
+            'warning',
+          );
+      }
+      setPipelineDefaultGoal(goal);
+      setPipelineDefaultBranch(freshBranchName());
+      setPipelineRunOpen(true);
+      setRunHistoryOpen(false);
+    },
+    [freshBranchName],
+  );
+
+  // Subscribe to the controller-tile's `tx-pipeline-rerun` window event.
+  // The tile dispatches a CustomEvent with `{ run }` in detail; we route it
+  // through `handleRerunWithGoal` exactly like the history-panel Re-run.
+  useEffect(() => {
+    function onRerun(e: Event) {
+      const detail = (e as CustomEvent<{ run: PipelineRun }>).detail;
+      if (!detail?.run) return;
+      void handleRerunWithGoal(detail.run);
+    }
+    window.addEventListener('tx-pipeline-rerun', onRerun);
+    return () => window.removeEventListener('tx-pipeline-rerun', onRerun);
+  }, [handleRerunWithGoal]);
+
   // Pipeline run launch — invoked by StartPipelineRunModal's submit button.
   // Returns the launch flow's structured result so the modal can surface
   // the error inline instead of via a toast (faster feedback loop).
@@ -728,6 +803,9 @@ export default function App() {
       });
       if (result.ok) {
         setPipelineRunOpen(false);
+        // Clear the rerun pre-fill so the next fresh launch starts empty.
+        setPipelineDefaultGoal('');
+        setPipelineDefaultBranch('');
         useToastStore.getState().addToast(
           `Pipeline run started — branch ${input.branch}`,
           'success',
@@ -796,9 +874,14 @@ export default function App() {
           inline error pre-filled. */}
       {pipelineRunOpen && (
         <StartPipelineRunModal
-          defaultBranch={`pipeline/run-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 4)}`}
+          defaultBranch={pipelineDefaultBranch || freshBranchName()}
+          defaultGoal={pipelineDefaultGoal}
           onSubmit={handleStartPipelineRun}
-          onCancel={() => setPipelineRunOpen(false)}
+          onCancel={() => {
+            setPipelineRunOpen(false);
+            setPipelineDefaultGoal('');
+            setPipelineDefaultBranch('');
+          }}
           hidden={sensitivePathsState !== null}
         />
       )}
@@ -824,6 +907,9 @@ export default function App() {
         <RunHistoryPanel
           onClose={() => setRunHistoryOpen(false)}
           onOpenLogs={(run) => setLogsTarget(run)}
+          onRerun={(run) => {
+            void handleRerunWithGoal(run);
+          }}
         />
       )}
 

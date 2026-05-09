@@ -273,6 +273,55 @@ describe('PipelineControllerTile — Delete worktree', () => {
   });
 });
 
+// Re-run action: terminal-state runs get a small "Re-run" button next to
+// Clear / Delete worktree / View logs that hands the run back up to App.tsx
+// so it can read the prior PIPELINE_GOAL.md and open the launch modal pre-
+// filled. The wiring is via a window-level event so we don't have to thread
+// a prop through every controller-tile callsite — App.tsx subscribes once.
+describe('PipelineControllerTile — Re-run action', () => {
+  beforeEach(() => {
+    resetStores();
+  });
+  afterEach(() => {
+    cleanup();
+    resetStores();
+  });
+
+  it('is hidden while the run is in a non-terminal state', () => {
+    const run = makeRun({ state: 'planning' });
+    seedStores(run);
+    render(<PipelineControllerTile tile={makeTile(run.id)} />);
+    expect(screen.queryByRole('button', { name: /^Re-run$/i })).toBeNull();
+  });
+
+  it('appears on terminal states (done/failed/escalated)', () => {
+    for (const state of ['done', 'failed', 'escalated'] as const) {
+      const run = makeRun({ id: `run-rerun-${state}`, state });
+      seedStores(run);
+      render(<PipelineControllerTile tile={makeTile(run.id)} />);
+      expect(screen.getByRole('button', { name: /^Re-run$/i })).toBeTruthy();
+      cleanup();
+      resetStores();
+    }
+  });
+
+  it('clicking Re-run dispatches a `tx-pipeline-rerun` window event with the run object', () => {
+    const run = makeRun({ state: 'failed' });
+    seedStores(run);
+    const handler = vi.fn();
+    window.addEventListener('tx-pipeline-rerun', handler);
+
+    render(<PipelineControllerTile tile={makeTile(run.id)} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Re-run$/i }));
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const ev = handler.mock.calls[0][0] as CustomEvent<{ run: PipelineRun }>;
+    expect(ev.detail.run.id).toBe(run.id);
+    expect(ev.detail.run.worktreePath).toBe(run.worktreePath);
+    window.removeEventListener('tx-pipeline-rerun', handler);
+  });
+});
+
 // Phase 3b: hydrated runs with dead PTYs surface a yellow banner so the
 // user knows approve/abort still works but Builder/Reviewer won't auto-resume.
 describe('PipelineControllerTile — Agents-disconnected banner', () => {

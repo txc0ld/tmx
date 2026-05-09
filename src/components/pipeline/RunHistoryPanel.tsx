@@ -26,6 +26,14 @@ type Group = 'active' | 'awaiting' | 'completed' | 'failed';
 interface Props {
   onClose: () => void;
   onOpenLogs: (run: PipelineRun) => void;
+  /**
+   * Optional "re-run with this goal" handler. When provided each row
+   * renders a small Re-run button that hands the run record up to the
+   * caller (App.tsx) so it can read PIPELINE_GOAL.md and open the launch
+   * modal pre-filled. Click stops propagation so the row's row-click
+   * (open logs) doesn't fire as well.
+   */
+  onRerun?: (run: PipelineRun) => void;
   runs?: Record<string, PipelineRun>;
   activeProjectId?: string | null;
 }
@@ -102,7 +110,7 @@ function pillStyle(group: Group): React.CSSProperties {
   };
 }
 
-export function RunHistoryPanel({ onClose, onOpenLogs, runs, activeProjectId }: Props) {
+export function RunHistoryPanel({ onClose, onOpenLogs, onRerun, runs, activeProjectId }: Props) {
   // Always subscribe so React state updates flow even when DI is omitted; the
   // value is only consumed if the corresponding prop is undefined.
   const liveRuns = usePipelineStore((s) => s.runs);
@@ -211,6 +219,34 @@ export function RunHistoryPanel({ onClose, onOpenLogs, runs, activeProjectId }: 
                   {new Date(run.startedAt).toLocaleString()}
                 </span>
                 <code style={{ color: 'var(--tx-text-muted)' }}>{run.id.slice(0, 8)}</code>
+                {onRerun && (
+                  <button
+                    type="button"
+                    data-testid="run-history-row-rerun"
+                    title="Re-run with this goal on a fresh branch"
+                    onClick={(e) => {
+                      // Stop the row's onClick (which opens logs) from
+                      // firing — a single click on Re-run should rerun,
+                      // not also open the logs modal.
+                      e.stopPropagation();
+                      onRerun(run);
+                    }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: 3,
+                      border: '1px solid var(--tx-border)',
+                      background: 'var(--tx-surface-2)',
+                      color: 'var(--tx-text)',
+                      fontFamily: 'inherit',
+                      fontSize: 11,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Re-run
+                  </button>
+                )}
               </div>
             );
           })}
