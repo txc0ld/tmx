@@ -1,7 +1,7 @@
 {
   "name": "terminalx",
   "version": "0.1.0",
-  "description": "Infinite canvas terminal workspace for AI agent orchestration",
+  "description": "Native desktop app for orchestrating multiple CLI agents with infinite-canvas workspace and end-to-end pipeline automation.",
   "author": "Fantom Labs",
   "license": "MIT",
   "type": "module",
