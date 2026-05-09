@@ -1,6 +1,6 @@
 {
   "name": "terminalx",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Native desktop app for orchestrating multiple CLI agents with infinite-canvas workspace and end-to-end pipeline automation.",
   "author": "Fantom Labs",
   "license": "MIT",

@@ -6,6 +6,8 @@ All notable changes to TerminalX are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-09
+
 ### Added
 - **Agentic Pipelines** — end-to-end Planner → Builder → Reviewer runs in isolated git worktrees. Launch from the TopBar Pipeline button or `Cmd/Ctrl+Shift+P`; pick a template (Anthropic Trio default), describe a goal, and approve the plan before the Builder runs. Full guide in [docs/PIPELINE.md](docs/PIPELINE.md).
 - **Plan preview modal** — review the Planner's plan with task count, files-touched, complexity badge, and confidence before approving, rejecting (with feedback to loop back), or replanning.

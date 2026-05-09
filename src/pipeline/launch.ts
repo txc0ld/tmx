@@ -48,7 +48,7 @@ import { usePipelineStore } from '@/stores/pipelineStore';
 import { isTerminalState } from './state-machine';
 import type { Tile, AgentTile, PipelineRun } from '@/types';
 
-const TX_VERSION = '0.1.0';
+const TX_VERSION = '0.2.0';
 
 /** Same regex as `validate_branch_name` on the Rust side, kept in sync to
  *  fail fast in the UI before round-tripping through the IPC. */
