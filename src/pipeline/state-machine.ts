@@ -158,6 +158,14 @@ export interface InitialRunInputs {
    */
   templateRetryBudget?: { reviewerReject: number; ciFail: number; planReject: number };
   templateDualReviewer?: boolean;
+  /**
+   * Phase 3a.7: per-user pref carried in as the run's *initial* `autoApprovePlan`
+   * value. The reducer's `planner_done` case still re-stamps based on
+   * `complexity === 'trivial'` (unchanged) — this field is the seed value the
+   * run starts with so the audit trail (and any future consumers) can see the
+   * user's intent before the planner has spoken.
+   */
+  autoApprovePlan?: boolean;
 }
 
 export function initialRunState(input: InitialRunInputs): PipelineRun {
@@ -179,7 +187,7 @@ export function initialRunState(input: InitialRunInputs): PipelineRun {
     fingerprint: input.fingerprint,
     planLineage: [],
     runMode: 'standard',
-    autoApprovePlan: false,
+    autoApprovePlan: input.autoApprovePlan ?? false,
     useDualReviewer: templateDualReviewer,
     runRedTeam: false,
     effectiveRetryBudgets: { ...baseBudgets },

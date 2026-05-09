@@ -42,6 +42,7 @@ import { RunHistoryPanel } from '@/components/pipeline/RunHistoryPanel';
 import { RunLogsModal } from '@/components/pipeline/RunLogsModal';
 import { launchPipelineRun } from '@/pipeline/launch';
 import { useToastStore } from '@/stores/toastStore';
+import { useSettingsStore, expandBranchPattern } from '@/stores/settingsStore';
 import type { TileType, Tile } from '@/types';
 import type { TileTemplate } from '@/stores/templateStore';
 import '@/stores/clipboardStore'; // Initialize clipboard listener
@@ -721,10 +722,17 @@ export default function App() {
   // Fresh auto-suffixed branch name. Always generates a NEW one — the
   // re-run flow deliberately does not reuse the prior run's branch (terminal
   // runs already own their branch on disk; reuse would collide).
-  const freshBranchName = useCallback(
-    () => `pipeline/run-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 4)}`,
-    [],
-  );
+  //
+  // Phase 3a.7: expands tokens from the user's `branchPattern` pref.
+  // Falls back to the legacy literal if the pattern produces an invalid
+  // branch name (validation runs at submit time too — the StartPipelineRunModal
+  // shows the error inline if the user edits the value).
+  const freshBranchName = useCallback(() => {
+    const pattern = useSettingsStore.getState().pipelinePrefs.branchPattern;
+    const { branch, valid } = expandBranchPattern(pattern);
+    if (valid) return branch;
+    return `pipeline/run-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 4)}`;
+  }, []);
 
   // Re-run with this goal. Wired to:
   //   1. The PipelineControllerTile's "Re-run" button via a window event
@@ -876,6 +884,7 @@ export default function App() {
         <StartPipelineRunModal
           defaultBranch={pipelineDefaultBranch || freshBranchName()}
           defaultGoal={pipelineDefaultGoal}
+          defaultTemplateId={useSettingsStore.getState().pipelinePrefs.defaultTemplate}
           onSubmit={handleStartPipelineRun}
           onCancel={() => {
             setPipelineRunOpen(false);

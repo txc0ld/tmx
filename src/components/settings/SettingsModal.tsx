@@ -5,6 +5,7 @@ import {
   type SettingsCategory,
 } from '@/stores/settingsStore';
 import { ProjectSettings } from './ProjectSettings';
+import { PipelineSettings } from './PipelineSettings';
 import { PipelineSkillsSettings } from './PipelineSkillsSettings';
 
 const CATEGORY_LABELS: Record<SettingsCategory, string> = {
@@ -193,7 +194,10 @@ function SettingsCategoryBody({ category }: { category: SettingsCategory }) {
       {category === 'project' ? (
         <ProjectSettings />
       ) : category === 'pipeline' ? (
-        <PipelineSkillsSettings />
+        <>
+          <PipelineSettings />
+          <PipelineSkillsSettings />
+        </>
       ) : (
         <>
           Category: <strong>{CATEGORY_LABELS[category]}</strong>

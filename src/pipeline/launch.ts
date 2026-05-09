@@ -36,6 +36,7 @@ import {
   type PreflightResult,
 } from '@/utils/ipc';
 import { useProjectStore } from '@/stores/projectStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { screenToCanvas } from '@/utils/layout';
 import { createRunFromTemplate, defaultRunFactoryDeps } from './run-factory';
@@ -211,6 +212,10 @@ export async function launchPipelineRun(
       baseBranch,
       projectDir,
       terminalxVersion: TX_VERSION,
+      // Phase 3a.7: seed from user pref. The reducer still authoritatively
+      // re-stamps on planner_done based on plan complexity, so this is
+      // primarily an audit-trail / future-consumer signal.
+      autoApprovePlan: useSettingsStore.getState().pipelinePrefs.autoApproveTrivial,
       deps,
     });
   } catch (e) {

@@ -33,6 +33,12 @@ interface Props {
    * initial textarea value only — the user can still edit before submit.
    */
   defaultGoal?: string;
+  /**
+   * Pre-selected template id, sourced from the user's pipeline prefs (Phase
+   * 3a.7). Optional for back-compat; defaults to Anthropic Trio. Unknown
+   * values fall back to the first template option.
+   */
+  defaultTemplateId?: TemplateOptionId;
   /** Resolves once the launch attempt finishes (success or error). */
   onSubmit(input: {
     goal: string;
@@ -127,10 +133,21 @@ const button: React.CSSProperties = {
   fontSize: 12,
 };
 
-export function StartPipelineRunModal({ defaultBranch, defaultGoal = '', onSubmit, onCancel, hidden = false }: Props) {
+export function StartPipelineRunModal({
+  defaultBranch,
+  defaultGoal = '',
+  defaultTemplateId,
+  onSubmit,
+  onCancel,
+  hidden = false,
+}: Props) {
   const [goal, setGoal] = useState(defaultGoal);
   const [branch, setBranch] = useState(defaultBranch);
-  const [templateId, setTemplateId] = useState<TemplateOptionId>(TEMPLATE_OPTIONS[0].id);
+  const initialTemplateId: TemplateOptionId =
+    defaultTemplateId && TEMPLATE_OPTIONS.some((o) => o.id === defaultTemplateId)
+      ? defaultTemplateId
+      : TEMPLATE_OPTIONS[0].id;
+  const [templateId, setTemplateId] = useState<TemplateOptionId>(initialTemplateId);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const goalRef = useRef<HTMLTextAreaElement>(null);
