@@ -112,21 +112,113 @@ export async function persistRun(
   }
 }
 
+/** Debounce window before a per-run write actually flushes to disk. */
+export const PERSIST_DEBOUNCE_MS = 500;
+
 /**
- * Lifecycle handler — fires on every `state_change` lifecycle event. Reads
- * the latest run snapshot from `pipelineStore` (after the reducer has
- * applied the transition) and writes it to disk.
+ * Per-run pending-write registry. Module-scoped because the debouncer must
+ * coalesce across every `makeRunPersistenceLifecycleHandler()` invocation
+ * AND across the one-shot `flushPendingPersistence()` call from beforeunload.
  *
- * Async work is fire-and-forget; the lifecycle emitter doesn't await us.
+ * On a non-terminal event we (re)schedule a 500ms timer; the timer's
+ * callback re-reads `pipelineStore.getState().runs[runId]` so the snapshot
+ * reflects every transition that landed during the debounce window. On a
+ * terminal-state event we cancel the pending timer (if any) and write
+ * immediately — production correctness (the JSON-on-disk ledger of the run
+ * terminating is the moment we MOST want fresh).
+ */
+const pendingTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+
+/** Cancel a pending timer for a run, if one is queued. */
+function clearPendingTimer(runId: string): void {
+  const t = pendingTimers.get(runId);
+  if (t !== undefined) {
+    clearTimeout(t);
+    pendingTimers.delete(runId);
+  }
+}
+
+/**
+ * Lifecycle handler — fires on every `state_change` lifecycle event.
+ *
+ * Hot path: schedule a 500ms debounced write so a chatty run (heartbeats,
+ * rapid state-machine bursts) doesn't fan out to one disk write per event.
+ * The closure re-reads `pipelineStore.getState()` when the timer fires, so
+ * the snapshot picked up is whatever lands at flush time — the second
+ * write supersedes the first if both fire within the window.
+ *
+ * Terminal transitions (`done` / `failed` / `escalated`) bypass the
+ * debounce: cancel any pending timer for this run, write the current
+ * snapshot synchronously (well, fire-and-forget — the lifecycle emitter
+ * doesn't await us, but no setTimeout interposes).
  */
 export function makeRunPersistenceLifecycleHandler(
   deps: RunPersistenceDeps = defaultRunPersistenceDeps(),
 ): (ev: LifecycleEvent) => void {
   return (ev) => {
-    const run = usePipelineStore.getState().runs[ev.runId];
-    if (!run) return;
-    void persistRun(run, deps);
+    const runId = ev.runId;
+    const initialRun = usePipelineStore.getState().runs[runId];
+    if (!initialRun) return;
+
+    // Terminal transitions: cancel any queued debounced write and flush
+    // immediately. We use ev.to rather than the loaded run.state because
+    // the run snapshot in the store IS the post-transition state, but
+    // ev.to is the same thing in source-of-truth terms and reads cleaner.
+    if (isTerminalState(ev.to as PipelineState)) {
+      clearPendingTimer(runId);
+      void persistRun(initialRun, deps);
+      return;
+    }
+
+    // Non-terminal: (re)schedule. If a timer is already queued, replace it
+    // — the next firing reads fresh state, so the dropped tick's snapshot
+    // would have been stale anyway.
+    clearPendingTimer(runId);
+    const t = setTimeout(() => {
+      pendingTimers.delete(runId);
+      const fresh = usePipelineStore.getState().runs[runId];
+      if (!fresh) return;
+      void persistRun(fresh, deps);
+    }, PERSIST_DEBOUNCE_MS);
+    pendingTimers.set(runId, t);
   };
+}
+
+/**
+ * Shutdown flush. Called from `beforeunload` so any pending debounced
+ * writes land before the renderer tears down. Each pending run is written
+ * once with its current store snapshot; timers are cleared either way so
+ * we don't double-fire after a re-entry.
+ *
+ * `writeFileText` is async and we can't await it from `beforeunload` (the
+ * event handler can't block the window unload), but firing the IPC
+ * synchronously enqueues the work in the Tauri command dispatch loop —
+ * Rust will complete the atomic temp+rename even if the renderer is gone
+ * by the time the worker thread runs (the OS keeps the FD/dir handle
+ * alive long enough). Best-effort by design; same posture as the
+ * lifecycle emitter writes.
+ */
+export function flushPendingPersistence(
+  deps: RunPersistenceDeps = defaultRunPersistenceDeps(),
+): void {
+  if (pendingTimers.size === 0) return;
+  const ids = Array.from(pendingTimers.keys());
+  for (const runId of ids) {
+    clearPendingTimer(runId);
+    const run = usePipelineStore.getState().runs[runId];
+    if (!run) continue;
+    void persistRun(run, deps);
+  }
+}
+
+/**
+ * Test-only: drop every pending timer without firing. Used by the
+ * debounce tests to keep state isolated between cases under
+ * `vi.useFakeTimers()`.
+ */
+export function _resetPendingPersistenceForTest(): void {
+  for (const t of pendingTimers.values()) clearTimeout(t);
+  pendingTimers.clear();
 }
 
 /** Walk the directory tree returned by `readFileTree` for *.json leaves. */

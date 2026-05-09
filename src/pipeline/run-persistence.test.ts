@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
   makeRunPersistenceLifecycleHandler,
@@ -7,6 +7,9 @@ import {
   reconcileHydratedRun,
   serializeRun,
   snapshotPath,
+  flushPendingPersistence,
+  _resetPendingPersistenceForTest,
+  PERSIST_DEBOUNCE_MS,
   RUN_PERSISTENCE_SUBDIR,
   type RunPersistenceDeps,
 } from './run-persistence';
@@ -140,9 +143,12 @@ describe('persistRun', () => {
 });
 
 describe('lifecycle handler', () => {
-  it('writes the latest run snapshot when a state_change event fires', () => {
-    const run = makeRun({ id: 'r-1', state: 'building' });
-    usePipelineStore.setState({ runs: { 'r-1': run }, activeRunIds: ['r-1'] });
+  it('writes the latest run snapshot when a terminal state_change event fires', () => {
+    // Terminal-state transitions bypass debounce and write immediately;
+    // we use one here so the assertion is sync-friendly. Non-terminal
+    // (debounced) writes have their own dedicated suite below.
+    const run = makeRun({ id: 'r-1', state: 'done' });
+    usePipelineStore.setState({ runs: { 'r-1': run }, activeRunIds: [] });
     const writeFileText = makeWriteMock();
     const deps = makeDeps({ writeFileText });
     const handler = makeRunPersistenceLifecycleHandler(deps);
@@ -151,9 +157,9 @@ describe('lifecycle handler', () => {
       runId: 'r-1',
       projectId: 'p-1',
       worktreePath: run.worktreePath,
-      from: 'planning',
-      to: 'building',
-      trigger: 'approve_plan',
+      from: 'merging',
+      to: 'done',
+      trigger: 'merger_done',
     };
     handler(ev);
 
@@ -163,7 +169,7 @@ describe('lifecycle handler', () => {
       const call = writeFileText.mock.calls[0];
       expect(call[0]).toBe(snapshotPath('/proj/fixture', 'r-1'));
       const parsed = JSON.parse(call[1]);
-      expect(parsed.state).toBe('building');
+      expect(parsed.state).toBe('done');
     });
   });
 
@@ -180,6 +186,174 @@ describe('lifecycle handler', () => {
       trigger: 'start',
     });
     expect(writeFileText).not.toHaveBeenCalled();
+  });
+});
+
+describe('lifecycle handler debounce', () => {
+  // Use real fake timers per test so we control the debounce flush window.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    _resetPendingPersistenceForTest();
+  });
+  // Clean up so other suites (hydration, persistRun) keep using real timers.
+  afterEach(() => {
+    _resetPendingPersistenceForTest();
+    vi.useRealTimers();
+  });
+
+  function ev(runId: string, to: PipelineState, from: PipelineState = 'planning'): LifecycleEvent {
+    return {
+      runId,
+      projectId: 'p-1',
+      worktreePath: '/proj/fixture/.tx-worktrees/' + runId,
+      from,
+      to,
+      trigger: 'tick',
+    };
+  }
+
+  it('coalesces 5 rapid lifecycle events into 1 write 500ms later', () => {
+    const run = makeRun({ id: 'r-burst', state: 'building' });
+    usePipelineStore.setState({ runs: { 'r-burst': run }, activeRunIds: ['r-burst'] });
+    const writeFileText = makeWriteMock();
+    const handler = makeRunPersistenceLifecycleHandler(makeDeps({ writeFileText }));
+
+    for (let i = 0; i < 5; i++) handler(ev('r-burst', 'building'));
+
+    // Before the timer fires: zero writes.
+    expect(writeFileText).not.toHaveBeenCalled();
+
+    // Advance just under the window: still zero.
+    vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS - 1);
+    expect(writeFileText).not.toHaveBeenCalled();
+
+    // Advance past the window: exactly one write.
+    vi.advanceTimersByTime(2);
+    expect(writeFileText).toHaveBeenCalledTimes(1);
+  });
+
+  it('terminal-state event flushes immediately without debounce', () => {
+    const run = makeRun({ id: 'r-term', state: 'done' });
+    usePipelineStore.setState({ runs: { 'r-term': run }, activeRunIds: [] });
+    const writeFileText = makeWriteMock();
+    const handler = makeRunPersistenceLifecycleHandler(makeDeps({ writeFileText }));
+
+    handler(ev('r-term', 'done', 'merging'));
+
+    // Sync after the call: write already in flight (no setTimeout).
+    expect(writeFileText).toHaveBeenCalledTimes(1);
+
+    // No queued timer to surprise us afterwards.
+    vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS * 2);
+    expect(writeFileText).toHaveBeenCalledTimes(1);
+  });
+
+  it('debounces two different runs independently', () => {
+    const runA = makeRun({ id: 'r-a', state: 'building' });
+    const runB = makeRun({ id: 'r-b', state: 'reviewing' });
+    usePipelineStore.setState({
+      runs: { 'r-a': runA, 'r-b': runB },
+      activeRunIds: ['r-a', 'r-b'],
+    });
+    const writeFileText = makeWriteMock();
+    const handler = makeRunPersistenceLifecycleHandler(makeDeps({ writeFileText }));
+
+    handler(ev('r-a', 'building'));
+    // Half the window elapses, then run B fires.
+    vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS / 2);
+    handler(ev('r-b', 'reviewing'));
+
+    // Advance to just past A's window (A: full elapsed, B: half elapsed).
+    vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS / 2 + 1);
+    expect(writeFileText).toHaveBeenCalledTimes(1);
+    expect(writeFileText.mock.calls[0][0]).toBe(snapshotPath('/proj/fixture', 'r-a'));
+
+    // Advance past B's window.
+    vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS);
+    expect(writeFileText).toHaveBeenCalledTimes(2);
+    expect(writeFileText.mock.calls[1][0]).toBe(snapshotPath('/proj/fixture', 'r-b'));
+  });
+
+  it('terminal-state event replaces a queued debounced write (no double-fire)', () => {
+    const run = makeRun({ id: 'r-promote', state: 'building' });
+    usePipelineStore.setState({ runs: { 'r-promote': run }, activeRunIds: ['r-promote'] });
+    const writeFileText = makeWriteMock();
+    const handler = makeRunPersistenceLifecycleHandler(makeDeps({ writeFileText }));
+
+    // 1) Queue a debounced write for a non-terminal transition.
+    handler(ev('r-promote', 'building'));
+    expect(writeFileText).not.toHaveBeenCalled();
+
+    // 2) Before the timer fires, transition to terminal. Update store
+    //    snapshot to reflect the post-transition state.
+    usePipelineStore.setState({
+      runs: { 'r-promote': { ...run, state: 'done' as PipelineState } },
+      activeRunIds: [],
+    });
+    handler(ev('r-promote', 'done', 'merging'));
+
+    // The terminal flush ran exactly once.
+    expect(writeFileText).toHaveBeenCalledTimes(1);
+    const written = JSON.parse(writeFileText.mock.calls[0][1]);
+    expect(written.state).toBe('done');
+
+    // Advancing the clock must NOT fire the original debounced write —
+    // it should have been cancelled.
+    vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS * 2);
+    expect(writeFileText).toHaveBeenCalledTimes(1);
+  });
+
+  it('flushPendingPersistence writes once per pending run on shutdown', () => {
+    const runA = makeRun({ id: 'r-x', state: 'building' });
+    const runB = makeRun({ id: 'r-y', state: 'reviewing' });
+    usePipelineStore.setState({
+      runs: { 'r-x': runA, 'r-y': runB },
+      activeRunIds: ['r-x', 'r-y'],
+    });
+    const writeFileText = makeWriteMock();
+    const deps = makeDeps({ writeFileText });
+    const handler = makeRunPersistenceLifecycleHandler(deps);
+
+    // Queue debounced writes for two distinct runs.
+    handler(ev('r-x', 'building'));
+    handler(ev('r-y', 'reviewing'));
+    expect(writeFileText).not.toHaveBeenCalled();
+
+    // Shutdown flush: each pending run writes exactly once, synchronously.
+    flushPendingPersistence(deps);
+    expect(writeFileText).toHaveBeenCalledTimes(2);
+    const paths = writeFileText.mock.calls.map((c) => c[0]).sort();
+    expect(paths).toEqual(
+      [snapshotPath('/proj/fixture', 'r-x'), snapshotPath('/proj/fixture', 'r-y')].sort(),
+    );
+
+    // Advancing the clock must NOT re-fire the now-cleared timers.
+    vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS * 2);
+    expect(writeFileText).toHaveBeenCalledTimes(2);
+  });
+
+  it('debounced write reads fresh store state at flush time (last writer wins)', () => {
+    // Ensures the closure isn't capturing the stale snapshot from when
+    // the FIRST event fired — the timer must re-read at fire time.
+    const run = makeRun({ id: 'r-fresh', state: 'building' });
+    usePipelineStore.setState({ runs: { 'r-fresh': run }, activeRunIds: ['r-fresh'] });
+    const writeFileText = makeWriteMock();
+    const handler = makeRunPersistenceLifecycleHandler(makeDeps({ writeFileText }));
+
+    handler(ev('r-fresh', 'building'));
+    // Mid-window, store state changes (e.g. another transition lands).
+    usePipelineStore.setState({
+      runs: {
+        'r-fresh': { ...run, state: 'reviewing' as PipelineState },
+      },
+      activeRunIds: ['r-fresh'],
+    });
+    handler(ev('r-fresh', 'reviewing'));
+
+    vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS + 1);
+    expect(writeFileText).toHaveBeenCalledTimes(1);
+    const written = JSON.parse(writeFileText.mock.calls[0][1]);
+    expect(written.state).toBe('reviewing');
   });
 });
 

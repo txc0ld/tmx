@@ -13,7 +13,7 @@ import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capa
 import { handleFailureBundleLifecycle } from '@/pipeline/failure-bundle-lifecycle';
 import { handleBuilderKickLifecycle } from '@/pipeline/builder-kick-lifecycle';
 import { handlePlannerRerunLifecycle } from '@/pipeline/planner-rerun-lifecycle';
-import { makeRunPersistenceLifecycleHandler, hydrateRunsFromDisk } from '@/pipeline/run-persistence';
+import { makeRunPersistenceLifecycleHandler, hydrateRunsFromDisk, flushPendingPersistence } from '@/pipeline/run-persistence';
 import { startRedTeamDispatcher } from '@/pipeline/red-team-dispatcher';
 import { startDualReviewerDispatcher } from '@/pipeline/dual-reviewer-dispatcher';
 import { startSingleReviewerDispatcher } from '@/pipeline/single-reviewer-dispatcher';
@@ -271,6 +271,17 @@ export default function App() {
       offPlannerRerun();
       offScratchpadResume();
     };
+  }, []);
+
+  // beforeunload: flush any debounced run-persistence writes so the
+  // disk record is fresh when the renderer dies. Best-effort — the IPC
+  // is fire-and-forget, but `writeFileText` enqueues onto the Tauri
+  // command dispatch loop and Rust completes the atomic rename even
+  // after the renderer goes away.
+  useEffect(() => {
+    const onUnload = () => flushPendingPersistence();
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
   }, []);
 
   // Audit fix: prune per-run renderer state on terminal transitions.
