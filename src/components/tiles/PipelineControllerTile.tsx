@@ -7,6 +7,7 @@ import { ClarificationModal } from '@/components/pipeline/ClarificationModal';
 import { PlanPreviewModal } from '@/components/pipeline/PlanPreviewModal';
 import { RunLogsModal } from '@/components/pipeline/RunLogsModal';
 import { ConfirmableButton } from '@/components/pipeline/ConfirmableButton';
+import { StageProgress } from '@/components/pipeline/StageProgress';
 import { pipelineWorktreeDestroy, deleteFile } from '@/utils/ipc';
 import { snapshotPath } from '@/pipeline/run-persistence';
 import type { PipelineControllerTile as Tile } from '@/types';
@@ -107,6 +108,12 @@ export function PipelineControllerTile({ tile }: Props) {
           {' — this run was restored after a reload. Approve/abort actions still work, but Builder/Reviewer won’t auto-resume. Launch a fresh run to continue.'}
         </div>
       )}
+      <StageProgress
+        state={run.state}
+        runMode={run.runMode}
+        priorActiveState={run.priorActiveState}
+        useDualReviewer={run.useDualReviewer}
+      />
       <div style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
         <strong>Pipeline</strong>
         <span style={{ color: 'var(--tx-text-muted)' }}>{run.id}</span>
