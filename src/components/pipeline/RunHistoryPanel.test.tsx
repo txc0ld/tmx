@@ -117,7 +117,7 @@ describe('RunHistoryPanel', () => {
     expect(onOpenLogs.mock.calls[0][0].id).toBe('pick-me');
   });
 
-  it('only shows runs for the active project', () => {
+  it('only shows runs for the active project when scope=active', () => {
     const runs = asMap([
       makeRun({ id: 'mine', projectId: 'proj-1', state: 'done' }),
       makeRun({ id: 'other', projectId: 'proj-2', state: 'done' }),
@@ -128,6 +128,7 @@ describe('RunHistoryPanel', () => {
         onOpenLogs={vi.fn()}
         runs={runs}
         activeProjectId="proj-1"
+        defaultScope="active"
       />,
     );
     const rows = screen.getAllByTestId('run-history-row');
@@ -386,5 +387,89 @@ describe('RunHistoryPanel', () => {
     expect(screen.getAllByTestId('run-history-row')).toHaveLength(1);
     fireEvent.click(screen.getByTestId('run-history-filter-all'));
     expect(screen.getAllByTestId('run-history-row')).toHaveLength(2);
+  });
+
+  it('default scope is "all projects" — runs from other projects appear', () => {
+    const runs = asMap([
+      makeRun({ id: 'mine', projectId: 'proj-1', startedAt: 100, state: 'done' }),
+      makeRun({ id: 'other', projectId: 'proj-2', startedAt: 200, state: 'done' }),
+      makeRun({ id: 'third', projectId: 'proj-3', startedAt: 300, state: 'building' }),
+    ]);
+    render(
+      <RunHistoryPanel
+        onClose={vi.fn()}
+        onOpenLogs={vi.fn()}
+        runs={runs}
+        activeProjectId="proj-1"
+      />,
+    );
+    const rows = screen.getAllByTestId('run-history-row');
+    expect(rows).toHaveLength(3);
+    // Newest first regardless of project
+    expect(rows[0].getAttribute('data-runid')).toBe('third');
+    expect(rows[1].getAttribute('data-runid')).toBe('other');
+    expect(rows[2].getAttribute('data-runid')).toBe('mine');
+  });
+
+  it('toggling to Active project narrows back to the current project', () => {
+    const runs = asMap([
+      makeRun({ id: 'mine', projectId: 'proj-1', startedAt: 100, state: 'done' }),
+      makeRun({ id: 'other', projectId: 'proj-2', startedAt: 200, state: 'done' }),
+    ]);
+    render(
+      <RunHistoryPanel
+        onClose={vi.fn()}
+        onOpenLogs={vi.fn()}
+        runs={runs}
+        activeProjectId="proj-1"
+      />,
+    );
+    expect(screen.getAllByTestId('run-history-row')).toHaveLength(2);
+    fireEvent.click(screen.getByTestId('run-history-scope-active'));
+    const rows = screen.getAllByTestId('run-history-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].getAttribute('data-runid')).toBe('mine');
+  });
+
+  it('renders project name labels per row in all-projects scope', () => {
+    const runs = asMap([
+      makeRun({ id: 'a', projectId: 'proj-1', startedAt: 100, state: 'done' }),
+      makeRun({ id: 'b', projectId: 'proj-2', startedAt: 200, state: 'done' }),
+    ]);
+    const projects = [
+      { id: 'proj-1', name: 'Alpha', icon: 'A', color: '#fff', description: '', cwd: '/a' },
+      { id: 'proj-2', name: 'Beta', icon: 'B', color: '#fff', description: '', cwd: '/b' },
+    ];
+    render(
+      <RunHistoryPanel
+        onClose={vi.fn()}
+        onOpenLogs={vi.fn()}
+        runs={runs}
+        activeProjectId="proj-1"
+        projects={projects}
+      />,
+    );
+    const labels = screen.getAllByTestId('run-history-row-project');
+    // Sorted newest-first: proj-2 first, proj-1 second
+    expect(labels.map(l => l.textContent)).toEqual(['Beta', 'Alpha']);
+  });
+
+  it('clicking a row from a non-active project still passes the run to onOpenLogs', () => {
+    const onOpenLogs = vi.fn();
+    const runs = asMap([
+      makeRun({ id: 'cross', projectId: 'proj-2', state: 'awaiting_merge_approval' }),
+    ]);
+    render(
+      <RunHistoryPanel
+        onClose={vi.fn()}
+        onOpenLogs={onOpenLogs}
+        runs={runs}
+        activeProjectId="proj-1"
+      />,
+    );
+    fireEvent.click(screen.getByTestId('run-history-row'));
+    expect(onOpenLogs).toHaveBeenCalledTimes(1);
+    expect(onOpenLogs.mock.calls[0][0].id).toBe('cross');
+    expect(onOpenLogs.mock.calls[0][0].projectId).toBe('proj-2');
   });
 });

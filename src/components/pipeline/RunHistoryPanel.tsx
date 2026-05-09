@@ -1,16 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { PipelineRun, PipelineState } from '@/types';
+import type { PipelineRun, PipelineState, Project } from '@/types';
 import { usePipelineStore } from '@/stores/pipelineStore';
 import { useProjectStore } from '@/stores/projectStore';
 import { readFileText as defaultReadFileText } from '@/utils/ipc';
 
 /**
- * Run History panel — lists all pipeline runs for the active project.
+ * Run History panel — lists pipeline runs across the user's projects.
  *
  * Pipeline Controller tile only surfaces the run it's bound to, so once a
  * run completes (or its controller is cleared) it becomes invisible. This
- * panel is the always-on register: every run for the project, sorted
- * newest-first, with a click-through to RunLogsModal for inspection.
+ * panel is the always-on register: every run, sorted newest-first, with a
+ * click-through to RunLogsModal for inspection.
+ *
+ * Cross-project scope (Phase 3 follow-up): the header carries an
+ * "All projects | Active project" toggle. Default is "All" so the user can
+ * see backgrounded runs on projects they aren't currently viewing — the
+ * tile sidebar already hides the controller when the project switches, so
+ * without this view a backgrounded run is essentially invisible. Clicking a
+ * row from a non-active project flows up via `onOpenLogs`; App.tsx
+ * switches the active project before mounting the logs modal.
  *
  * Sibling-modal conventions: fixed overlay, CSS-var theming, opaque card,
  * `data-canvas-overlay` so the canvas wheel handler bails, Escape→close,
@@ -38,12 +46,25 @@ interface Props {
   runs?: Record<string, PipelineRun>;
   activeProjectId?: string | null;
   /**
+   * Optional projects map for the per-row project label. When omitted (or
+   * a project id is missing), the row falls back to a short id slice. In
+   * production this comes from `useProjectStore`.
+   */
+  projects?: Project[];
+  /**
    * Override for the goal-file reader. Tests inject a stub; production
    * uses the `readFileText` IPC. Errors (worktree deleted, missing file)
    * resolve to an empty string and the run silently falls back to
    * branch-only matching.
    */
   readFileText?: (path: string) => Promise<string>;
+  /**
+   * Initial scope selection. Default `'all'` — the cross-project view is
+   * the more useful default since the user came here looking for
+   * "where's my run?" rather than "what's on this project?". Tests can
+   * pass `'active'` to assert the legacy behavior.
+   */
+  defaultScope?: 'all' | 'active';
 }
 
 const FAILED: ReadonlySet<PipelineState> = new Set(['failed', 'escalated']);
@@ -124,18 +145,31 @@ export function RunHistoryPanel({
   onRerun,
   runs,
   activeProjectId,
+  projects,
   readFileText,
+  defaultScope = 'all',
 }: Props) {
   // Always subscribe so React state updates flow even when DI is omitted; the
   // value is only consumed if the corresponding prop is undefined.
   const liveRuns = usePipelineStore((s) => s.runs);
   const liveActiveProjectId = useProjectStore((s) => s.active);
+  const liveProjects = useProjectStore((s) => s.projects);
   const effRuns = runs ?? liveRuns;
   const effPid = activeProjectId === undefined ? liveActiveProjectId : activeProjectId;
+  const effProjects = projects ?? liveProjects;
   const effRead = readFileText ?? defaultReadFileText;
+
+  // Project-name lookup for cross-project rows. Pre-built once per render
+  // so each row's label is a `O(1)` Map lookup rather than an array scan.
+  const projectNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of effProjects) m.set(p.id, p.name);
+    return m;
+  }, [effProjects]);
 
   // Empty set = "All"; multi-select toggles add/remove from the set.
   const [filters, setFilters] = useState<Set<Group>>(new Set());
+  const [scope, setScope] = useState<'all' | 'active'>(defaultScope);
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -164,11 +198,16 @@ export function RunHistoryPanel({
 
   // Lazy goal-file fetch: only run once a search term is active. Branch-only
   // matching upfront keeps the panel snappy with 50+ runs; we pay the IPC
-  // cost only when the user has expressed search intent.
+  // cost only when the user has expressed search intent. In `'all'` scope
+  // we fetch goals for every run regardless of project so cross-project
+  // search hits the goal text too.
   useEffect(() => {
-    if (!effPid) return;
     if (trimmedSearch === '') return;
-    const mine = Object.values(effRuns).filter((r) => r.projectId === effPid);
+    if (scope === 'active' && !effPid) return;
+    const mine =
+      scope === 'all'
+        ? Object.values(effRuns)
+        : Object.values(effRuns).filter((r) => r.projectId === effPid);
     for (const r of mine) {
       if (goalCache.current.has(r.id)) continue;
       if (inFlight.current.has(r.id)) continue;
@@ -188,7 +227,7 @@ export function RunHistoryPanel({
           setGoalTick((t) => t + 1);
         });
     }
-  }, [effRuns, effPid, trimmedSearch, effRead]);
+  }, [effRuns, effPid, scope, trimmedSearch, effRead]);
 
   const fromMs = useMemo(() => {
     if (!dateFrom) return null;
@@ -203,8 +242,11 @@ export function RunHistoryPanel({
   }, [dateTo]);
 
   const visible = useMemo(() => {
-    if (!effPid) return [];
-    const mine = Object.values(effRuns).filter((r) => r.projectId === effPid);
+    if (scope === 'active' && !effPid) return [];
+    const mine =
+      scope === 'all'
+        ? Object.values(effRuns)
+        : Object.values(effRuns).filter((r) => r.projectId === effPid);
     const byChip = filters.size === 0 ? mine : mine.filter((r) => filters.has(classify(r.state)));
     const byDate = byChip.filter((r) => {
       if (fromMs !== null && r.startedAt < fromMs) return false;
@@ -223,7 +265,7 @@ export function RunHistoryPanel({
     return bySearch.sort((a, b) => b.startedAt - a.startedAt);
     // `goalTick` participates so re-renders triggered by async goal-cache
     // landings re-evaluate the substring match (the cache itself is a ref).
-  }, [effRuns, effPid, filters, fromMs, toMs, lowerSearch, goalTick]);
+  }, [effRuns, effPid, scope, filters, fromMs, toMs, lowerSearch, goalTick]);
 
   const hasAnyFilter =
     filters.size > 0 || trimmedSearch !== '' || dateFrom !== '' || dateTo !== '';
@@ -252,9 +294,45 @@ export function RunHistoryPanel({
     >
       <div role="dialog" aria-modal="true" aria-label="Run history" style={card} onClick={(e) => e.stopPropagation()}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--tx-border)' }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>Run history</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>Run history</div>
+            <div
+              role="tablist"
+              aria-label="Run history scope"
+              style={{ display: 'flex', gap: 4 }}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scope === 'all'}
+                data-testid="run-history-scope-all"
+                onClick={() => setScope('all')}
+                style={scope === 'all' ? { ...chipBase, ...chipActive } : chipBase}
+              >
+                All projects
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={scope === 'active'}
+                data-testid="run-history-scope-active"
+                onClick={() => setScope('active')}
+                disabled={!effPid}
+                title={effPid ? 'Show only the active project' : 'Select a project first'}
+                style={
+                  scope === 'active'
+                    ? { ...chipBase, ...chipActive }
+                    : { ...chipBase, opacity: effPid ? 1 : 0.5, cursor: effPid ? 'pointer' : 'not-allowed' }
+                }
+              >
+                Active project
+              </button>
+            </div>
+          </div>
           <div style={{ color: 'var(--tx-text-muted)', marginTop: 4 }}>
-            All pipeline runs for this project, newest first. Click a row to inspect logs.
+            {scope === 'all'
+              ? 'All pipeline runs across your projects, newest first. Click a row to inspect logs.'
+              : 'All pipeline runs for the active project, newest first. Click a row to inspect logs.'}
           </div>
         </div>
 
@@ -370,7 +448,7 @@ export function RunHistoryPanel({
         <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', flex: 1 }}>
           {visible.length === 0 && !hasAnyFilter && (
             <div data-testid="run-history-empty" style={{ color: 'var(--tx-text-muted)', padding: '20px 8px' }}>
-              No runs yet for this project.
+              {scope === 'all' ? 'No runs yet across your projects.' : 'No runs yet for this project.'}
             </div>
           )}
           {visible.length === 0 && hasAnyFilter && (
@@ -429,6 +507,22 @@ export function RunHistoryPanel({
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {run.branch}
                 </span>
+                {scope === 'all' && (
+                  <span
+                    data-testid="run-history-row-project"
+                    data-projectid={run.projectId}
+                    style={{
+                      color: 'var(--tx-text-muted)',
+                      whiteSpace: 'nowrap',
+                      fontSize: 11,
+                      maxWidth: 140,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {projectNameById.get(run.projectId) ?? run.projectId.slice(0, 8)}
+                  </span>
+                )}
                 <span style={{ color: 'var(--tx-text-muted)', whiteSpace: 'nowrap' }}>
                   {new Date(run.startedAt).toLocaleString()}
                 </span>

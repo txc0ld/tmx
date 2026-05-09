@@ -183,4 +183,86 @@ describe('PipelineButton attention badge', () => {
 
     expect(screen.queryByTestId('topbar-pipeline-badge')).toBeNull();
   });
+
+  it('clicking with a pending run on ANOTHER project switches active project + focuses controller', () => {
+    const project = makeProject({ id: 'proj-1' });
+    seedRuns([
+      makeRun({
+        id: 'cross-r',
+        projectId: 'proj-2',
+        state: 'awaiting_plan_approval',
+        startedAt: 500,
+        tiles: { controller: 'tile-cross' },
+      }),
+    ]);
+    const onStart = vi.fn();
+    const setFocusedTile = vi.fn();
+    const bringToFront = vi.fn();
+    const setActiveProject = vi.fn();
+    render(
+      <PipelineButton
+        project={project}
+        onStartPipelineRun={onStart}
+        deps={{
+          getCanvasStore: () => ({ setFocusedTile, bringToFront }),
+          setActiveProject,
+        }}
+      />,
+    );
+
+    // Active project has zero pending — no badge, but the off-project hint
+    // dot should render.
+    expect(screen.queryByTestId('topbar-pipeline-badge')).toBeNull();
+    expect(screen.getByTestId('topbar-pipeline-offproject-dot')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('topbar-pipeline-button'));
+
+    // Switches to proj-2, then focuses that project's controller. Launch
+    // modal must NOT open — the user came here for the existing run.
+    expect(setActiveProject).toHaveBeenCalledWith('proj-2');
+    expect(bringToFront).toHaveBeenCalledWith('tile-cross');
+    expect(setFocusedTile).toHaveBeenCalledWith('tile-cross');
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
+  it('local pending wins over cross-project pending', () => {
+    const project = makeProject({ id: 'proj-1' });
+    seedRuns([
+      makeRun({
+        id: 'mine',
+        projectId: 'proj-1',
+        state: 'awaiting_plan_approval',
+        startedAt: 100,
+        tiles: { controller: 'tile-mine' },
+      }),
+      makeRun({
+        id: 'theirs',
+        projectId: 'proj-2',
+        state: 'awaiting_plan_approval',
+        startedAt: 500, // newer, but on a different project — must NOT win
+        tiles: { controller: 'tile-theirs' },
+      }),
+    ]);
+    const onStart = vi.fn();
+    const setFocusedTile = vi.fn();
+    const bringToFront = vi.fn();
+    const setActiveProject = vi.fn();
+    render(
+      <PipelineButton
+        project={project}
+        onStartPipelineRun={onStart}
+        deps={{
+          getCanvasStore: () => ({ setFocusedTile, bringToFront }),
+          setActiveProject,
+        }}
+      />,
+    );
+    // Local badge present, off-project dot suppressed.
+    expect(screen.getByTestId('topbar-pipeline-badge').textContent).toBe('1');
+    expect(screen.queryByTestId('topbar-pipeline-offproject-dot')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('topbar-pipeline-button'));
+    expect(setActiveProject).not.toHaveBeenCalled();
+    expect(bringToFront).toHaveBeenCalledWith('tile-mine');
+  });
 });

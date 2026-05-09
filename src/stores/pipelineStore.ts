@@ -357,6 +357,27 @@ function deriveActive(runs: Record<string, PipelineRun>): string[] {
     .map(r => r.id);
 }
 
+/**
+ * Cross-project indicator helper. Returns every run whose `projectId` matches
+ * — including terminal ones — so the caller can decide what to show
+ * (sidebar dot uses non-terminal + unviewed-failed; history panel uses all).
+ *
+ * Pure read; safe to call from `useSyncExternalStore`-style selectors as
+ * long as the caller passes the same `runs` reference each time. UI sites
+ * should prefer subscribing to `usePipelineStore(s => s.runs)` and filtering
+ * inline so React re-renders track membership changes.
+ */
+export function getRunsForProject(
+  runs: Record<string, PipelineRun>,
+  projectId: string,
+): PipelineRun[] {
+  const out: PipelineRun[] = [];
+  for (const r of Object.values(runs)) {
+    if (r.projectId === projectId) out.push(r);
+  }
+  return out;
+}
+
 export const usePipelineStore = create<PipelineStoreShape>((set) => ({
   runs: {},
   activeRunIds: [],

@@ -316,6 +316,14 @@ export interface PipelineButtonDeps {
    * store containing `setFocusedTile` and `bringToFront` spies.
    */
   getCanvasStore?: () => Pick<ReturnType<typeof useCanvasStore.getState>, 'setFocusedTile' | 'bringToFront'>;
+  /**
+   * Switch the active project (cross-project pending-run focus). Tests
+   * stub this with a spy; production routes through `projectStore.setActive`.
+   * The badge button uses this when the most-recent pending run lives on
+   * a different project — clicking from any project brings the user to
+   * that project AND focuses its controller tile.
+   */
+  setActiveProject?: (projectId: string) => void;
 }
 
 export function PipelineButton({
@@ -329,6 +337,9 @@ export function PipelineButton({
 }) {
   const runs = usePipelineStore(s => s.runs);
 
+  // Active-project pending list — the badge count reflects only the active
+  // project (so the user isn't surprised by a "3" that includes projects
+  // they never look at). Cross-project pending is consulted only on click.
   const pendingRuns = useMemo<PipelineRun[]>(() => {
     if (!project) return [];
     return Object.values(runs)
@@ -337,8 +348,22 @@ export function PipelineButton({
       .sort((a, b) => b.startedAt - a.startedAt);
   }, [runs, project]);
 
+  // Cross-project pending list — used as a fallback when the active project
+  // has nothing pending but another project does. Sorted newest-first so a
+  // click lands on the freshest gate.
+  const crossProjectPending = useMemo<PipelineRun[]>(() => {
+    return Object.values(runs)
+      .filter(r => r.state.startsWith('awaiting_'))
+      .sort((a, b) => b.startedAt - a.startedAt);
+  }, [runs]);
+
   const pendingCount = pendingRuns.length;
   const hasPending = pendingCount > 0;
+  // Off-project pending exists only when the active project is empty AND
+  // some other project has a gate. Avoids flicker on a project with both
+  // its own gates and external ones — local gates win.
+  const hasOffProjectPending =
+    !hasPending && project !== undefined && crossProjectPending.some(r => r.projectId !== project.id);
 
   const handleClick = useCallback(() => {
     if (!project) return;
@@ -353,9 +378,32 @@ export function PipelineButton({
       }
       // Fall through to launch modal if the controller tile is gone (e.g.
       // user closed it). Better than swallowing the click.
+    } else if (crossProjectPending.length > 0) {
+      // Cross-project gate exists. Switch project first so the canvas re-
+      // renders with that project's tiles, THEN focus the controller. We
+      // call setFocusedTile/bringToFront synchronously after setActive —
+      // canvasStore reads `activeProject` from projectStore via a
+      // subscription, but `bringToFront`/`setFocusedTile` operate on tile
+      // ids in `zStack`/`focusedTile` which are project-scoped maps, so
+      // the focus survives the project flip.
+      const target = crossProjectPending[0];
+      const controllerTileId = target.tiles?.controller;
+      const setActive = deps?.setActiveProject ?? ((id: string) => {
+        // Lazy require to avoid a top-level circular import; production
+        // path runs once per click so the dynamic resolution cost is
+        // negligible. Tests always inject `deps.setActiveProject`.
+        useProjectStore.getState().setActive(id);
+      });
+      setActive(target.projectId);
+      if (controllerTileId) {
+        const cs = deps?.getCanvasStore?.() ?? useCanvasStore.getState();
+        cs.bringToFront(controllerTileId);
+        cs.setFocusedTile(controllerTileId);
+      }
+      return;
     }
     onStartPipelineRun();
-  }, [project, hasPending, pendingRuns, onStartPipelineRun, deps]);
+  }, [project, hasPending, pendingRuns, crossProjectPending, onStartPipelineRun, deps]);
 
   const shortcutLabel = isMac() ? '⌘⇧P' : 'Ctrl+Shift+P';
   const baseTitle = project
@@ -363,7 +411,9 @@ export function PipelineButton({
     : 'Select a project first';
   const title = hasPending
     ? `${pendingCount} run${pendingCount === 1 ? '' : 's'} need attention`
-    : baseTitle;
+    : hasOffProjectPending
+      ? 'Pipeline run awaiting attention on another project'
+      : baseTitle;
 
   return (
     <div style={{
@@ -397,6 +447,25 @@ export function PipelineButton({
       >
         <span style={{ fontSize: 14, lineHeight: 1 }}>▶</span> Pipeline
       </button>
+      {!hasPending && hasOffProjectPending && (
+        <span
+          data-testid="topbar-pipeline-offproject-dot"
+          aria-label="Pipeline run awaiting attention on another project"
+          title="Pipeline run awaiting attention on another project"
+          style={{
+            position: 'absolute',
+            top: -4,
+            right: -4,
+            width: 10,
+            height: 10,
+            borderRadius: 5,
+            background: 'var(--tx-accent)',
+            boxShadow: '0 0 0 2px var(--tx-bg)',
+            pointerEvents: 'none',
+            opacity: 0.7,
+          }}
+        />
+      )}
       {hasPending && (
         <>
           <span

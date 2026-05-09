@@ -969,7 +969,27 @@ export default function App() {
       {runHistoryOpen && (
         <RunHistoryPanel
           onClose={() => setRunHistoryOpen(false)}
-          onOpenLogs={(run) => setLogsTarget(run)}
+          onOpenLogs={(run) => {
+            // Cross-project: switch the active project before mounting
+            // the logs modal so the user lands on that project's canvas
+            // when they close the modal — otherwise the modal pops over
+            // a project they aren't viewing and "Close" returns them to
+            // the wrong canvas. We do NOT abort the prior project's runs
+            // — pipelineStore retains them across switches.
+            const activeProjectId = useProjectStore.getState().active;
+            if (run.projectId && run.projectId !== activeProjectId) {
+              useProjectStore.getState().setActive(run.projectId);
+            }
+            // Mark this run as viewed so the sidebar's red "unviewed
+            // failed" dot clears. Best-effort — localStorage failures are
+            // silent (private-mode browsers / quota exhaustion).
+            try {
+              localStorage.setItem(`tx-run-viewed-${run.id}`, '1');
+            } catch {
+              /* ignore */
+            }
+            setLogsTarget(run);
+          }}
           onRerun={(run) => {
             void handleRerunWithGoal(run);
           }}
