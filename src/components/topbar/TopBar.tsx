@@ -8,6 +8,7 @@ import { colors, spacing, typography, glass, radius, motion, tileColors, fonts, 
 import { isMac, modShortcut } from '@/utils/platform';
 import { isTemplatePinned, toggleTemplatePin } from '@/components/canvas/TileDock';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { PipelineOnboardingTooltip, dismissPipelineOnboarding } from '@/components/topbar/PipelineOnboardingTooltip';
 import type { Project, TileType, Tile, PipelineRun } from '@/types';
 
 interface TopBarProps {
@@ -144,8 +145,17 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette, onStartPipel
       {/* Pipeline run launcher — opens StartPipelineRunModal. Disabled when
           no project is selected (the launch flow needs a cwd). When any run
           on the active project is in an `awaiting_*` gate, badges with the
-          count and routes the click to focus the controller tile instead. */}
-      <PipelineButton project={project} onStartPipelineRun={onStartPipelineRun} />
+          count and routes the click to focus the controller tile instead.
+          The wrapping div is `position: relative` so the one-time
+          onboarding tooltip can anchor below the button. */}
+      <div style={{ position: 'relative', // @ts-expect-error webkit
+        WebkitAppRegion: 'no-drag' }}>
+        <PipelineButton
+          project={project}
+          onStartPipelineRun={() => { dismissPipelineOnboarding(); onStartPipelineRun(); }}
+        />
+        <PipelineOnboardingTooltip />
+      </div>
 
       {/* Run history — opens the always-on register of pipeline runs for the
           active project. Disabled when there is no active project (the panel
