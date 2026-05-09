@@ -240,7 +240,13 @@ export function reducer(run: PipelineRun, ev: PipelineEvent): PipelineRun {
       // by 3c.4 + 3c.6 respectively).
       const mode: 'trivial' | 'standard' | 'complex' = ev.plan.complexity ?? 'standard';
       const effectiveRetryBudgets = scaleBudgets(run.templateRetryBudget, mode);
-      const autoApprovePlan = mode === 'trivial';
+      // Phase 3a.7: trivial fast-path is gated by the user pref carried
+      // on `run.autoApprovePlan` (seeded by the run-factory from the
+      // settings store). Opted out → trivial still routes through the
+      // human confirm gate. AND-ing here means complexity downgrades to
+      // standard/complex always reset to false (consistent with §A4
+      // re-plans-are-full-resets).
+      const autoApprovePlan = mode === 'trivial' && run.autoApprovePlan;
       const useDualReviewer = mode === 'complex' || run.templateDualReviewer;
       const runRedTeam = mode === 'complex';
       const nextState: PipelineState = autoApprovePlan ? 'building' : 'awaiting_plan_approval';

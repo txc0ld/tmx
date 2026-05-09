@@ -115,12 +115,15 @@ describe('trust telemetry (Phase 3c.7)', () => {
     }
   });
 
-  it('complexity_routed: trivial plan stamps autoApprovePlan=true and skips dual/red-team', () => {
+  it('complexity_routed: trivial plan + user opted in stamps autoApprovePlan=true and skips dual/red-team', () => {
+    // Phase 3a.7: trivial fast-path requires the run to seed
+    // autoApprovePlan=true (set by the run-factory from the user pref).
     const { events, unsub } = captureTelemetry();
     try {
       const runId = usePipelineStore.getState().createRun({
         runId: 'r-trivial', templateId: 't', projectId: 'proj-T',
         worktreePath: '/tmp/wt', branch: 'feat/r1', fingerprint: FP,
+        autoApprovePlan: true,
       });
       usePipelineStore.getState().dispatch(runId, { type: 'start' });
       usePipelineStore.getState().dispatch(runId, {

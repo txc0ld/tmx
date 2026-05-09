@@ -436,8 +436,10 @@ describe('pipeline state machine', () => {
 
   // ─── Complexity gate (Phase 3c.1) ─────────────────────────────────────
 
-  it('complexity=trivial: planner_done auto-skips awaiting_plan_approval, halves budgets', () => {
-    const run = makeRun({ state: 'planning' });
+  it('complexity=trivial + user opted in (autoApprovePlan=true): auto-skips awaiting_plan_approval, halves budgets', () => {
+    // Phase 3a.7: the trivial fast-path is now gated by the user pref,
+    // seeded into run.autoApprovePlan by the run-factory.
+    const run = makeRun({ state: 'planning', autoApprovePlan: true });
     const ev: PipelineEvent = {
       type: 'planner_done',
       plan: {
@@ -448,13 +450,35 @@ describe('pipeline state machine', () => {
       },
     };
     const next = reducer(run, ev);
-    // The whole point: trivial bypasses the human confirm gate.
+    // The whole point: trivial + opt-in bypasses the human confirm gate.
     expect(next.state).toBe('building');
     expect(next.runMode).toBe('trivial');
     expect(next.autoApprovePlan).toBe(true);
     expect(next.useDualReviewer).toBe(false);
     expect(next.runRedTeam).toBe(false);
     // Halved with floor + min-1: 3 → 1.
+    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 1, ciFail: 1, planReject: 1 });
+  });
+
+  it('complexity=trivial + user opted out (autoApprovePlan=false, default): still routes through awaiting_plan_approval', () => {
+    // Phase 3a.7: default user pref is opt-out. Trivial complexity alone
+    // is no longer enough — the run must also have autoApprovePlan=true
+    // (seeded from settings) for the fast-path to engage.
+    const run = makeRun({ state: 'planning' /* autoApprovePlan: false default */ });
+    const ev: PipelineEvent = {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
+        tasks: [], summary: 's', planCommitSha: 'sha-trivial-optout',
+        complexity: 'trivial',
+        confidence: 'verified',
+      },
+    };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('awaiting_plan_approval');
+    expect(next.runMode).toBe('trivial');
+    expect(next.autoApprovePlan).toBe(false);
+    // Budgets still scale with complexity regardless of approval gating.
     expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 1, ciFail: 1, planReject: 1 });
   });
 
@@ -535,7 +559,10 @@ describe('pipeline state machine', () => {
   });
 
   it('replan re-stamps complexity from the new plan (full reset semantic)', () => {
-    let run = makeRun({ state: 'planning' });
+    // Seed with user opted-in so the v1 trivial path still hits 'building'
+    // (the reset semantic we want to verify is about budgets, not the
+    // approval gate).
+    let run = makeRun({ state: 'planning', autoApprovePlan: true });
     // v1: trivial → halved, building.
     run = reducer(run, {
       type: 'planner_done',

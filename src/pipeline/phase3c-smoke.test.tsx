@@ -216,8 +216,11 @@ describe('Phase 3c smoke: complexity gate + dual-reviewer + tiebreaker + red-tea
 
   // 2. Trivial plan auto-approves — state goes straight to building, skipping
   //    awaiting_plan_approval. autoApprovePlan flag is the audit trail.
+  //    Phase 3a.7: trivial fast-path is now ALSO gated by the user pref
+  //    seeded into `run.autoApprovePlan` by the run-factory. Seed with
+  //    `autoApprovePlan: true` to exercise the opt-in path here.
   it('trivial plan: auto-skips awaiting_plan_approval and halves budgets', () => {
-    seedRun(makeRun('planning'));
+    seedRun(makeRun('planning', { autoApprovePlan: true }));
 
     usePipelineStore.getState().dispatch(RUN_ID, {
       type: 'planner_done',
