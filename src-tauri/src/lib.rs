@@ -93,6 +93,8 @@ pub fn run() {
             commands::secrets_mask::secrets_mask,
             // Failure bundle generator (Phase 2c-iii.7)
             commands::failure_bundle::pipeline_failure_bundle_generate,
+            // Boot-time CLI health check (welcome banner)
+            commands::health::pipeline_health_check,
             // Pipeline (agentic-pipeline Phase 1)
             commands::pipeline::pipeline_capabilities_install,
             commands::pipeline::pipeline_capabilities_uninstall,

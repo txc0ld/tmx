@@ -32,6 +32,7 @@ import { ProjectSidebar } from '@/components/sidebar/ProjectSidebar';
 import { TopBar } from '@/components/topbar/TopBar';
 import { StatusRail } from '@/components/status/StatusRail';
 import { ToastContainer } from '@/components/status/ToastContainer';
+import { WelcomeBanner } from '@/components/status/WelcomeBanner';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { SearchOverlay } from '@/components/canvas/SearchOverlay';
 import { SessionTimeline } from '@/components/timeline/SessionTimeline';
@@ -856,6 +857,7 @@ export default function App() {
           onStartPipelineRun={() => setPipelineRunOpen(true)}
           onOpenRunHistory={() => setRunHistoryOpen(true)}
         />
+        <WelcomeBanner />
         <InfiniteCanvas />
         <SessionTimeline onClose={() => useTimelineStore.getState().setOpen(false)} />
         <StatusRail />
