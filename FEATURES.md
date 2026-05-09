@@ -28,6 +28,12 @@ Spawn Claude Code / Codex / Gemini as tiles. Auto-complete via DONE sentinel or 
 
 → [Agent docs](./docs/features/README.md#agent-orchestration)
 
+### 🚦 Pipeline runs
+
+Multi-agent automation: Planner (Opus) → Builder (Sonnet) → Reviewer (Opus, one-shot), running in an isolated git worktree on a generated branch. Plan and merge gates require user approval; clarifications surface as modals. Telemetry, plan artifacts, and failure bundles persist per run.
+
+→ [Pipeline guide](./docs/PIPELINE.md)
+
 ### 🔗 Wiring system
 
 Drag from any tile's right port to another's left port. 6 wire types, auto-inferred:
