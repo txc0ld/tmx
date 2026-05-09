@@ -3,7 +3,28 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import type { PipelineRun, PlanArtifact, RunFingerprint, PipelineState } from '@/types';
 import { usePipelineStore } from '@/stores/pipelineStore';
 import { initialRunState } from '@/pipeline/state-machine';
+import type { FailureBundleSummary } from '@/utils/ipc';
 import { RunLogsModal } from './RunLogsModal';
+
+/**
+ * Default summary stub used when a test doesn't care about the
+ * specifics of the inline bundle summary panel — keeps the existing
+ * Failure-bundle tab assertions (path + Reveal button) free of
+ * unrelated bundle-summary noise.
+ */
+function makeSummary(overrides: Partial<FailureBundleSummary> = {}): FailureBundleSummary {
+  return {
+    bytes: 1024,
+    telemetry_line_count: 0,
+    last_events: [],
+    run_state: null,
+    failure_reason: null,
+    retry_counters: {},
+    git_status: '',
+    artifacts_present: false,
+    ...overrides,
+  };
+}
 
 const fakeFingerprint: RunFingerprint = {
   templateId: 'tpl',
@@ -246,6 +267,7 @@ describe('RunLogsModal', () => {
   it('Failure bundle tab shows tarball path when run.state === failed', () => {
     const run = makeRun({ state: 'failed' });
     const readFileText = vi.fn().mockResolvedValue('');
+    const bundleSummary = vi.fn().mockResolvedValue(makeSummary());
 
     render(
       <RunLogsModal
@@ -254,6 +276,7 @@ describe('RunLogsModal', () => {
         onClose={vi.fn()}
         readFileText={readFileText}
         openShell={vi.fn()}
+        bundleSummary={bundleSummary}
       />,
     );
 
@@ -268,6 +291,7 @@ describe('RunLogsModal', () => {
     const run = makeRun({ state: 'failed' });
     const readFileText = vi.fn().mockResolvedValue('');
     const openShell = vi.fn().mockResolvedValue(undefined);
+    const bundleSummary = vi.fn().mockResolvedValue(makeSummary());
 
     render(
       <RunLogsModal
@@ -276,6 +300,7 @@ describe('RunLogsModal', () => {
         onClose={vi.fn()}
         readFileText={readFileText}
         openShell={openShell}
+        bundleSummary={bundleSummary}
       />,
     );
 
@@ -285,6 +310,155 @@ describe('RunLogsModal', () => {
     await waitFor(() => {
       expect(openShell).toHaveBeenCalledWith('/Users/me/proj/.terminalx/failure-bundles');
     });
+  });
+
+  it('Failure bundle tab calls bundleSummary with the tarball path on activation', async () => {
+    const run = makeRun({ state: 'failed' });
+    const readFileText = vi.fn().mockResolvedValue('');
+    const bundleSummary = vi.fn().mockResolvedValue(makeSummary());
+
+    render(
+      <RunLogsModal
+        run={run}
+        projectDir="/Users/me/proj"
+        onClose={vi.fn()}
+        readFileText={readFileText}
+        openShell={vi.fn()}
+        bundleSummary={bundleSummary}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('run-logs-tab-bundle'));
+
+    await waitFor(() => {
+      expect(bundleSummary).toHaveBeenCalledWith(
+        '/Users/me/proj/.terminalx/failure-bundles/run-test.tar.gz',
+      );
+    });
+  });
+
+  it('Failure bundle tab renders size, telemetry count, run state, retry counters, last events, and git status', async () => {
+    const run = makeRun({ state: 'failed' });
+    const readFileText = vi.fn().mockResolvedValue('');
+    const summary = makeSummary({
+      bytes: 4096,
+      telemetry_line_count: 12,
+      last_events: ['state_change@t1', 'capability_install@t2', 'merger_invoked@t3'],
+      run_state: 'failed',
+      failure_reason: 'reviewer_blocker',
+      retry_counters: { build: '2', review: '1' },
+      git_status: '3 modified, 1 added, 0 deleted, 2 untracked',
+      artifacts_present: true,
+    });
+    const bundleSummary = vi.fn().mockResolvedValue(summary);
+
+    render(
+      <RunLogsModal
+        run={run}
+        projectDir="/Users/me/proj"
+        onClose={vi.fn()}
+        readFileText={readFileText}
+        openShell={vi.fn()}
+        bundleSummary={bundleSummary}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('run-logs-tab-bundle'));
+
+    const block = await screen.findByTestId('run-logs-bundle-summary');
+    expect(block).toBeTruthy();
+    expect(screen.getByTestId('run-logs-bundle-summary-size').textContent).toContain('4.0 KB');
+    expect(
+      screen.getByTestId('run-logs-bundle-summary-telemetry-count').textContent,
+    ).toContain('12');
+    expect(screen.getByTestId('run-logs-bundle-summary-state').textContent).toContain('failed');
+    expect(screen.getByTestId('run-logs-bundle-summary-reason').textContent).toContain(
+      'reviewer_blocker',
+    );
+    expect(screen.getByTestId('run-logs-bundle-summary-retries').textContent).toContain(
+      'build=2',
+    );
+    expect(screen.getByTestId('run-logs-bundle-summary-retries').textContent).toContain(
+      'review=1',
+    );
+    expect(screen.getByTestId('run-logs-bundle-summary-git-status').textContent).toContain(
+      '3 modified',
+    );
+    expect(screen.getAllByTestId('run-logs-bundle-summary-last-event-row')).toHaveLength(3);
+    expect(
+      screen.queryByTestId('run-logs-bundle-summary-artifacts-missing'),
+    ).toBeNull();
+  });
+
+  it('Failure bundle tab shows the artifacts-missing footnote when artifacts.json is absent', async () => {
+    const run = makeRun({ state: 'failed' });
+    const summary = makeSummary({ artifacts_present: false, telemetry_line_count: 1 });
+    const bundleSummary = vi.fn().mockResolvedValue(summary);
+
+    render(
+      <RunLogsModal
+        run={run}
+        projectDir="/tmp/proj"
+        onClose={vi.fn()}
+        readFileText={vi.fn().mockResolvedValue('')}
+        openShell={vi.fn()}
+        bundleSummary={bundleSummary}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('run-logs-tab-bundle'));
+
+    expect(
+      await screen.findByTestId('run-logs-bundle-summary-artifacts-missing'),
+    ).toBeTruthy();
+  });
+
+  it('Failure bundle tab shows the loading state until bundleSummary resolves', async () => {
+    const run = makeRun({ state: 'failed' });
+    let resolve!: (s: FailureBundleSummary) => void;
+    const pending = new Promise<FailureBundleSummary>((r) => {
+      resolve = r;
+    });
+    const bundleSummary = vi.fn().mockReturnValue(pending);
+
+    render(
+      <RunLogsModal
+        run={run}
+        projectDir="/tmp/proj"
+        onClose={vi.fn()}
+        readFileText={vi.fn().mockResolvedValue('')}
+        openShell={vi.fn()}
+        bundleSummary={bundleSummary}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('run-logs-tab-bundle'));
+
+    expect(screen.getByTestId('run-logs-bundle-summary-loading')).toBeTruthy();
+
+    resolve(makeSummary());
+    await waitFor(() => {
+      expect(screen.queryByTestId('run-logs-bundle-summary-loading')).toBeNull();
+      expect(screen.getByTestId('run-logs-bundle-summary')).toBeTruthy();
+    });
+  });
+
+  it('Failure bundle tab surfaces the IPC error on summary failure', async () => {
+    const run = makeRun({ state: 'failed' });
+    const bundleSummary = vi.fn().mockRejectedValue(new Error('open r-test.tar.gz: nope'));
+
+    render(
+      <RunLogsModal
+        run={run}
+        projectDir="/tmp/proj"
+        onClose={vi.fn()}
+        readFileText={vi.fn().mockResolvedValue('')}
+        openShell={vi.fn()}
+        bundleSummary={bundleSummary}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('run-logs-tab-bundle'));
+
+    const err = await screen.findByTestId('run-logs-bundle-summary-error');
+    expect(err.textContent).toContain('nope');
   });
 
   it('Escape key calls onClose', () => {

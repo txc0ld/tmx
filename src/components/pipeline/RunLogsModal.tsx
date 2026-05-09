@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { PipelineRun } from '@/types';
-import { readFileText as defaultReadFileText } from '@/utils/ipc';
+import {
+  readFileText as defaultReadFileText,
+  pipelineFailureBundleSummary as defaultBundleSummary,
+  type FailureBundleSummary,
+} from '@/utils/ipc';
 
 /**
  * Run Logs panel — surfaces the on-disk artifacts for a pipeline run so
@@ -35,6 +39,12 @@ interface Props {
    * manager.  Defaults to `@tauri-apps/plugin-shell::open`.
    */
   openShell?: (path: string) => Promise<void>;
+  /**
+   * DI hook for the in-process bundle summary IPC. Tests pass a
+   * `vi.fn()` returning a `FailureBundleSummary` shape; production
+   * threads through `pipelineFailureBundleSummary` from `utils/ipc`.
+   */
+  bundleSummary?: (bundlePath: string) => Promise<FailureBundleSummary>;
 }
 
 type Tab = 'telemetry' | 'plan' | 'bundle';
@@ -254,12 +264,23 @@ function summarizeRow(row: TelemetryRow): { ts: string; event: string; detail: s
   return { ts: at, event, detail: JSON.stringify(rest) };
 }
 
+/**
+ * Format a byte count for the bundle-size line. Single-decimal KB / MB
+ * is plenty of resolution; we don't need full IEC pedantry.
+ */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function RunLogsModal({
   run,
   projectDir,
   onClose,
   readFileText = defaultReadFileText,
   openShell,
+  bundleSummary = defaultBundleSummary,
 }: Props) {
   const isTerminalFailed = run.state === 'failed' || run.state === 'escalated';
   const bundleEnabled = isTerminalFailed;
@@ -276,6 +297,12 @@ export function RunLogsModal({
   const [planError, setPlanError] = useState<string | null>(null);
   const [specText, setSpecText] = useState<string | null>(null);
   const [specError, setSpecError] = useState<string | null>(null);
+
+  // Failure bundle summary state — null until the IPC has resolved.
+  const [bundleSummaryData, setBundleSummaryData] = useState<FailureBundleSummary | null>(
+    null,
+  );
+  const [bundleSummaryError, setBundleSummaryError] = useState<string | null>(null);
 
   // Path resolution
   const telemetryPath = useMemo(
@@ -356,6 +383,31 @@ export function RunLogsModal({
       cancelled = true;
     };
   }, [tab, plan, planFullPath, specFullPath, readFileText]);
+
+  // Bundle summary loads on first activation of the bundle tab. The
+  // summary IPC is read-only and idempotent, so a re-fetch on tab
+  // re-entry is fine — keeps the size / counters fresh if the bundle
+  // was regenerated in the background.
+  useEffect(() => {
+    if (tab !== 'bundle') return;
+    if (!bundleEnabled) return;
+    let cancelled = false;
+    setBundleSummaryData(null);
+    setBundleSummaryError(null);
+    bundleSummary(bundlePath).then(
+      (s) => {
+        if (!cancelled) setBundleSummaryData(s);
+      },
+      (err: unknown) => {
+        if (!cancelled) {
+          setBundleSummaryError(err instanceof Error ? err.message : String(err));
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, bundleEnabled, bundlePath, bundleSummary]);
 
   const telemetryRows = useMemo(
     () => (telemetryText ? parseTelemetry(telemetryText) : []),
@@ -568,7 +620,7 @@ export function RunLogsModal({
           )}
 
           {tab === 'bundle' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ color: 'var(--tx-text-muted)' }}>
                 The failure bundle archives telemetry, preflight, git status/diff, and
                 versions for the run. Reveal in Finder/Explorer to inspect.
@@ -579,6 +631,160 @@ export function RunLogsModal({
                 </span>
                 <code data-testid="run-logs-bundle-path">{bundlePath}</code>
               </div>
+
+              {/* Inline summary derived from inspecting the tarball
+                  in-process. Loading / error / data states are
+                  mutually exclusive so the testids stay clean. */}
+              {bundleSummaryError !== null && (
+                <div
+                  data-testid="run-logs-bundle-summary-error"
+                  style={{ color: 'var(--tx-error)' }}
+                >
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                    Couldn't read the bundle
+                  </div>
+                  <div>{bundleSummaryError}</div>
+                </div>
+              )}
+              {bundleSummaryError === null && bundleSummaryData === null && (
+                <div
+                  data-testid="run-logs-bundle-summary-loading"
+                  style={{ color: 'var(--tx-text-muted)' }}
+                >
+                  Inspecting bundle…
+                </div>
+              )}
+              {bundleSummaryData !== null && (
+                <div
+                  data-testid="run-logs-bundle-summary"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    padding: 10,
+                    background: 'var(--tx-surface-1, rgba(0,0,0,0.2))',
+                    border: '1px solid var(--tx-border)',
+                    borderRadius: 4,
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    <SummaryStat
+                      label="Size"
+                      value={formatBytes(bundleSummaryData.bytes)}
+                      testid="run-logs-bundle-summary-size"
+                    />
+                    <SummaryStat
+                      label="Telemetry events"
+                      value={String(bundleSummaryData.telemetry_line_count)}
+                      testid="run-logs-bundle-summary-telemetry-count"
+                    />
+                    {bundleSummaryData.run_state && (
+                      <SummaryStat
+                        label="Run state"
+                        value={bundleSummaryData.run_state}
+                        testid="run-logs-bundle-summary-state"
+                      />
+                    )}
+                    {bundleSummaryData.failure_reason && (
+                      <SummaryStat
+                        label="Failure reason"
+                        value={bundleSummaryData.failure_reason}
+                        testid="run-logs-bundle-summary-reason"
+                      />
+                    )}
+                  </div>
+
+                  {Object.keys(bundleSummaryData.retry_counters).length > 0 && (
+                    <div
+                      data-testid="run-logs-bundle-summary-retries"
+                      style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
+                    >
+                      <span
+                        style={{
+                          textTransform: 'uppercase',
+                          fontSize: 10,
+                          letterSpacing: 1,
+                          color: 'var(--tx-text-muted)',
+                        }}
+                      >
+                        Retry counters
+                      </span>
+                      <code>
+                        {Object.entries(bundleSummaryData.retry_counters)
+                          .map(([k, v]) => `${k}=${v}`)
+                          .join(', ')}
+                      </code>
+                    </div>
+                  )}
+
+                  {bundleSummaryData.git_status && (
+                    <div
+                      data-testid="run-logs-bundle-summary-git-status"
+                      style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
+                    >
+                      <span
+                        style={{
+                          textTransform: 'uppercase',
+                          fontSize: 10,
+                          letterSpacing: 1,
+                          color: 'var(--tx-text-muted)',
+                        }}
+                      >
+                        Git status
+                      </span>
+                      <code>{bundleSummaryData.git_status}</code>
+                    </div>
+                  )}
+
+                  {bundleSummaryData.last_events.length > 0 && (
+                    <div
+                      data-testid="run-logs-bundle-summary-last-events"
+                      style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
+                    >
+                      <span
+                        style={{
+                          textTransform: 'uppercase',
+                          fontSize: 10,
+                          letterSpacing: 1,
+                          color: 'var(--tx-text-muted)',
+                        }}
+                      >
+                        Last {bundleSummaryData.last_events.length} events
+                      </span>
+                      <ul
+                        style={{
+                          margin: 0,
+                          padding: 0,
+                          listStyle: 'none',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                        }}
+                      >
+                        {bundleSummaryData.last_events.map((e, idx) => (
+                          <li
+                            key={idx}
+                            data-testid="run-logs-bundle-summary-last-event-row"
+                            style={{ fontFamily: 'var(--tx-font-mono)' }}
+                          >
+                            {e}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {!bundleSummaryData.artifacts_present && (
+                    <div
+                      data-testid="run-logs-bundle-summary-artifacts-missing"
+                      style={{ color: 'var(--tx-text-muted)', fontStyle: 'italic' }}
+                    >
+                      artifacts.json missing or unparseable — run state / retry counters not shown.
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div>
                 <button
                   type="button"
@@ -659,6 +865,38 @@ function PaneView({ label, path, content, error, testid }: PaneProps) {
           <div data-testid={`${testid}-content`}>{renderHeadingsOnly(content)}</div>
         )}
       </div>
+    </div>
+  );
+}
+
+interface SummaryStatProps {
+  label: string;
+  value: string;
+  testid: string;
+}
+
+/**
+ * Compact stat tile for the failure-bundle summary header — a small
+ * label above a monospace value. The label is uppercase + tracked
+ * matching the rest of the summary chrome.
+ */
+function SummaryStat({ label, value, testid }: SummaryStatProps) {
+  return (
+    <div
+      data-testid={testid}
+      style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}
+    >
+      <span
+        style={{
+          textTransform: 'uppercase',
+          fontSize: 10,
+          letterSpacing: 1,
+          color: 'var(--tx-text-muted)',
+        }}
+      >
+        {label}
+      </span>
+      <code style={{ fontFamily: 'var(--tx-font-mono)' }}>{value}</code>
     </div>
   );
 }
