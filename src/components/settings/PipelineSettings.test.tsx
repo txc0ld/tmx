@@ -90,4 +90,24 @@ describe('PipelineSettings', () => {
     const preview = screen.getByTestId('pipeline-prefs-branch-preview');
     expect(preview.textContent ?? '').toMatch(/Pattern must produce a valid branch name/);
   });
+
+  it('renders the retention-days input with the default value', () => {
+    render(<PipelineSettings />);
+    const input = screen.getByTestId('pipeline-prefs-retention-days') as HTMLInputElement;
+    expect(input.value).toBe('30');
+  });
+
+  it('typing in retention-days input updates the store', () => {
+    render(<PipelineSettings />);
+    const input = screen.getByTestId('pipeline-prefs-retention-days') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '7' } });
+    expect(useSettingsStore.getState().pipelinePrefs.retentionDays).toBe(7);
+  });
+
+  it('treats 0 in retention-days as "disabled"', () => {
+    render(<PipelineSettings />);
+    const input = screen.getByTestId('pipeline-prefs-retention-days') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '0' } });
+    expect(useSettingsStore.getState().pipelinePrefs.retentionDays).toBe(0);
+  });
 });

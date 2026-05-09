@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import {
   expandBranchPattern,
+  MAX_RETENTION_DAYS,
   PIPELINE_TEMPLATE_IDS,
   useSettingsStore,
   type PipelineDefaultTemplateId,
@@ -171,6 +172,36 @@ export function PipelineSettings() {
             off if you want to review every plan.
           </div>
         </span>
+      </label>
+
+      <label style={rowStyle}>
+        <span style={labelStyle}>
+          Auto-delete completed runs older than (days)
+        </span>
+        <span style={subtitleStyle}>
+          Sweeps run records, telemetry JSONL, and orphaned worktrees for
+          runs in <code>done</code>, <code>failed</code>, or <code>escalated</code> states.
+          Active and <code>awaiting_*</code> runs are never touched.
+          Set to <code>0</code> to disable.
+        </span>
+        <input
+          type="number"
+          min={0}
+          max={MAX_RETENTION_DAYS}
+          step={1}
+          data-testid="pipeline-prefs-retention-days"
+          value={prefs.retentionDays}
+          onChange={(e) => {
+            // Empty / NaN inputs bottom out at 0 (disabled) rather than
+            // pushing the store into an invalid state. The clamp in the
+            // store re-validates regardless.
+            const parsed = parseInt(e.target.value, 10);
+            useSettingsStore.getState().setPipelinePrefs({
+              retentionDays: Number.isFinite(parsed) ? parsed : 0,
+            });
+          }}
+          style={inputStyle}
+        />
       </label>
     </div>
   );

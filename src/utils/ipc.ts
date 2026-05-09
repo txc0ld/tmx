@@ -501,6 +501,35 @@ export async function pipelineTelemetryLog(opts: {
   await invoke<void>('pipeline_telemetry_log', opts);
 }
 
+/** Result of `pipeline_cleanup_old_runs`. Field names mirror the Rust struct. */
+export interface PipelineCleanupResult {
+  removed_records: number;
+  removed_telemetry: number;
+  removed_worktrees: number;
+  errors: string[];
+}
+
+/**
+ * Age-based GC for terminal pipeline runs. Walks
+ * `<projectDir>/.terminalx/pipeline-runs/`, deletes the run record + paired
+ * `pipeline-telemetry/<runId>.jsonl{,.1}` + `.tx-worktrees/<runId>/` for
+ * runs that are both terminal (`done`/`failed`/`escalated`) AND older than
+ * `retentionDays`. Also sweeps orphaned worktrees whose run record is gone.
+ *
+ * `retentionDays = 0` is the "disable" sentinel — the Rust side returns an
+ * empty result without scanning anything, so callers can pass the user's
+ * settings value directly.
+ */
+export async function pipelineCleanupOldRuns(opts: {
+  projectDir: string;
+  retentionDays: number;
+}): Promise<PipelineCleanupResult> {
+  return invoke<PipelineCleanupResult>('pipeline_cleanup_old_runs', {
+    projectDir: opts.projectDir,
+    retentionDays: opts.retentionDays,
+  });
+}
+
 /**
  * Mask detected secrets in arbitrary text. Returns the same string with
  * known-prefix tokens (`sk-…`, `ghp_…`, `xoxb-…`, `AKIA…`, `AIza…`,

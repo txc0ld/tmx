@@ -99,6 +99,7 @@ pub fn run() {
             // Pipeline (agentic-pipeline Phase 1)
             commands::pipeline::pipeline_capabilities_install,
             commands::pipeline::pipeline_capabilities_uninstall,
+            commands::pipeline::pipeline_cleanup_old_runs,
             commands::pipeline::pipeline_guardrails_install,
             commands::pipeline::pipeline_guardrails_uninstall,
             commands::pipeline::pipeline_install_skills,

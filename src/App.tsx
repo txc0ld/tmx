@@ -5,7 +5,7 @@ import { useTimelineStore } from '@/stores/timelineStore';
 import { colors } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
 import { isPipelineLaunchShortcut } from '@/utils/keyboardShortcuts';
-import { agentRunOneshot, httpFetch, loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite, readFileText, secretsMask } from '@/utils/ipc';
+import { agentRunOneshot, httpFetch, loadWorkspace, pipelineCleanupOldRuns, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite, readFileText, secretsMask } from '@/utils/ipc';
 import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter, usePipelineStore } from '@/stores/pipelineStore';
 import { isTerminalState } from '@/pipeline/state-machine';
 import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
@@ -130,6 +130,14 @@ export function _resetHydratedProjectIdsForTest(): void {
  * Hydrate one project's persisted runs into pipelineStore if we haven't
  * already done so this session. Pulled out so the boot effect and the
  * project-switch subscription share the same dedup + warning behavior.
+ *
+ * Piggybacks the cleanup pass on the same once-per-session/project gate —
+ * `pipeline_cleanup_old_runs` deletes terminal runs older than the user's
+ * configured retention. The frontend hydration runs first (so the in-memory
+ * `pipelineStore.runs` is populated), then cleanup deletes the on-disk
+ * artifacts. Stale store entries for runs whose JSON we just deleted are
+ * fine — they're terminal, not active, and will be evicted on the next app
+ * boot when hydration walks the now-cleaner directory.
  */
 function maybeHydrateProject(projectId: string): void {
   if (!projectId) return;
@@ -137,9 +145,34 @@ function maybeHydrateProject(projectId: string): void {
   const proj = useProjectStore.getState().projects.find(p => p.id === projectId);
   if (!proj?.cwd) return;
   hydratedProjectIds.add(projectId);
-  hydrateRunsFromDisk(proj.cwd).catch(err => {
-    console.warn('[pipeline] run hydration failed:', err);
-  });
+  const projectCwd = proj.cwd;
+  hydrateRunsFromDisk(projectCwd)
+    .catch(err => {
+      console.warn('[pipeline] run hydration failed:', err);
+    })
+    .finally(() => {
+      const retentionDays = useSettingsStore.getState().pipelinePrefs.retentionDays;
+      if (retentionDays <= 0) return; // 0 = disabled
+      pipelineCleanupOldRuns({ projectDir: projectCwd, retentionDays })
+        .then(res => {
+          if (
+            res.removed_records > 0 ||
+            res.removed_telemetry > 0 ||
+            res.removed_worktrees > 0
+          ) {
+            console.info(
+              '[pipeline] cleanup:',
+              `${res.removed_records} records,`,
+              `${res.removed_telemetry} telemetry files,`,
+              `${res.removed_worktrees} worktrees removed`,
+              res.errors.length ? `(${res.errors.length} errors)` : '',
+            );
+          }
+        })
+        .catch(err => {
+          console.warn('[pipeline] cleanup failed:', err);
+        });
+    });
 }
 
 function spawnTileAtCenter(type: TileType, overrides: Record<string, unknown> = {}): void {

@@ -43,6 +43,34 @@ describe('settingsStore — pipeline prefs', () => {
     expect(prefs.defaultTemplate).toBe('tx.pipeline.anthropic-trio');
     expect(prefs.branchPattern).toBe('pipeline/run-{date}-{shortId}');
     expect(prefs.autoApproveTrivial).toBe(false);
+    expect(prefs.retentionDays).toBe(30);
+  });
+
+  it('setPipelinePrefs persists retentionDays and survives reload', () => {
+    useSettingsStore.getState().setPipelinePrefs({ retentionDays: 7 });
+    expect(useSettingsStore.getState().pipelinePrefs.retentionDays).toBe(7);
+    const persisted = JSON.parse(window.localStorage.getItem('tx-pipeline-prefs') ?? '{}');
+    expect(persisted.retentionDays).toBe(7);
+  });
+
+  it('clamps negative retentionDays to the default', () => {
+    useSettingsStore.getState().setPipelinePrefs({ retentionDays: -3 });
+    expect(useSettingsStore.getState().pipelinePrefs.retentionDays).toBe(30);
+  });
+
+  it('clamps very-large retentionDays to MAX_RETENTION_DAYS', () => {
+    useSettingsStore.getState().setPipelinePrefs({ retentionDays: 1_000_000 });
+    expect(useSettingsStore.getState().pipelinePrefs.retentionDays).toBe(3650);
+  });
+
+  it('treats 0 as a valid "disabled" sentinel', () => {
+    useSettingsStore.getState().setPipelinePrefs({ retentionDays: 0 });
+    expect(useSettingsStore.getState().pipelinePrefs.retentionDays).toBe(0);
+  });
+
+  it('floors fractional retentionDays to integer days', () => {
+    useSettingsStore.getState().setPipelinePrefs({ retentionDays: 14.7 });
+    expect(useSettingsStore.getState().pipelinePrefs.retentionDays).toBe(14);
   });
 
   it('setPipelinePrefs patches the prefs and persists to localStorage', () => {
