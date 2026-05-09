@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react';
 import type { PipelineRun, PipelineState } from '@/types';
 import { RunHistoryPanel } from './RunHistoryPanel';
 
@@ -192,6 +192,181 @@ describe('RunHistoryPanel', () => {
     // Row click would normally open logs; verify the rerun button stops
     // propagation so a single click doesn't ALSO open logs.
     expect(onOpenLogs).not.toHaveBeenCalled();
+  });
+
+  it('search input filters runs by case-insensitive branch substring', () => {
+    const runs = asMap([
+      makeRun({ id: 'a', branch: 'feat/login-page', startedAt: 100, state: 'done' }),
+      makeRun({ id: 'b', branch: 'fix/auth-bug', startedAt: 200, state: 'done' }),
+      makeRun({ id: 'c', branch: 'chore/deps', startedAt: 300, state: 'done' }),
+    ]);
+    render(
+      <RunHistoryPanel
+        onClose={vi.fn()}
+        onOpenLogs={vi.fn()}
+        runs={runs}
+        activeProjectId="proj-1"
+      />,
+    );
+    const input = screen.getByTestId('run-history-search') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'AUTH' } });
+    const rows = screen.getAllByTestId('run-history-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].getAttribute('data-runid')).toBe('b');
+  });
+
+  it('search input filters runs by goal-file substring (lazy-loaded via readFileText)', async () => {
+    const runs = asMap([
+      makeRun({ id: 'a', branch: 'feat/x', worktreePath: '/wt/a', state: 'done' }),
+      makeRun({ id: 'b', branch: 'feat/y', worktreePath: '/wt/b', state: 'done' }),
+    ]);
+    const goals: Record<string, string> = {
+      '/wt/a/PIPELINE_GOAL.md': 'Add dark mode toggle',
+      '/wt/b/PIPELINE_GOAL.md': 'Fix login flow regression',
+    };
+    const readFileText = vi.fn(async (path: string) => goals[path] ?? '');
+    render(
+      <RunHistoryPanel
+        onClose={vi.fn()}
+        onOpenLogs={vi.fn()}
+        runs={runs}
+        activeProjectId="proj-1"
+        readFileText={readFileText}
+      />,
+    );
+    // Before any typing, both visible and goal-fetch must NOT have fired
+    // (lazy: branch-only filtering until the user expresses search intent).
+    expect(screen.getAllByTestId('run-history-row')).toHaveLength(2);
+    expect(readFileText).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByTestId('run-history-search'), {
+      target: { value: 'dark mode' },
+    });
+    await waitFor(() => {
+      const rows = screen.getAllByTestId('run-history-row');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].getAttribute('data-runid')).toBe('a');
+    });
+    expect(readFileText).toHaveBeenCalledWith('/wt/a/PIPELINE_GOAL.md');
+    expect(readFileText).toHaveBeenCalledWith('/wt/b/PIPELINE_GOAL.md');
+  });
+
+  it('goal-fetch errors do not crash the panel; row stays visible via branch match', async () => {
+    const runs = asMap([
+      makeRun({ id: 'a', branch: 'feat/searchme', worktreePath: '/gone/a', state: 'done' }),
+    ]);
+    const readFileText = vi.fn(async () => {
+      throw new Error('worktree deleted');
+    });
+    render(
+      <RunHistoryPanel
+        onClose={vi.fn()}
+        onOpenLogs={vi.fn()}
+        runs={runs}
+        activeProjectId="proj-1"
+        readFileText={readFileText}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('run-history-search'), {
+      target: { value: 'searchme' },
+    });
+    // Branch matches; goal read errors silently. Wait for the IPC promise to
+    // settle so any unhandled rejection would surface.
+    await waitFor(() => expect(readFileText).toHaveBeenCalled());
+    const rows = screen.getAllByTestId('run-history-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].getAttribute('data-runid')).toBe('a');
+  });
+
+  it('date range filter narrows runs by startedAt (inclusive on both sides)', () => {
+    const day = (s: string) => new Date(`${s}T12:00:00Z`).getTime();
+    const runs = asMap([
+      makeRun({ id: 'a', startedAt: day('2026-05-05'), state: 'done' }),
+      makeRun({ id: 'b', startedAt: day('2026-05-07'), state: 'done' }),
+      makeRun({ id: 'c', startedAt: day('2026-05-09'), state: 'done' }),
+    ]);
+    render(
+      <RunHistoryPanel
+        onClose={vi.fn()}
+        onOpenLogs={vi.fn()}
+        runs={runs}
+        activeProjectId="proj-1"
+      />,
+    );
+    fireEvent.change(screen.getByTestId('run-history-date-from'), {
+      target: { value: '2026-05-06' },
+    });
+    fireEvent.change(screen.getByTestId('run-history-date-to'), {
+      target: { value: '2026-05-08' },
+    });
+    const rows = screen.getAllByTestId('run-history-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].getAttribute('data-runid')).toBe('b');
+  });
+
+  it('combined chip + search + date filters AND together', () => {
+    const day = (s: string) => new Date(`${s}T12:00:00Z`).getTime();
+    const runs = asMap([
+      // Match: failed, branch contains 'auth', within range.
+      makeRun({ id: 'hit', branch: 'fix/auth', startedAt: day('2026-05-07'), state: 'failed' }),
+      // Right state, right branch, wrong date.
+      makeRun({ id: 'oldFail', branch: 'fix/auth', startedAt: day('2026-04-01'), state: 'failed' }),
+      // Right date, wrong state.
+      makeRun({ id: 'doneAuth', branch: 'fix/auth', startedAt: day('2026-05-07'), state: 'done' }),
+      // Right state + date, wrong branch.
+      makeRun({ id: 'failOther', branch: 'feat/other', startedAt: day('2026-05-07'), state: 'failed' }),
+    ]);
+    render(
+      <RunHistoryPanel
+        onClose={vi.fn()}
+        onOpenLogs={vi.fn()}
+        runs={runs}
+        activeProjectId="proj-1"
+      />,
+    );
+    fireEvent.click(screen.getByTestId('run-history-filter-failed'));
+    fireEvent.change(screen.getByTestId('run-history-search'), {
+      target: { value: 'auth' },
+    });
+    fireEvent.change(screen.getByTestId('run-history-date-from'), {
+      target: { value: '2026-05-06' },
+    });
+    fireEvent.change(screen.getByTestId('run-history-date-to'), {
+      target: { value: '2026-05-08' },
+    });
+    const rows = screen.getAllByTestId('run-history-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].getAttribute('data-runid')).toBe('hit');
+  });
+
+  it('Clear filters button resets search/date/chips and shows all runs again', () => {
+    const day = (s: string) => new Date(`${s}T12:00:00Z`).getTime();
+    const runs = asMap([
+      makeRun({ id: 'a', branch: 'feat/a', startedAt: day('2026-05-05'), state: 'done' }),
+      makeRun({ id: 'b', branch: 'feat/b', startedAt: day('2026-05-07'), state: 'done' }),
+    ]);
+    render(
+      <RunHistoryPanel
+        onClose={vi.fn()}
+        onOpenLogs={vi.fn()}
+        runs={runs}
+        activeProjectId="proj-1"
+      />,
+    );
+    // Force an empty result via a no-match search.
+    fireEvent.change(screen.getByTestId('run-history-search'), {
+      target: { value: 'nonexistent-xyz' },
+    });
+    fireEvent.change(screen.getByTestId('run-history-date-from'), {
+      target: { value: '2030-01-01' },
+    });
+    expect(screen.queryAllByTestId('run-history-row')).toHaveLength(0);
+    expect(screen.getByTestId('run-history-empty-filtered')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('run-history-clear-filters'));
+    expect(screen.getAllByTestId('run-history-row')).toHaveLength(2);
+    expect((screen.getByTestId('run-history-search') as HTMLInputElement).value).toBe('');
+    expect((screen.getByTestId('run-history-date-from') as HTMLInputElement).value).toBe('');
+    expect((screen.getByTestId('run-history-date-to') as HTMLInputElement).value).toBe('');
   });
 
   it('clicking the All chip clears any existing filter', () => {

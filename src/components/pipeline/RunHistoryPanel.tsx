@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PipelineRun, PipelineState } from '@/types';
 import { usePipelineStore } from '@/stores/pipelineStore';
 import { useProjectStore } from '@/stores/projectStore';
+import { readFileText as defaultReadFileText } from '@/utils/ipc';
 
 /**
  * Run History panel — lists all pipeline runs for the active project.
@@ -36,6 +37,13 @@ interface Props {
   onRerun?: (run: PipelineRun) => void;
   runs?: Record<string, PipelineRun>;
   activeProjectId?: string | null;
+  /**
+   * Override for the goal-file reader. Tests inject a stub; production
+   * uses the `readFileText` IPC. Errors (worktree deleted, missing file)
+   * resolve to an empty string and the run silently falls back to
+   * branch-only matching.
+   */
+  readFileText?: (path: string) => Promise<string>;
 }
 
 const FAILED: ReadonlySet<PipelineState> = new Set(['failed', 'escalated']);
@@ -110,16 +118,35 @@ function pillStyle(group: Group): React.CSSProperties {
   };
 }
 
-export function RunHistoryPanel({ onClose, onOpenLogs, onRerun, runs, activeProjectId }: Props) {
+export function RunHistoryPanel({
+  onClose,
+  onOpenLogs,
+  onRerun,
+  runs,
+  activeProjectId,
+  readFileText,
+}: Props) {
   // Always subscribe so React state updates flow even when DI is omitted; the
   // value is only consumed if the corresponding prop is undefined.
   const liveRuns = usePipelineStore((s) => s.runs);
   const liveActiveProjectId = useProjectStore((s) => s.active);
   const effRuns = runs ?? liveRuns;
   const effPid = activeProjectId === undefined ? liveActiveProjectId : activeProjectId;
+  const effRead = readFileText ?? defaultReadFileText;
 
   // Empty set = "All"; multi-select toggles add/remove from the set.
   const [filters, setFilters] = useState<Set<Group>>(new Set());
+  const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  // Per-run goal cache. `undefined` = not yet attempted, `string` = result
+  // (empty string for read failures so we don't keep retrying). Stored in a
+  // ref + version-counter pair so we trigger one re-render per goal landing
+  // without thrashing on every concurrent resolve.
+  const goalCache = useRef<Map<string, string>>(new Map());
+  const inFlight = useRef<Set<string>>(new Set());
+  const [goalTick, setGoalTick] = useState(0);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -132,12 +159,80 @@ export function RunHistoryPanel({ onClose, onOpenLogs, onRerun, runs, activeProj
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  const trimmedSearch = search.trim();
+  const lowerSearch = trimmedSearch.toLowerCase();
+
+  // Lazy goal-file fetch: only run once a search term is active. Branch-only
+  // matching upfront keeps the panel snappy with 50+ runs; we pay the IPC
+  // cost only when the user has expressed search intent.
+  useEffect(() => {
+    if (!effPid) return;
+    if (trimmedSearch === '') return;
+    const mine = Object.values(effRuns).filter((r) => r.projectId === effPid);
+    for (const r of mine) {
+      if (goalCache.current.has(r.id)) continue;
+      if (inFlight.current.has(r.id)) continue;
+      inFlight.current.add(r.id);
+      const path = `${r.worktreePath}/PIPELINE_GOAL.md`;
+      effRead(path)
+        .then((txt) => {
+          goalCache.current.set(r.id, txt ?? '');
+        })
+        .catch(() => {
+          // Worktree deleted, file missing, IPC error — cache empty so we
+          // don't retry; branch-only match still works.
+          goalCache.current.set(r.id, '');
+        })
+        .finally(() => {
+          inFlight.current.delete(r.id);
+          setGoalTick((t) => t + 1);
+        });
+    }
+  }, [effRuns, effPid, trimmedSearch, effRead]);
+
+  const fromMs = useMemo(() => {
+    if (!dateFrom) return null;
+    const t = new Date(dateFrom).getTime();
+    return Number.isFinite(t) ? t : null;
+  }, [dateFrom]);
+  const toMs = useMemo(() => {
+    if (!dateTo) return null;
+    // Inclusive end-of-day so a "to=2026-05-09" pick keeps runs from that day.
+    const t = new Date(dateTo).getTime();
+    return Number.isFinite(t) ? t + 86_400_000 - 1 : null;
+  }, [dateTo]);
+
   const visible = useMemo(() => {
     if (!effPid) return [];
     const mine = Object.values(effRuns).filter((r) => r.projectId === effPid);
-    const filtered = filters.size === 0 ? mine : mine.filter((r) => filters.has(classify(r.state)));
-    return filtered.sort((a, b) => b.startedAt - a.startedAt);
-  }, [effRuns, effPid, filters]);
+    const byChip = filters.size === 0 ? mine : mine.filter((r) => filters.has(classify(r.state)));
+    const byDate = byChip.filter((r) => {
+      if (fromMs !== null && r.startedAt < fromMs) return false;
+      if (toMs !== null && r.startedAt > toMs) return false;
+      return true;
+    });
+    const bySearch =
+      lowerSearch === ''
+        ? byDate
+        : byDate.filter((r) => {
+            if (r.branch.toLowerCase().includes(lowerSearch)) return true;
+            const goal = goalCache.current.get(r.id);
+            if (goal && goal.toLowerCase().includes(lowerSearch)) return true;
+            return false;
+          });
+    return bySearch.sort((a, b) => b.startedAt - a.startedAt);
+    // `goalTick` participates so re-renders triggered by async goal-cache
+    // landings re-evaluate the substring match (the cache itself is a ref).
+  }, [effRuns, effPid, filters, fromMs, toMs, lowerSearch, goalTick]);
+
+  const hasAnyFilter =
+    filters.size > 0 || trimmedSearch !== '' || dateFrom !== '' || dateTo !== '';
+  const clearAll = () => {
+    setFilters(new Set());
+    setSearch('');
+    setDateFrom('');
+    setDateTo('');
+  };
 
   const toggle = (g: Group) =>
     setFilters((prev) => {
@@ -185,10 +280,129 @@ export function RunHistoryPanel({ onClose, onOpenLogs, onRerun, runs, activeProj
           ))}
         </div>
 
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            padding: '10px 18px',
+            borderBottom: '1px solid var(--tx-border)',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+          }}
+        >
+          <input
+            type="text"
+            data-testid="run-history-search"
+            placeholder="Search by branch or goal..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              flex: '1 1 220px',
+              minWidth: 180,
+              padding: '6px 10px',
+              borderRadius: 3,
+              border: '1px solid var(--tx-border)',
+              background: 'var(--tx-surface-1, rgba(0,0,0,0.2))',
+              color: 'var(--tx-text)',
+              fontFamily: 'inherit',
+              fontSize: 12,
+              outline: 'none',
+            }}
+          />
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              color: 'var(--tx-text-muted)',
+              fontSize: 11,
+              textTransform: 'uppercase',
+              letterSpacing: 0.5,
+            }}
+          >
+            From
+            <input
+              type="date"
+              data-testid="run-history-date-from"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              style={{
+                padding: '5px 8px',
+                borderRadius: 3,
+                border: '1px solid var(--tx-border)',
+                background: 'var(--tx-surface-1, rgba(0,0,0,0.2))',
+                color: 'var(--tx-text)',
+                fontFamily: 'inherit',
+                fontSize: 12,
+              }}
+            />
+          </label>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              color: 'var(--tx-text-muted)',
+              fontSize: 11,
+              textTransform: 'uppercase',
+              letterSpacing: 0.5,
+            }}
+          >
+            To
+            <input
+              type="date"
+              data-testid="run-history-date-to"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              style={{
+                padding: '5px 8px',
+                borderRadius: 3,
+                border: '1px solid var(--tx-border)',
+                background: 'var(--tx-surface-1, rgba(0,0,0,0.2))',
+                color: 'var(--tx-text)',
+                fontFamily: 'inherit',
+                fontSize: 12,
+              }}
+            />
+          </label>
+        </div>
+
         <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', flex: 1 }}>
-          {visible.length === 0 && (
+          {visible.length === 0 && !hasAnyFilter && (
             <div data-testid="run-history-empty" style={{ color: 'var(--tx-text-muted)', padding: '20px 8px' }}>
               No runs yet for this project.
+            </div>
+          )}
+          {visible.length === 0 && hasAnyFilter && (
+            <div
+              data-testid="run-history-empty-filtered"
+              style={{
+                color: 'var(--tx-text-muted)',
+                padding: '20px 8px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                alignItems: 'flex-start',
+              }}
+            >
+              <span>No runs match your filters. Clear search?</span>
+              <button
+                type="button"
+                data-testid="run-history-clear-filters"
+                onClick={clearAll}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 3,
+                  border: '1px solid var(--tx-border)',
+                  background: 'var(--tx-surface-2)',
+                  color: 'var(--tx-text)',
+                  fontFamily: 'inherit',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                }}
+              >
+                Clear filters
+              </button>
             </div>
           )}
           {visible.map((run) => {
