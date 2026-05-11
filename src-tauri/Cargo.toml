@@ -15,7 +15,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-sha2 = "0.10"
+sha2 = "0.11"
 
 [dependencies]
 # Tauri core
@@ -52,7 +52,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 shellexpand = "3"
 parking_lot = "0.12"
-sha2 = "0.10"
+sha2 = "0.11"
 regex = "1"
 
 # Failure-bundle generator (Phase 2c-iii.7): tar.gz of telemetry + artifacts
