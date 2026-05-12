@@ -65,7 +65,9 @@ recoverable via re-plan), `failed` (terminal).
 
 - **Plan approval** — the Plan Preview modal opens automatically.
 - **Clarification** — a modal asks a single question; pick a suggested option
-  or type a free-text answer. Counts against a budget of 3 per run.
+  or type a free-text answer. Counts against a budget of 3 per run. Synthetic
+  questions from the builder-scratchpad watcher (see Troubleshooting) draw
+  from the same budget, so an undisciplined Builder can exhaust it on its own.
 - **Merge approval** — the Merger Confirm modal previews the exact command.
 
 ---
@@ -141,6 +143,17 @@ Two project-root files steer the run:
   scroll its output. If you don't see a `<<<TX_STAGE_DONE>>>` or
   `<<<TX_STAGE_FAILED>>>` sentinel near the end, the agent likely never
   emitted one. Use the controller's **Abort** to stop the run, then re-launch.
+- **Run aborts itself with `stage_unresponsive`** — the stuck detector
+  watches for PTY silence. At 5 minutes of no output it pings the role with
+  "Are you stuck?"; at 8 minutes total silence it aborts the run. Open the
+  agent tile to see whether the role hung mid-thought or never spawned, then
+  re-run.
+- **Builder makes commits but the controller looks idle** — the builder
+  scratchpad watcher requires Builder to write `.tx-builder-notes.md` while
+  it works. 10 minutes of activity without a scratchpad write injects a
+  synthetic `<<<TX_STAGE_QUESTION>>>` ("you're working but not documenting —
+  pause and update notes") which spends one clarification budget slot. If
+  this fires repeatedly the run will hit the budget cap and escalate.
 - **An agent prompts "Do you want to proceed?"** — the skip-permissions flag
   isn't being applied. This is a bug; capture `ps aux | grep claude` and file
   an issue.

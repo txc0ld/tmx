@@ -118,6 +118,7 @@ const bodyStyle: React.CSSProperties = {
   gap: 10,
   overflowY: 'auto',
   flex: 1,
+  minHeight: 200,
 };
 
 const footerStyle: React.CSSProperties = {
@@ -794,7 +795,7 @@ export function RunLogsModal({
                     ...buttonBase,
                     background: 'var(--tx-accent)',
                     borderColor: 'var(--tx-accent)',
-                    color: 'var(--tx-accent-fg)',
+                    color: '#000',
                     fontWeight: 600,
                   }}
                 >

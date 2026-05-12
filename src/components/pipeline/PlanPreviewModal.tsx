@@ -365,7 +365,7 @@ export function PlanPreviewModal({
               htmlFor="plan-preview-reject-textarea"
               style={{ color: 'var(--tx-text-muted)', fontSize: 12 }}
             >
-              Why is this plan unsuitable? (Required — sent to planner for the next pass)
+              Why Is This Plan Unsuitable? (Required — sent to planner for the next pass)
             </label>
             <textarea
               id="plan-preview-reject-textarea"
@@ -452,7 +452,7 @@ export function PlanPreviewModal({
               ...buttonBase,
               background: 'var(--tx-accent)',
               borderColor: 'var(--tx-accent)',
-              color: 'var(--tx-accent-fg)',
+              color: '#000',
               fontWeight: 600,
               opacity: plan ? 1 : 0.5,
               cursor: plan ? 'pointer' : 'not-allowed',

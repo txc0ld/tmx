@@ -105,7 +105,7 @@ export function ConfirmableButton({
 
   const confirmBg =
     variant === 'danger'
-      ? 'var(--tx-error, #f55)'
+      ? 'var(--tx-error, #d24f4f)'
       : 'var(--tx-warning, #d2a25f)';
 
   const mergedStyle: CSSProperties = confirming

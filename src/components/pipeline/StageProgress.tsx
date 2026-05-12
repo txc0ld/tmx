@@ -1,4 +1,28 @@
+import { useEffect, useState } from 'react';
 import type { PipelineState } from '@/types';
+
+/**
+ * Tiny local hook — `true` when the user has expressed a preference AGAINST
+ * motion via the OS-level reduced-motion setting. Defaults to `false` (we
+ * animate) so SSR / test environments without `matchMedia` don't crash.
+ */
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReduced(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setReduced(e.matches);
+    // Older Safari uses addListener; modern browsers use addEventListener.
+    if (mq.addEventListener) {
+      mq.addEventListener('change', onChange);
+      return () => mq.removeEventListener('change', onChange);
+    }
+    mq.addListener(onChange);
+    return () => mq.removeListener(onChange);
+  }, []);
+  return reduced;
+}
 
 /**
  * Pure presentational stage progress indicator for PipelineControllerTile.
@@ -68,7 +92,7 @@ function isTerminal(state: PipelineState): boolean {
   return state === 'done' || state === 'failed' || state === 'escalated';
 }
 
-function pillStyle(status: StageStatus): React.CSSProperties {
+function pillStyle(status: StageStatus, reducedMotion = false): React.CSSProperties {
   const base: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -89,7 +113,9 @@ function pillStyle(status: StageStatus): React.CSSProperties {
         borderColor: 'var(--tx-accent)',
         color: 'var(--tx-accent-fg)',
         fontWeight: 600,
-        animation: 'tx-stage-pulse 1.6s ease-in-out infinite',
+        ...(reducedMotion
+          ? {}
+          : { animation: 'tx-stage-pulse 1.6s ease-in-out infinite' }),
       };
     case 'past':
       return {
@@ -160,6 +186,7 @@ export function StageProgress({
 
   const active = activeStageFor(state, priorActiveState);
   const terminal = isTerminal(state);
+  const reducedMotion = useReducedMotion();
 
   // Past/future is computed by index against the active stage. On terminal
   // failure, all pills mute; the failed badge does the talking.
@@ -207,7 +234,7 @@ export function StageProgress({
             <span
               data-testid={`stage-pill-${s.key}`}
               data-status={status}
-              style={pillStyle(status)}
+              style={pillStyle(status, reducedMotion)}
             >
               {s.label}
               {showDualBadge && (

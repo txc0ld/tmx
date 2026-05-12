@@ -104,7 +104,7 @@ export function PipelineControllerTile({ tile }: Props) {
             lineHeight: 1.4,
           }}
         >
-          <strong style={{ color: '#facc15' }}>{'⚠'} Agents disconnected</strong>
+          <strong style={{ color: '#facc15' }}><span role="img" aria-label="warning">⚠</span> Agents disconnected</strong>
           {' — this run was restored after a reload. Approve/abort actions still work, but Builder/Reviewer won’t auto-resume. Launch a fresh run to continue.'}
         </div>
       )}
@@ -125,7 +125,7 @@ export function PipelineControllerTile({ tile }: Props) {
       {run.failureReason && (
         <div style={{ color: 'var(--tx-error)' }}>failure: {run.failureReason}</div>
       )}
-      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+      <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', rowGap: 6 }}>
         {!isTerminal && run.state === 'idle' && (
           <button
             type="button"

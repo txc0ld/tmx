@@ -165,12 +165,12 @@ describe('RunHistoryPanel', () => {
       />,
     );
     const rows = screen.getAllByTestId('run-history-row');
-    // Pills label by raw state — assert the label, color is style-only.
+    // Pills pretty-print the raw state (snake_case → Sentence case).
     expect(within(rows[0]).getByTestId('run-history-row-pill').textContent).toBe(
-      'awaiting_merge_approval',
+      'Awaiting merge approval',
     );
-    expect(within(rows[1]).getByTestId('run-history-row-pill').textContent).toBe('done');
-    expect(within(rows[2]).getByTestId('run-history-row-pill').textContent).toBe('failed');
+    expect(within(rows[1]).getByTestId('run-history-row-pill').textContent).toBe('Done');
+    expect(within(rows[2]).getByTestId('run-history-row-pill').textContent).toBe('Failed');
   });
 
   it('each row has a Re-run button that calls onRerun with the run (and does not call onOpenLogs)', () => {

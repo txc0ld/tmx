@@ -412,6 +412,7 @@ export function RunHistoryPanel({
                 color: 'var(--tx-text)',
                 fontFamily: 'inherit',
                 fontSize: 12,
+                outline: 'revert',
               }}
             />
           </label>
@@ -440,6 +441,7 @@ export function RunHistoryPanel({
                 color: 'var(--tx-text)',
                 fontFamily: 'inherit',
                 fontSize: 12,
+                outline: 'revert',
               }}
             />
           </label>
@@ -503,7 +505,7 @@ export function RunHistoryPanel({
                 onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--tx-accent)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'transparent'; }}
               >
-                <span data-testid="run-history-row-pill" style={pillStyle(group)}>{run.state}</span>
+                <span data-testid="run-history-row-pill" style={pillStyle(group)}>{run.state.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())}</span>
                 <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {run.branch}
                 </span>

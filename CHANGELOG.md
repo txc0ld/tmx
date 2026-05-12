@@ -23,6 +23,8 @@ All notable changes to TerminalX are documented here. Format follows [Keep a Cha
 - **INVARIANTS.md grounding** — drop an `INVARIANTS.md` at the project root and all three role prompts pick it up at spawn; the Reviewer treats invariant violations as blockers.
 - **Builder scratchpad + compaction checkpoints** — Builder maintains `.tx-builder-notes.md`; controller injects a compaction prompt past 200KB of output to keep context fresh.
 - **Sub-agent delegation** — Builder may delegate self-contained tasks to one-shot sub-agents via `agent_run_oneshot` (one level deep, file-globs only, telemetry-tracked).
+- **Bundled pipeline skills** — five SKILL.md files (`tx-pipeline-stage-handoff`, `tx-pipeline-reviewer`, `tx-pipeline-red-team`, `tx-pipeline-builder-scratchpad`, `tx-pipeline-subagent`) ship inside the app via Tauri resources and copy into `~/.claude/skills/` on first boot. Provenance-verified via build-time SHA-256.
+- **Stuck detector** — pipeline runs that go silent for 5 min get probed with "Are you stuck?"; 8 min of total silence aborts the run with `failureClass: 'stage_unresponsive'`.
 - **Sensitive-paths preflight gate** — before a run starts, project tree is scanned for `.env*`, `*.pem`, `*.key`, SSH keys, etc.; user must acknowledge before the run is created.
 - **Trust telemetry** — five new event variants (`complexity_routed`, `confidence_uncertain_escalated`, `dual_reviewer_disagreement`, `tiebreaker_invoked`, `red_team_finding`) for run-quality dashboards.
 - **Welcome banner + CLI health check** at boot — surfaces missing `claude` / `codex` / `gemini` CLIs before the first run.

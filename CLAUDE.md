@@ -33,7 +33,7 @@ cd src-tauri && cargo test     # Rust tests
 
 Entry: `main.tsx` → `AppErrorBoundary` → `App.tsx`. All inline styles (except `xterm.css`). Colors via CSS custom properties set by `themeStore`. Monaco Editor/DiffEditor are lazy-loaded.
 
-**Stores (`stores/`, Zustand 5, 15 total):**
+**Stores (`stores/`, Zustand 5, 19 total):**
 - `canvasStore` — Central state: tiles, wires, transforms, z-stack, focus mode, multi-select, bookmarks, workspace tabs, snap guides, sticky notes, wire data bus (500KB cap per PTY)
 - `projectStore` — Project CRUD, active-project persistence. Starts empty — users add projects via the + button in the sidebar.
 - `themeStore` — 6 themes (5 dark + 1 light `Slate`). CSS var application via `applyThemeToDOM()`. Light themes get dark tile surfaces + dark chrome.
@@ -44,7 +44,11 @@ Entry: `main.tsx` → `AppErrorBoundary` → `App.tsx`. All inline styles (excep
 - `commandHistoryStore` — Per-terminal command buffer.
 - `templateStore` — 16 built-in + user templates in localStorage.
 - `pluginStore` — Custom tile types via sandboxed iframes.
-- `pipelineStore` — Agentic pipeline run state machine (Phase 1: foundation; full execution lands in Phase 2). See `docs/superpowers/specs/2026-05-03-agentic-pipeline-template-design.md`.
+- `pipelineStore` — Agentic pipeline run state machine. v0.2.0 ships end-to-end execution (Plan → Build → Review → Merge). See `docs/superpowers/specs/2026-05-03-agentic-pipeline-template-design.md`.
+- `blueprintStore` — Multi-tile blueprint capture (snapshot a wired set of tiles for re-instantiation).
+- `promptLibraryStore` — User-managed library of agent prompts injectable at spawn time.
+- `settingsStore` — Centralized Settings modal state (project + pipeline-skills sub-panels).
+- `wiringStore` — Wire definitions kept separate from `canvasStore` to avoid render churn on wire-data updates.
 - `toastStore`, `timelineStore`, `clipboardStore`, `paletteStore`.
 
 **Tile system:** 16 types via discriminated union in `types/index.ts` (agent, terminal, editor, diff, note, todo, kanban, filetree, git, browser, runner, ssh, docker, usage, group, pipeline-controller). Each has a component in `components/tiles/`. `TileShell.tsx` (memo'd) wraps every tile with drag + resize + snap + z-order + title-bar chrome (5 buttons: pin/clone/detach/template/close, shown on hover).
@@ -81,7 +85,7 @@ Entry: `main.rs` → `lib.rs` (Tauri builder, plugin registration, PTY cleanup o
 
 **State (`state/`):** `AppState` owns `PtyManager`, `AgentRegistry`, `Timeline`, `Watchers` — all behind `parking_lot::Mutex`. `PtyManager` implements `Drop` for automatic cleanup. Session IDs are uniqueness-checked on insert.
 
-**Security (`capabilities/default.json`):** `fs:default` has explicit allow (`$APPDATA/**`, `$APPCONFIG/**`, `$APPLOCALDATA/**`, `$DOCUMENT/**`, `$DESKTOP/**`, `$HOME/Projects/**`) and deny (`**/.env`, `.ssh/**`, `.aws/**`, `.config/gcloud/**`). CSP has no `'unsafe-inline'` in `script-src`.
+**Security (`capabilities/default.json`):** `fs:default` has explicit allow (`$APPDATA/**`, `$APPCONFIG/**`, `$APPLOCALDATA/**`, `$DOCUMENT/**`, `$DESKTOP/**`, `$HOME/Projects/**`) and per-scope deny lists for `.env`, `.ssh/**`, `.aws/**`, `.config/gcloud/**` rooted under each allowed scope (not a top-level `**/.env`). CSP has no `'unsafe-inline'` in `script-src`.
 
 ## Critical Patterns
 
@@ -128,15 +132,15 @@ Large PTY writes get truncated on Windows. `PtyManager.write()` chunks ALL write
 
 When `isLightBg()` is true, `applyThemeToDOM()` sets dark surface colors so tiles and chrome stay dark with white text while the canvas background is light. xterm terminals also flip via `isLightTheme()` in each terminal component.
 
-## Pipeline Templates (Phase 1 foundation)
+## Pipeline Templates (v0.2.0 — end-to-end execution)
 
-Multi-tile templates that lay down a wired set of agent + helper tiles + a `pipeline-controller` tile, owned by `pipelineStore`. Phase 1 ships the foundation: state machine, fingerprint, worktree IPCs, controller tile rendering. Phase 2 wires live agent execution. See `docs/superpowers/specs/2026-05-03-agentic-pipeline-template-design.md` for the full design and `2026-05-04-...-addendum.md` for the post-v1 roadmap.
+Multi-tile templates that lay down a wired set of agent + helper tiles + a `pipeline-controller` tile, owned by `pipelineStore`. v0.2.0 ships the whole pipeline end-to-end: state machine, worktree isolation, live PTY routing, sentinel parsing, single + dual reviewer, red-team, merger, failure bundles, persistence + reload survival. See `docs/superpowers/specs/2026-05-03-agentic-pipeline-template-design.md` for the original design and `2026-05-04-...-addendum.md` for the post-v1 roadmap.
 
 **State machine** lives in `src/pipeline/state-machine.ts` as a pure reducer; `src/stores/pipelineStore.ts` wraps it. Direct dispatch via `usePipelineStore.getState().dispatch(runId, event)`. The reducer guarantees identity preservation on no-op transitions, and `pipelineStore.dispatch` short-circuits to avoid re-render churn.
 
 **Worktree IPCs** (`pipeline_worktree_create` / `pipeline_worktree_destroy`) and `pipeline_preflight` validate path/branch args against control-char + shell-metachar checks per the same pattern as `agent_spawn` (see `commands/agents.rs`). Cross-platform: cleanup uses `git worktree remove --force` plus a fallback `remove_dir_all` for cases where git's removal misses files.
 
-**Skills installation** (`pipeline_install_skills`) bundles `tx-pipeline-stage-handoff` + `tx-pipeline-reviewer` SKILL.md files inside the app via Tauri `bundle.resources` (`src-tauri/resources/skills/**/*`). On first mount, `App.tsx` invokes the Rust command which resolves the bundle via `app.path().resource_dir()` and copies any missing skill into `~/.claude/skills/<name>/`. Existing skills are left alone (no auto-overwrite — Phase 3 ships an explicit upgrade UI). Per-skill copy errors are recorded in `errors: string[]` and surfaced as `console.warn` but never crash the app. Skill provenance signing (verifying the bundle hasn't been tampered with vs the TerminalX release key) lands in Phase 2c with the broader security work.
+**Skills installation** (`pipeline_install_skills`) bundles five SKILL.md files inside the app via Tauri `bundle.resources` (`src-tauri/resources/skills/**/*`): `tx-pipeline-stage-handoff` (sentinel emission contract), `tx-pipeline-reviewer` (reviewer rubric incl. invariant-violation = blocker), `tx-pipeline-red-team` (adversarial pass for complex runs), `tx-pipeline-builder-scratchpad` (`.tx-builder-notes.md` discipline), `tx-pipeline-subagent` (one-level Builder delegation contract). On first mount, `App.tsx` invokes the Rust command which resolves the bundle via `app.path().resource_dir()` and copies any missing skill into `~/.claude/skills/<name>/`. Existing skills are left alone (no auto-overwrite — Phase 3 ships an explicit upgrade UI). Per-skill copy errors are recorded in `errors: string[]` and surfaced as `console.warn` but never crash the app. Skill-provenance verification (SHA-256 hash baked at build time) runs before each copy and skips per-skill on mismatch.
 
 **Sentinel scanner** (`src/pipeline/sentinel-scanner.ts`) — pure parser for the four sentinels (`<<<TX_STAGE_DONE>>>`, `<<<TX_STAGE_FAILED>>>`, `<<<TX_STAGE_QUESTION>>>`, `<<<TX_HEARTBEAT>>>`) emitted by agents per the `tx-pipeline-stage-handoff` skill. Strips ANSI codes, finds the first marker, extracts a balanced JSON object (string-aware so braces inside strings don't fool it), returns `null` on incomplete input so the caller can buffer more PTY chunks and retry.
 
