@@ -17,3 +17,7 @@ Thumbs.db
 e2e/test-results/
 e2e/playwright-report/
 playwright/.cache/
+
+# Pipeline runtime artifacts (per-project, never committed)
+.terminalx/
+.tx-worktrees/
