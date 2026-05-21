@@ -28,6 +28,8 @@
     "notification:allow-notify",
     "global-shortcut:default",
     "global-shortcut:allow-register",
-    "dialog:default"
+    "dialog:default",
+    "shell:default",
+    "shell:allow-open"
   ]
 }

@@ -61,15 +61,34 @@ export function substituteInvariants(
  * consistency with the fingerprint read at run-creation.
  */
 async function defaultReadInvariants(projectDir: string): Promise<string | null> {
+  return defaultReadOptionalFile(projectDir, 'INVARIANTS.md');
+}
+
+/**
+ * Best-effort read of `<projectDir>/PIPELINE_GOAL.md` — the user-stated
+ * goal that `launch.ts` writes before instantiating tiles. Same ENOENT
+ * tolerance as the INVARIANTS read; used to append the goal onto the
+ * Planner's role prompt so the agent kicks into action with a concrete
+ * task instead of sitting idle at its prompt.
+ */
+async function defaultReadGoal(projectDir: string): Promise<string | null> {
+  return defaultReadOptionalFile(projectDir, 'PIPELINE_GOAL.md');
+}
+
+async function defaultReadOptionalFile(
+  projectDir: string,
+  filename: string,
+): Promise<string | null> {
   if (!projectDir) return null;
   const trimmed = projectDir.replace(/[\\/]+$/, '');
   try {
-    const text = await readFileText(`${trimmed}/INVARIANTS.md`);
-    return text.length > 0 ? text : null;
+    const text = await readFileText(`${trimmed}/${filename}`);
+    if (typeof text !== 'string' || text.length === 0) return null;
+    return text;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (!/no such file|not found|enoent/i.test(msg)) {
-      console.warn(`[role-prompt] read INVARIANTS.md for ${trimmed} failed:`, msg);
+      console.warn(`[role-prompt] read ${filename} for ${trimmed} failed:`, msg);
     }
     return null;
   }
@@ -113,6 +132,8 @@ export async function injectRolePromptForAgent(opts: {
     listen: typeof onPtyOutput;
     /** Test-only: override the INVARIANTS.md read. Default reads via IPC. */
     readInvariants?: (projectDir: string) => Promise<string | null>;
+    /** Test-only: override the PIPELINE_GOAL.md read. Default reads via IPC. */
+    readGoal?: (projectDir: string) => Promise<string | null>;
   };
 }): Promise<{ injected: boolean; reason?: string }> {
   const { ptyId, mode, projectDir } = opts;
@@ -122,6 +143,7 @@ export async function injectRolePromptForAgent(opts: {
     listen: onPtyOutput,
   };
   const readInvariants = deps.readInvariants ?? defaultReadInvariants;
+  const readGoal = deps.readGoal ?? defaultReadGoal;
 
   if (!isPipelineRoleMode(mode)) {
     return { injected: false, reason: 'mode not a pipeline role' };
@@ -147,6 +169,19 @@ export async function injectRolePromptForAgent(opts: {
   if (prompt.includes(PLACEHOLDER)) {
     const invariants = projectDir ? await readInvariants(projectDir) : null;
     prompt = substituteInvariants(prompt, invariants);
+  }
+
+  // Phase 4: append the user-stated goal for the Planner so the agent has
+  // a concrete task to start working on. The goal lives in
+  // `<worktreePath>/PIPELINE_GOAL.md`, written by `launchPipelineRun`. Other
+  // roles read their context from the run's artifacts (plan, diff) so the
+  // append is planner-only. Quietly skipped if the file isn't there yet
+  // (smoke template / manual launches).
+  if (mode === 'planner' && projectDir) {
+    const goal = await readGoal(projectDir);
+    if (goal && goal.trim().length > 0) {
+      prompt = `${prompt}\n\n## Initial user request\n\nThe user submitted the following goal for this run. This is the feature request your spec + plan must satisfy.\n\n${goal.trim()}\n\nBegin by invoking the required skills above, then produce the spec and plan as instructed.\n`;
+    }
   }
 
   const safe = sanitizeForPty(prompt);

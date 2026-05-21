@@ -72,6 +72,35 @@ function applyThemeToDOM(theme: Theme) {
   s.setProperty('--tx-glow', rgba(theme.accent, light ? 0.06 : 0.04));
   s.setProperty('--tx-glow-strong', rgba(theme.accent, light ? 0.15 : 0.12));
 
+  // ── Modal-shorthand aliases ──────────────────────────────────────────
+  // Phase 3 pipeline modals + the settings panels were authored against a
+  // shorthand vocabulary (`--tx-text`, `--tx-border`, `--tx-surface-2`,
+  // `--tx-text-muted`, `--tx-error*`, `--tx-accent-fg`) that nobody actually
+  // wired into the theme. Browsers fell back to transparent / inherited and
+  // every modal rendered without a card background. Define them here as
+  // aliases of the canonical surface tokens so all those modals "just work"
+  // without rewriting each call site.
+  const electricBlack = '#000000';
+  const accentLight = isLightBg(theme.accent);
+  s.setProperty('--tx-text', light ? '#FFFFFF' : theme.fg);
+  s.setProperty('--tx-text-muted', light ? 'rgba(255,255,255,0.77)' : rgba(theme.fg, 0.77));
+  s.setProperty('--tx-border', light ? 'rgba(255,255,255,0.18)' : rgba(theme.fg, 0.15));
+  // Modal card surface — must be FULLY OPAQUE so stacked modals don't
+  // bleed text through each other. Avoid alpha-based mixes here.
+  // On dark themes: a solid grey 18% along the bg→fg axis (≈ #2e2e2e on
+  // Electric) — clearly elevated above the canvas dim overlay
+  // (rgba(0,0,0,0.75)) without competing with the accent.
+  s.setProperty('--tx-surface-2', light ? '#3c4234' : mixHex(theme.bg, theme.fg, 0.18));
+  // Slightly lighter inputs so fields are distinguishable inside the card.
+  s.setProperty('--tx-input-bg', light ? '#2c3025' : mixHex(theme.bg, theme.fg, 0.10));
+  // Foreground colour for buttons painted in `--tx-accent`. Light accents
+  // (Electric / Snow) get black text; dark accents (Phantom / Ember) keep
+  // theme.fg.
+  s.setProperty('--tx-accent-fg', accentLight ? electricBlack : theme.fg);
+  // Error palette — wired into the StartPipelineRunModal inline error.
+  s.setProperty('--tx-error', '#F87171');
+  s.setProperty('--tx-error-bg', 'rgba(248,113,113,0.12)');
+
   // Update body background for light themes
   document.body.style.background = theme.bg;
 }

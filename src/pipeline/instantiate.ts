@@ -34,6 +34,18 @@ export function instantiatePipelineTemplate(
   const tiles: Tile[] = [];
 
   for (const spec of template.tiles) {
+    // One-shot agent tiles (e.g. Reviewer in the Anthropic Trio template)
+    // run via `agent_run_oneshot` headlessly — no live tile on the canvas.
+    // Skip both the tile and the roleToTileId entry so wires referencing
+    // this role gracefully degrade through the existing missing-endpoint
+    // skip path below. The matching dispatcher
+    // (`single-reviewer-dispatcher.ts`) fires the one-shot on transition
+    // into `reviewing`.
+    const cfgUnknown = spec.config as { oneshot?: unknown };
+    if (spec.type === 'agent' && cfgUnknown.oneshot === true) {
+      continue;
+    }
+
     const id = uid();
     roleToTileId[spec.role] = id;
 
@@ -51,6 +63,12 @@ export function instantiatePipelineTemplate(
       tiles.push(tile);
     } else if (spec.type === 'agent') {
       const cfg = spec.config as Partial<AgentTile>;
+      // Tiles for the four real pipeline roles get a back-pointer to the run
+      // + the role string so the global PTY router (App.tsx) can forward
+      // their output into `ingestPtyChunk`. Controller / unknown roles skip
+      // the binding — they don't emit sentinels.
+      const isPipelineRoleTile =
+        spec.role === 'planner' || spec.role === 'builder' || spec.role === 'reviewer';
       const tile: AgentTile = {
         ...base,
         type: 'agent',
@@ -63,6 +81,9 @@ export function instantiatePipelineTemplate(
         branch: (cfg.branch as string) ?? '',
         status: 'idle',
         elapsed: 0,
+        ...(isPipelineRoleTile
+          ? { pipelineRunId: input.runId, pipelineRole: spec.role as 'planner' | 'builder' | 'reviewer' }
+          : {}),
       };
       tiles.push(tile);
     } else {

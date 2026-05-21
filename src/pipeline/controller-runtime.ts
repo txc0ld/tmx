@@ -495,9 +495,15 @@ function dispatchSentinel(
       dispatch(runId, { type: 'red_team_failed', reason: `${role}: ${ev.payload.reason}` });
       return;
     case 'parse_error':
-      dispatch(runId, role === 'planner'
-        ? { type: 'planner_failed', reason: `malformed sentinel: ${ev.error}` }
-        : { type: 'abort', reason: `malformed sentinel from ${role}: ${ev.error}` });
+      // Used to abort the run on the first parse failure. That's too brittle:
+      // role prompts contain literal sentinel examples ("<<<TX_STAGE_DONE>>>{
+      // ...,"round":<n>}") that an agent may echo back as part of explaining
+      // its plan, and a buffer-truncation edge case can also produce malformed
+      // JSON. Treat parse errors as transient: warn and let the scanner
+      // advance past the bad sentinel (consumedThrough already handles that).
+      // A genuinely-broken agent will be caught by the stuck-detector or its
+      // eventual non-zero exit.
+      console.warn(`[pipeline] skipped malformed sentinel from ${role}: ${ev.error}`);
       return;
   }
 }

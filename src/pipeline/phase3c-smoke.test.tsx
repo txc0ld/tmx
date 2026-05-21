@@ -91,7 +91,7 @@ function makeRun(
     baseBranch: 'main',
     state,
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
-    retryCounters: { reviewerReject: 0, ciFail: 0 },
+    retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
     startedAt: Date.now(),
     escalationLog: [],
     tiles: {},
@@ -101,8 +101,8 @@ function makeRun(
     autoApprovePlan: false,
     useDualReviewer: false,
     runRedTeam: false,
-    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
-    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3, planReject: 3 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
     templateDualReviewer: false,
     ...overrides,
   };
@@ -190,7 +190,7 @@ describe('Phase 3c smoke: complexity gate + dual-reviewer + tiebreaker + red-tea
     expect(run.useDualReviewer).toBe(true);
     expect(run.runRedTeam).toBe(true);
     // Doubled from default 3.
-    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 6, ciFail: 6 });
+    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 6, ciFail: 6, planReject: 6 });
     // Complex doesn't auto-approve — operator still confirms.
     expect(run.state).toBe('awaiting_plan_approval');
     expect(run.autoApprovePlan).toBe(false);
@@ -216,8 +216,11 @@ describe('Phase 3c smoke: complexity gate + dual-reviewer + tiebreaker + red-tea
 
   // 2. Trivial plan auto-approves — state goes straight to building, skipping
   //    awaiting_plan_approval. autoApprovePlan flag is the audit trail.
+  //    Phase 3a.7: trivial fast-path is now ALSO gated by the user pref
+  //    seeded into `run.autoApprovePlan` by the run-factory. Seed with
+  //    `autoApprovePlan: true` to exercise the opt-in path here.
   it('trivial plan: auto-skips awaiting_plan_approval and halves budgets', () => {
-    seedRun(makeRun('planning'));
+    seedRun(makeRun('planning', { autoApprovePlan: true }));
 
     usePipelineStore.getState().dispatch(RUN_ID, {
       type: 'planner_done',
@@ -230,7 +233,7 @@ describe('Phase 3c smoke: complexity gate + dual-reviewer + tiebreaker + red-tea
     expect(run.useDualReviewer).toBe(false);
     expect(run.runRedTeam).toBe(false);
     // Halved from default 3 → 1 (floor + min-1).
-    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 1, ciFail: 1 });
+    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 1, ciFail: 1, planReject: 1 });
   });
 
   // 3. Uncertain confidence + non-trivial diff (≥5 files) → synthetic
@@ -282,7 +285,7 @@ describe('Phase 3c smoke: complexity gate + dual-reviewer + tiebreaker + red-tea
       runMode: 'complex',
       useDualReviewer: true,
       runRedTeam: true,
-      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
+      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6, planReject: 6 },
     }));
     const captured: TelemetryEvent[] = [];
     setPipelineTelemetryEmitter((ev) => captured.push(ev));
@@ -331,7 +334,7 @@ describe('Phase 3c smoke: complexity gate + dual-reviewer + tiebreaker + red-tea
       runMode: 'complex',
       useDualReviewer: true,
       runRedTeam: true,
-      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
+      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6, planReject: 6 },
     }));
 
     const fire = vi.fn<(input: RunOneShotReviewerInput) => Promise<void>>()
@@ -380,7 +383,7 @@ describe('Phase 3c smoke: complexity gate + dual-reviewer + tiebreaker + red-tea
       runMode: 'complex',
       useDualReviewer: true,
       runRedTeam: true,
-      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
+      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6, planReject: 6 },
       // Pre-existing dual verdicts (opus approve, codex reject) for realism.
       artifacts: {
         builds: [],
@@ -407,7 +410,7 @@ describe('Phase 3c smoke: complexity gate + dual-reviewer + tiebreaker + red-tea
       runMode: 'complex',
       useDualReviewer: true,
       runRedTeam: true,
-      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
+      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6, planReject: 6 },
     }));
     const captured: TelemetryEvent[] = [];
     setPipelineTelemetryEmitter((ev) => captured.push(ev));
@@ -468,7 +471,7 @@ describe('Phase 3c smoke: complexity gate + dual-reviewer + tiebreaker + red-tea
       runMode: 'complex',
       useDualReviewer: true,
       runRedTeam: true,
-      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
+      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6, planReject: 6 },
     }));
 
     const findings: RedTeamFinding[] = [

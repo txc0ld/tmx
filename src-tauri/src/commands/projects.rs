@@ -19,6 +19,12 @@ pub struct Project {
     pub branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhook_url: Option<String>,
+    /// Optional re-fire cadence for the outbound webhook. Mirrors
+    /// `WebhookCadence` in the frontend types: `entry-only` | `15min` |
+    /// `1hr` | `4hr` | `daily`. `None` is the implicit `entry-only`
+    /// default — kept tidy out of the JSON when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_cadence: Option<String>,
 }
 
 async fn projects_path() -> PathBuf {
@@ -83,6 +89,19 @@ fn validate_project(project: &Project) -> Result<(), String> {
         let trimmed = webhook.trim();
         if !trimmed.is_empty() && !trimmed.starts_with("https://") {
             return Err("Project webhook_url must start with https://".to_string());
+        }
+    }
+    if let Some(cadence) = &project.webhook_cadence {
+        // Whitelist exactly the WebhookCadence variants — `entry-only` is the
+        // implicit default and shouldn't normally be persisted (the frontend
+        // strips it), but we accept it defensively in case a hand-edited
+        // file rolls back to the explicit form.
+        match cadence.as_str() {
+            "entry-only" | "15min" | "1hr" | "4hr" | "daily" => {}
+            _ => return Err(format!(
+                "Project webhook_cadence must be one of entry-only|15min|1hr|4hr|daily, got {:?}",
+                cadence
+            )),
         }
     }
     Ok(())
@@ -184,6 +203,7 @@ mod tests {
             git_url: None,
             branch: None,
             webhook_url: None,
+            webhook_cadence: None,
         }
     }
 
@@ -283,6 +303,22 @@ mod tests {
         let mut p = ok_project();
         p.webhook_url = Some("".into());
         assert!(validate_project(&p).is_ok(), "empty allowed (means clear)");
+    }
+
+    #[test]
+    fn webhook_cadence_must_be_known_variant() {
+        for ok in &["entry-only", "15min", "1hr", "4hr", "daily"] {
+            let mut p = ok_project();
+            p.webhook_cadence = Some((*ok).to_string());
+            assert!(validate_project(&p).is_ok(), "cadence {} should pass", ok);
+        }
+        let mut p = ok_project();
+        p.webhook_cadence = Some("yearly".into());
+        assert!(validate_project(&p).is_err(), "unknown cadence rejected");
+
+        let mut p = ok_project();
+        p.webhook_cadence = Some("".into());
+        assert!(validate_project(&p).is_err(), "empty cadence rejected (use None instead)");
     }
 
     #[test]

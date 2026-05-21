@@ -61,13 +61,53 @@ interface MatchedMarker {
   marker: string;
 }
 
+/**
+ * The protocol asks agents to emit sentinels on their own line. Anchoring
+ * to line-start filters out false positives — most importantly, role-prompt
+ * echoes that get re-rendered inside Claude Code's box-drawn frames (those
+ * lines are prefixed with `│ ` or similar box-drawing chars). The anchor
+ * accepts:
+ *
+ *  - Buffer start (chunk-boundary split between newline and marker)
+ *  - The previous char is `\n` / `\r`
+ *  - The line up to the marker contains ONLY whitespace (spaces / tabs).
+ *    Claude Code's interactive UI sometimes indents agent output a few
+ *    columns; rejecting strict-column-0 makes legitimate sentinels invisible.
+ *
+ * Rejected: lines whose pre-marker prefix contains box-drawing chars (`│`
+ * `╎` `┃` etc.) or any non-whitespace text. Those are the prompt-echo cases.
+ */
+const BOX_DRAWING_CHARS = new Set(['│', '╎', '┃', '|', '>', '*', '#']);
+
+function isAtLineStart(buf: string, index: number): boolean {
+  if (index === 0) return true;
+  // Walk backwards from `index` to the previous newline (or buffer start).
+  // If every char in that span is whitespace (space / tab), accept. If we
+  // hit a box-drawing char or any other non-whitespace, reject.
+  for (let i = index - 1; i >= 0; i--) {
+    const ch = buf[i];
+    if (ch === '\n' || ch === '\r') return true;
+    if (ch === ' ' || ch === '\t') continue;
+    if (BOX_DRAWING_CHARS.has(ch)) return false;
+    return false;
+  }
+  return true; // reached buffer start with only whitespace
+}
+
 function findFirstMarker(buf: string): MatchedMarker | null {
   let earliest: MatchedMarker | null = null;
   for (const { marker, kind } of MARKERS) {
-    const idx = buf.indexOf(marker);
-    if (idx === -1) continue;
-    if (earliest === null || idx < earliest.index) {
-      earliest = { index: idx, kind, marker };
+    let from = 0;
+    while (from < buf.length) {
+      const idx = buf.indexOf(marker, from);
+      if (idx === -1) break;
+      if (isAtLineStart(buf, idx)) {
+        if (earliest === null || idx < earliest.index) {
+          earliest = { index: idx, kind, marker };
+        }
+        break;
+      }
+      from = idx + 1;
     }
   }
   return earliest;

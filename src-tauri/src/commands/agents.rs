@@ -35,7 +35,95 @@ pub struct AgentStatusChange {
     pub status: AgentStatus,
 }
 
+/// Resolve the CLI binary name + initial args from an agent_spawn request.
+///
+/// Pure helper extracted so the args-building logic can be unit-tested
+/// without a live Tauri AppHandle / State. The `pipeline_run` flag
+/// (Claude only) appends the hardcoded `--dangerously-skip-permissions`
+/// flag — see `agent_spawn` doc-comment for the security rationale.
+pub(super) fn resolve_spawn_bin_and_args(
+    agent_type: &AgentType,
+    task: Option<&str>,
+    custom_command: Option<&str>,
+    pipeline_run: bool,
+) -> Result<(String, Vec<String>), String> {
+    if let Some(cmd) = custom_command {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        if parts.is_empty() {
+            return Err("Custom command is empty".to_string());
+        }
+        let bin_name = parts[0];
+        if bin_name.contains('/') || bin_name.contains('\\') {
+            return Err("Custom command must be a program name, not a path".to_string());
+        }
+        return Ok((
+            bin_name.to_string(),
+            parts[1..].iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        ));
+    }
+
+    // Validate task doesn't start with '-' (prevents argument injection)
+    if let Some(t) = task {
+        if t.starts_with('-') {
+            return Err("Task cannot start with '-'".to_string());
+        }
+        if t.len() > 32768 {
+            return Err("Task too long (max 32KB)".to_string());
+        }
+    }
+
+    Ok(match agent_type {
+        AgentType::Claude => {
+            let mut a: Vec<String> = vec![];
+            // Pipeline-spawned Claude bypasses interactive tool-permission
+            // prompts; the worktree boundary + guardrails hook + per-role
+            // capabilities lists are the safety net.
+            if pipeline_run {
+                a.push("--dangerously-skip-permissions".to_string());
+            }
+            if let Some(t) = task {
+                a.push("-p".to_string());
+                a.push(t.to_string());
+            }
+            ("claude".to_string(), a)
+        }
+        AgentType::Codex => {
+            // Codex / Gemini equivalent flags are not hardcoded yet — the CLI
+            // surface for unattended runs is still in flux. Pipeline runs
+            // targeting non-Claude providers will continue to hit any
+            // interactive prompts the upstream CLI throws; revisit when
+            // dogfooding the Codex / Gemini roles.
+            let mut a: Vec<String> = vec![];
+            if let Some(t) = task {
+                a.push(t.to_string());
+            }
+            ("codex".to_string(), a)
+        }
+        AgentType::Gemini => {
+            let mut a: Vec<String> = vec![];
+            if let Some(t) = task {
+                a.push(t.to_string());
+            }
+            ("gemini".to_string(), a)
+        }
+    })
+}
+
 /// Spawn an AI agent CLI process
+///
+/// `pipeline_run` (default false): when true AND `agent_type` is Claude, the
+/// hardcoded `--dangerously-skip-permissions` flag is appended to the args
+/// list so pipeline-spawned Claude Code processes don't hit the interactive
+/// "Do you want to proceed?" tool-permission prompt on every `git add`,
+/// `npm install`, `Write(...)`, etc. The pipeline run is already isolated
+/// inside `<projectDir>/.tx-worktrees/<runId>/` (a fresh git worktree on a
+/// fresh branch) and the `tx-pipeline-managed` PreToolUse guardrails hook +
+/// per-role capabilities allow/deny lists in `.claude/settings.json` form
+/// the actual safety boundary. Stand-alone agent tiles (manual user spawn)
+/// keep `pipeline_run = false` and the prompt remains.
+///
+/// The flag is a hardcoded string — callers cannot inject arbitrary flags
+/// through this field.
 #[tauri::command]
 pub async fn agent_spawn(
     app: AppHandle,
@@ -44,55 +132,17 @@ pub async fn agent_spawn(
     cwd: String,
     task: Option<String>,
     custom_command: Option<String>,
+    pipeline_run: Option<bool>,
 ) -> Result<String, String> {
+    let pipeline_run = pipeline_run.unwrap_or(false);
+
     // Resolve CLI binary and args
-    let (bin, args) = if let Some(ref cmd) = custom_command {
-        // Custom command: split first word as binary, rest as args
-        let parts: Vec<&str> = cmd.split_whitespace().collect();
-        if parts.is_empty() {
-            return Err("Custom command is empty".to_string());
-        }
-        let bin_name = parts[0];
-        // Reject binary names containing path separators — only PATH-resolved names allowed
-        if bin_name.contains('/') || bin_name.contains('\\') {
-            return Err("Custom command must be a program name, not a path".to_string());
-        }
-        (bin_name.to_string(), parts[1..].iter().map(|s| s.to_string()).collect::<Vec<_>>())
-    } else {
-        // Validate task doesn't start with '-' (prevents argument injection)
-        if let Some(ref t) = task {
-            if t.starts_with('-') {
-                return Err("Task cannot start with '-'".to_string());
-            }
-            if t.len() > 32768 {
-                return Err("Task too long (max 32KB)".to_string());
-            }
-        }
-        match agent_type {
-            AgentType::Claude => {
-                let mut a: Vec<String> = vec![];
-                if let Some(ref t) = task {
-                    a.push("-p".to_string());
-                    a.push(t.clone());
-                }
-                ("claude".to_string(), a)
-            }
-            AgentType::Codex => {
-                let mut a: Vec<String> = vec![];
-                if let Some(ref t) = task {
-                    a.push(t.clone());
-                }
-                ("codex".to_string(), a)
-            }
-            AgentType::Gemini => {
-                let mut a: Vec<String> = vec![];
-                if let Some(ref t) = task {
-                    a.push(t.clone());
-                }
-                ("gemini".to_string(), a)
-            }
-        }
-    };
+    let (bin, args) = resolve_spawn_bin_and_args(
+        &agent_type,
+        task.as_deref(),
+        custom_command.as_deref(),
+        pipeline_run,
+    )?;
 
     // Check if binary exists in PATH
     let check = if cfg!(target_os = "windows") {
@@ -365,6 +415,91 @@ pub async fn agent_run_oneshot(input: OneshotIpcInput) -> Result<OneshotResult, 
         cwd: input.cwd,
     };
     run_oneshot_inner(inv).await
+}
+
+// Pure-function tests for the spawn-args resolver. No subprocess / Tauri
+// state required — runs on every platform.
+#[cfg(test)]
+mod spawn_args_tests {
+    use super::*;
+
+    #[test]
+    fn claude_pipeline_run_appends_skip_permissions_flag() {
+        let (bin, args) =
+            resolve_spawn_bin_and_args(&AgentType::Claude, None, None, true).unwrap();
+        assert_eq!(bin, "claude");
+        assert!(
+            args.contains(&"--dangerously-skip-permissions".to_string()),
+            "expected --dangerously-skip-permissions, got {args:?}"
+        );
+    }
+
+    #[test]
+    fn claude_default_omits_skip_permissions_flag() {
+        let (bin, args) =
+            resolve_spawn_bin_and_args(&AgentType::Claude, None, None, false).unwrap();
+        assert_eq!(bin, "claude");
+        assert!(
+            !args.contains(&"--dangerously-skip-permissions".to_string()),
+            "stand-alone agent tile must NOT skip permissions; got {args:?}"
+        );
+    }
+
+    #[test]
+    fn claude_pipeline_run_with_task_keeps_flag_before_dash_p() {
+        let (_, args) =
+            resolve_spawn_bin_and_args(&AgentType::Claude, Some("hi"), None, true).unwrap();
+        // Order: --dangerously-skip-permissions, -p, <task>
+        assert_eq!(args[0], "--dangerously-skip-permissions");
+        assert_eq!(args[1], "-p");
+        assert_eq!(args[2], "hi");
+    }
+
+    #[test]
+    fn codex_pipeline_run_does_not_inject_claude_flag() {
+        let (bin, args) =
+            resolve_spawn_bin_and_args(&AgentType::Codex, None, None, true).unwrap();
+        assert_eq!(bin, "codex");
+        assert!(
+            !args.contains(&"--dangerously-skip-permissions".to_string()),
+            "Claude flag must not leak into Codex args; got {args:?}"
+        );
+    }
+
+    #[test]
+    fn gemini_pipeline_run_does_not_inject_claude_flag() {
+        let (bin, args) =
+            resolve_spawn_bin_and_args(&AgentType::Gemini, None, None, true).unwrap();
+        assert_eq!(bin, "gemini");
+        assert!(
+            !args.contains(&"--dangerously-skip-permissions".to_string()),
+            "Claude flag must not leak into Gemini args; got {args:?}"
+        );
+    }
+
+    #[test]
+    fn custom_command_pipeline_run_does_not_inject_flag() {
+        // Custom commands are a user trust boundary; we don't second-guess
+        // their flags. If the user wants --dangerously-skip-permissions on
+        // a pipeline-spawned custom command they put it in the command
+        // string themselves.
+        let (bin, args) = resolve_spawn_bin_and_args(
+            &AgentType::Claude,
+            None,
+            Some("claude --model opus-4"),
+            true,
+        )
+        .unwrap();
+        assert_eq!(bin, "claude");
+        assert_eq!(args, vec!["--model".to_string(), "opus-4".to_string()]);
+    }
+
+    #[test]
+    fn task_starting_with_dash_is_rejected() {
+        let err = resolve_spawn_bin_and_args(&AgentType::Claude, Some("-p"), None, false)
+            .unwrap_err();
+        assert!(err.contains("cannot start with '-'"), "got: {err}");
+    }
 }
 
 // These tests use POSIX paths (/bin/echo, /bin/sh, /bin/cat) as stand-ins

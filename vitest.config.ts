@@ -13,5 +13,10 @@ export default defineConfig({
     environment: 'happy-dom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    // Vitest's default include glob would otherwise pick up
+    // `e2e/pipeline-launch.spec.ts` — that file uses `@playwright/test`
+    // and only runs through `pnpm test:e2e`. Keep the two suites
+    // disjoint so `pnpm test` stays at unit-test speed.
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
   },
 });

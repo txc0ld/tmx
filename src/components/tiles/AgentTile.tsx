@@ -4,11 +4,13 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useThemeStore } from '@/stores/themeStore';
+import { useToastStore } from '@/stores/toastStore';
 import { usePty } from '@/hooks/usePty';
-import { agentSpawn, onAgentStatus, ptyWrite } from '@/utils/ipc';
+import { agentSpawn, onAgentStatus, ptyKill, ptyWrite } from '@/utils/ipc';
 import { colors, fonts, spacing, typography, radius, agentColors, alpha } from '@/design/tokens';
 import { attachKeyboardCapture } from './xtermInput';
 import { cleanPtyOutput } from '@/utils/ansi';
+import { ConfirmableButton } from '@/components/pipeline/ConfirmableButton';
 import type { AgentTile as AgentTileType } from '@/types';
 
 function isLightTheme(t: { bg: string }): boolean {
@@ -156,8 +158,11 @@ export function AgentTile({ tile }: AgentTileProps) {
     const terminal = new Terminal({
       theme: getXtermTheme(),
       fontFamily: fonts.mono,
-      fontSize: 13,
-      lineHeight: 1.3,
+      // 12px gives ~92 cols at the Anthropic Trio template's 720-wide
+      // tile — enough headroom for Claude Code's status bar + tip box
+      // without the box-frame overflowing into mangled wraps.
+      fontSize: 12,
+      lineHeight: 1.25,
       cursorBlink: true,
       cursorStyle: 'bar',
     });
@@ -224,8 +229,34 @@ export function AgentTile({ tile }: AgentTileProps) {
       agentType: agentType as 'Claude' | 'Codex' | 'Gemini',
       cwd: tile.cwd || '~',
       ...(tile.command ? { customCommand: tile.command } : {}),
+      // Pipeline-spawned tiles carry `pipelineRunId` (set by `instantiate.ts`).
+      // The flag tells Rust to append `--dangerously-skip-permissions` to
+      // Claude Code so the run can `git add`, `npm install`, `Write(...)`,
+      // etc., without hitting the interactive consent prompt. The worktree
+      // boundary + guardrails hook + capabilities lists are the safety net.
+      // Manual user-spawned agent tiles omit `pipelineRunId` and keep the
+      // prompt — that's a normal interactive session.
+      ...(tile.pipelineRunId ? { pipelineRun: true } : {}),
     }).then(async (id) => {
       useCanvasStore.getState().updateTile(tile.id, { ptyId: id, status: 'working' } as Partial<AgentTileType>);
+      // Sync PTY size with xterm BEFORE the agent paints anything. The
+      // PTY default is 80x24 but xterm fits to the tile (~92x40 at the
+      // template size). Without this, Claude Code positions cursor for
+      // its assumed cols, xterm renders at actual cols, and you get
+      // overlapping text + mangled box-drawing — exactly the "glitchy
+      // consoles" the user reported.
+      if (termRef.current && fitRef.current) {
+        try { fitRef.current.fit(); } catch { /* container detached */ }
+        const cols = termRef.current.cols;
+        const rows = termRef.current.rows;
+        if (cols > 0 && rows > 0) {
+          // The Rust IPC for ptyResize lives on `usePty`'s `resize` callback.
+          // Lazy import to avoid a circular initialization order with the
+          // hook's effect chain.
+          const { ptyResize } = await import('@/utils/ipc');
+          ptyResize(id, cols, rows).catch(() => { /* PTY may have raced */ });
+        }
+      }
       // Pipeline role-prompt injection (Phase 2c-iii post-script): if the
       // tile's mode is one of the four pipeline roles, write the bundled
       // role prompt as the agent's first input. Skipped for stub modes
@@ -296,7 +327,11 @@ export function AgentTile({ tile }: AgentTileProps) {
       resizeTimerRef.current = window.setTimeout(() => {
         if (fitRef.current && termRef.current) {
           fitRef.current.fit();
-          resize(termRef.current.cols, termRef.current.rows);
+          const cols = termRef.current.cols;
+          const rows = termRef.current.rows;
+          if (cols > 0 && rows > 0) {
+            resize(cols, rows);
+          }
         }
       }, 100);
     });
@@ -304,6 +339,39 @@ export function AgentTile({ tile }: AgentTileProps) {
     return () => {
       observer.disconnect();
       if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current);
+    };
+  }, [resize]);
+
+  // Zoom-refit — when the canvas transform.scale changes (pinch / wheel zoom),
+  // the tile's logical pixel size doesn't change so ResizeObserver never fires,
+  // but the visual size does — and Claude Code's box-drawing assumes the
+  // pre-zoom col count, producing overlapping text. Subscribe directly to the
+  // store (not a selector hook) so we don't re-render the tile on every
+  // transform tick. Debounce 120ms so a rapid wheel-zoom gesture coalesces
+  // into one fit + ptyResize at the final scale.
+  const zoomTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    let lastScale = useCanvasStore.getState().transforms[
+      useCanvasStore.getState().activeProject
+    ]?.scale;
+    const unsub = useCanvasStore.subscribe((s) => {
+      const scale = s.transforms[s.activeProject]?.scale;
+      if (scale === lastScale) return;
+      lastScale = scale;
+      if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+      zoomTimerRef.current = window.setTimeout(() => {
+        if (!fitRef.current || !termRef.current) return;
+        try { fitRef.current.fit(); } catch { /* container detached */ }
+        const cols = termRef.current.cols;
+        const rows = termRef.current.rows;
+        if (cols > 0 && rows > 0) {
+          resize(cols, rows);
+        }
+      }, 120);
+    });
+    return () => {
+      unsub();
+      if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
     };
   }, [resize]);
 
@@ -326,6 +394,68 @@ export function AgentTile({ tile }: AgentTileProps) {
     useCanvasStore.getState().updateTile(tile.id, { command: customCmd } as Partial<AgentTileType>);
     setConfigOpen(false);
   };
+
+  // ─── Mini-toolbar actions ────────────────────────────────────────────
+  // Kill / Restart / Copy / Clear. Lives just above the xterm container
+  // and is hover-revealed so it stays out of the way during normal use.
+
+  const handleKill = useCallback(async () => {
+    if (!tile.ptyId) return;
+    try {
+      await ptyKill(tile.ptyId);
+      useToastStore.getState().addToast('Agent killed', 'info');
+    } catch (err) {
+      useToastStore.getState().addToast(`Kill failed: ${String(err)}`, 'error');
+    }
+  }, [tile.ptyId]);
+
+  const handleRestart = useCallback(async () => {
+    // Kill current PTY (if any) then clear the ptyId so the spawn effect
+    // re-fires. spawnedRef guards repeat-spawn within the same id; flip
+    // it back to false so the next render's effect runs.
+    const oldPty = tile.ptyId;
+    spawnedRef.current = false;
+    try {
+      if (oldPty) {
+        await ptyKill(oldPty).catch(() => { /* PTY may already be gone */ });
+      }
+      // Clear ptyId on the tile so the spawn effect's `tile.ptyId` guard
+      // releases and the effect re-runs.
+      useCanvasStore.getState().updateTile(tile.id, {
+        ptyId: undefined,
+        status: 'spawning',
+        elapsed: 0,
+      } as Partial<AgentTileType>);
+      useToastStore.getState().addToast('Restarting agent…', 'info');
+    } catch (err) {
+      useToastStore.getState().addToast(`Restart failed: ${String(err)}`, 'error');
+    }
+  }, [tile.id, tile.ptyId]);
+
+  const handleCopyOutput = useCallback(async () => {
+    const term = termRef.current;
+    if (!term) return;
+    const buf = term.buffer.active;
+    const lines: string[] = [];
+    for (let i = 0; i < buf.length; i++) {
+      const line = buf.getLine(i);
+      if (line) lines.push(line.translateToString(true));
+    }
+    const text = lines.join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      useToastStore.getState().addToast('Output copied', 'success');
+    } catch (err) {
+      useToastStore.getState().addToast(`Copy failed: ${String(err)}`, 'error');
+    }
+  }, []);
+
+  const handleClear = useCallback(() => {
+    const term = termRef.current;
+    if (!term) return;
+    term.clear();
+    useToastStore.getState().addToast('Output cleared', 'info');
+  }, []);
 
   const agentColor = agentColors[tile.agent] || colors.primary;
   const statusColor = STATUS_COLORS[tile.status] || colors.secondary;
@@ -425,11 +555,149 @@ export function AgentTile({ tile }: AgentTileProps) {
         </div>
       )}
 
+      {/* Mini-toolbar: hover-revealed agent-only quick actions */}
+      <AgentMiniToolbar
+        isPipeline={Boolean(tile.pipelineRunId)}
+        canKill={Boolean(tile.ptyId)}
+        onKill={handleKill}
+        onRestart={handleRestart}
+        onCopy={handleCopyOutput}
+        onClear={handleClear}
+      />
+
       {/* Terminal */}
       <div
         ref={containerRef}
         style={{ flex: 1, background: colors.bg, padding: '4px 0 0 4px', cursor: 'text' }}
       />
+    </div>
+  );
+}
+
+// ─── Agent Mini-Toolbar ──────────────────────────────────────────────
+// Hover-revealed row of agent-specific quick actions. Stays out of the
+// way during normal use (collapsed to 0 height, opacity 0); on hover the
+// row expands to ~24px tall and the buttons fade in. Distinct from the
+// universal TileShell chrome (pin/clone/detach/template/close) — these
+// actions only make sense for an agent tile.
+
+interface MiniToolbarProps {
+  isPipeline: boolean;
+  canKill: boolean;
+  onKill: () => void;
+  onRestart: () => void;
+  onCopy: () => void;
+  onClear: () => void;
+}
+
+const PIPELINE_WARNING = '[Pipeline] Killing this agent will mark the run as failed';
+
+const TOOLBAR_BTN_STYLE: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'var(--tx-surface-2)',
+  border: '1px solid var(--tx-border)',
+  borderRadius: 3,
+  color: 'var(--tx-text-muted)',
+  cursor: 'pointer',
+  fontSize: 12,
+  lineHeight: 1,
+  padding: 0,
+  fontFamily: fonts.mono,
+  transition: 'color 120ms ease, background 120ms ease, border-color 120ms ease',
+};
+
+function AgentMiniToolbar({ isPipeline, canKill, onKill, onRestart, onCopy, onClear }: MiniToolbarProps) {
+  const [hover, setHover] = useState(false);
+
+  const killTitle = (isPipeline ? `${PIPELINE_WARNING}. ` : '') + 'Kill agent process';
+  const restartTitle = (isPipeline ? `${PIPELINE_WARNING}. ` : '') + 'Restart agent (kill + re-spawn)';
+
+  return (
+    <div
+      data-testid="agent-mini-toolbar"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        gap: 4,
+        padding: hover ? '2px 6px' : 0,
+        height: hover ? 24 : 1,
+        background: hover ? 'var(--tx-surface-1, transparent)' : 'transparent',
+        borderBottom: hover ? '1px solid var(--tx-border, rgba(255,255,255,0.06))' : '1px solid transparent',
+        opacity: hover ? 1 : 0,
+        overflow: 'hidden',
+        transition: 'opacity 140ms ease, height 140ms ease, padding 140ms ease',
+        // When collapsed, don't capture pointer events so canvas drag/resize
+        // and the surrounding tile still work normally.
+        pointerEvents: hover ? 'auto' : 'none',
+        flexShrink: 0,
+      }}
+    >
+      <ConfirmableButton
+        label="Kill"
+        confirmLabel="Kill agent?"
+        onConfirm={onKill}
+        confirmDelayMs={4000}
+        variant="danger"
+        title={killTitle}
+        disabled={!canKill}
+        style={{
+          ...TOOLBAR_BTN_STYLE,
+          width: 'auto',
+          padding: '0 6px',
+          fontSize: 10,
+        }}
+      />
+      <ConfirmableButton
+        label="Restart"
+        confirmLabel="Restart agent?"
+        onConfirm={onRestart}
+        confirmDelayMs={4000}
+        variant="danger"
+        title={restartTitle}
+        style={{
+          ...TOOLBAR_BTN_STYLE,
+          width: 'auto',
+          padding: '0 6px',
+          fontSize: 10,
+        }}
+      />
+      <button
+        type="button"
+        onClick={onCopy}
+        title="Copy all output to clipboard"
+        aria-label="Copy output"
+        style={TOOLBAR_BTN_STYLE}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--tx-text)';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--tx-text-muted)';
+        }}
+      >
+        ⧉
+      </button>
+      <button
+        type="button"
+        onClick={onClear}
+        title="Clear terminal output and scrollback"
+        aria-label="Clear output"
+        style={TOOLBAR_BTN_STYLE}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--tx-text)';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--tx-text-muted)';
+        }}
+      >
+        ⌫
+      </button>
     </div>
   );
 }

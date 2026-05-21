@@ -251,7 +251,7 @@ describe('injectRolePromptForAgent — INVARIANTS.md injection', () => {
     vi.restoreAllMocks();
   });
 
-  function makeDeps(promptContent: string, invariants: string | null) {
+  function makeDeps(promptContent: string, invariants: string | null, goal: string | null = null) {
     const readRolePrompt = vi.fn().mockResolvedValue(promptContent);
     const write = vi.fn().mockResolvedValue(undefined);
     let outputHandler: ((ev: { id: string }) => void) | null = null;
@@ -261,20 +261,24 @@ describe('injectRolePromptForAgent — INVARIANTS.md injection', () => {
       return Promise.resolve(unlisten);
     });
     const readInvariants = vi.fn().mockResolvedValue(invariants);
+    const readGoal = vi.fn().mockResolvedValue(goal);
     return {
       readRolePrompt,
       write,
       listen,
       readInvariants,
+      readGoal,
       unlisten,
       getHandler: () => outputHandler,
     };
   }
 
   async function fire(getHandler: () => ((ev: { id: string }) => void) | null, id: string) {
-    // Drain microtasks until both readRolePrompt + readInvariants resolve and
-    // the listener registers. Three turns covers: (1) readRolePrompt, (2)
-    // readInvariants, (3) deps.listen() promise resolution.
+    // Drain microtasks until readRolePrompt + readInvariants + readGoal
+    // resolve and the listener registers. Five turns covers: (1)
+    // readRolePrompt, (2) readInvariants, (3) readGoal, (4) deps.listen()
+    // promise resolution, (5) cleanup-attach.
+    await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();

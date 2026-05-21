@@ -10,7 +10,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.90+-000000?logo=rust)](https://rust-lang.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript)](https://typescriptlang.org)
 
-[**Feature docs**](./docs/features/README.md) · [**Wiring tutorial**](./WIRING.md) · [**Features**](./FEATURES.md) · [**Design**](./DESIGN.md) · [**Install**](#install) · [**Quick start**](#quick-start)
+[**Feature docs**](./docs/features/README.md) · [**Wiring tutorial**](./WIRING.md) · [**Pipeline guide**](./docs/PIPELINE.md) · [**Features**](./FEATURES.md) · [**Design**](./DESIGN.md) · [**Install**](#install) · [**Quick start**](#quick-start)
 
 </div>
 

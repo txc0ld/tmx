@@ -12,3 +12,8 @@ coverage/
 .claude/
 .DS_Store
 Thumbs.db
+
+# Playwright E2E
+e2e/test-results/
+e2e/playwright-report/
+playwright/.cache/

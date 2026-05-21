@@ -52,12 +52,26 @@ export async function agentSpawn(opts: {
   cwd: string;
   task?: string;
   customCommand?: string;
+  /**
+   * When true AND `agentType === 'Claude'`, the Rust spawn appends the
+   * hardcoded `--dangerously-skip-permissions` flag so pipeline-spawned
+   * Claude Code processes don't hit the interactive tool-permission prompt
+   * on every `git add` / `npm install` / `Write(...)`. Pipeline runs are
+   * isolated inside `<projectDir>/.tx-worktrees/<runId>/` (fresh worktree
+   * + branch) and the `tx-pipeline-managed` PreToolUse guardrails hook +
+   * per-role capabilities lists in `.claude/settings.json` form the actual
+   * safety boundary. Stand-alone (manual) agent tiles must omit this flag.
+   * The Rust side ignores it for Codex / Gemini until we hardcode the
+   * provider-specific equivalents.
+   */
+  pipelineRun?: boolean;
 }): Promise<string> {
   return invoke('agent_spawn', {
     agentType: opts.agentType,
     cwd: opts.cwd,
     task: opts.task,
     customCommand: opts.customCommand,
+    pipelineRun: opts.pipelineRun ?? false,
   });
 }
 
@@ -115,6 +129,20 @@ export async function writeFileText(path: string, contents: string): Promise<voi
 
 export async function getFileSize(path: string): Promise<number> {
   return invoke('get_file_size', { path });
+}
+
+/**
+ * Delete a single file under the same allowed-roots list as
+ * `read_file_text`/`write_file_text`. Idempotent — resolves cleanly when
+ * the file is already missing. Refuses directories and symlinks.
+ *
+ * Used by the pipeline-controller "Delete worktree" cleanup to remove the
+ * persisted run-snapshot at
+ * `<projectDir>/.terminalx/pipeline-runs/<runId>.json` after the worktree
+ * has been destroyed.
+ */
+export async function deleteFile(path: string): Promise<void> {
+  return invoke('delete_file', { path });
 }
 
 /**
@@ -241,6 +269,7 @@ export interface ProjectData {
   git_url?: string;
   branch?: string;
   webhook_url?: string;
+  webhook_cadence?: string;
 }
 
 export async function loadProjects(): Promise<ProjectData[]> {
@@ -472,6 +501,35 @@ export async function pipelineTelemetryLog(opts: {
   await invoke<void>('pipeline_telemetry_log', opts);
 }
 
+/** Result of `pipeline_cleanup_old_runs`. Field names mirror the Rust struct. */
+export interface PipelineCleanupResult {
+  removed_records: number;
+  removed_telemetry: number;
+  removed_worktrees: number;
+  errors: string[];
+}
+
+/**
+ * Age-based GC for terminal pipeline runs. Walks
+ * `<projectDir>/.terminalx/pipeline-runs/`, deletes the run record + paired
+ * `pipeline-telemetry/<runId>.jsonl{,.1}` + `.tx-worktrees/<runId>/` for
+ * runs that are both terminal (`done`/`failed`/`escalated`) AND older than
+ * `retentionDays`. Also sweeps orphaned worktrees whose run record is gone.
+ *
+ * `retentionDays = 0` is the "disable" sentinel — the Rust side returns an
+ * empty result without scanning anything, so callers can pass the user's
+ * settings value directly.
+ */
+export async function pipelineCleanupOldRuns(opts: {
+  projectDir: string;
+  retentionDays: number;
+}): Promise<PipelineCleanupResult> {
+  return invoke<PipelineCleanupResult>('pipeline_cleanup_old_runs', {
+    projectDir: opts.projectDir,
+    retentionDays: opts.retentionDays,
+  });
+}
+
 /**
  * Mask detected secrets in arbitrary text. Returns the same string with
  * known-prefix tokens (`sk-…`, `ghp_…`, `xoxb-…`, `AKIA…`, `AIza…`,
@@ -535,6 +593,36 @@ export async function pipelineFailureBundleGenerate(opts: {
       claude_version: opts.claudeVersion ?? null,
       codex_version: opts.codexVersion ?? null,
     },
+  });
+}
+
+/**
+ * Compact summary derived from inspecting a failure-bundle tarball
+ * IN-PROCESS (no extraction to disk). Surfaced in the Run Logs modal so
+ * the user can see what happened without reaching for `tar -xzf`.
+ *
+ * Best-effort: missing / malformed entries inside the bundle return
+ * neutral defaults rather than throwing. The IPC only rejects on hard
+ * failures (path validation, file-open, gzip / tar framing).
+ */
+export interface FailureBundleSummary {
+  bytes: number;
+  telemetry_line_count: number;
+  /** Last 5 telemetry events, oldest-first within the slice. */
+  last_events: string[];
+  run_state: string | null;
+  failure_reason: string | null;
+  retry_counters: Record<string, string>;
+  /** `<modified> modified, <added> added, ...` one-liner; empty when unknown. */
+  git_status: string;
+  artifacts_present: boolean;
+}
+
+export async function pipelineFailureBundleSummary(
+  bundlePath: string,
+): Promise<FailureBundleSummary> {
+  return invoke<FailureBundleSummary>('pipeline_failure_bundle_summary', {
+    bundlePath,
   });
 }
 
@@ -675,4 +763,22 @@ export async function agentRunOneshot(opts: {
       cwd: opts.cwd ?? null,
     },
   });
+}
+
+// ─── Health check ─────────────────────────────────────────────────────
+
+/**
+ * Boot-time CLI health probe. PATH-only lookup; never spawns binaries.
+ * Used by the welcome banner to detect first-run state where the user
+ * hasn't installed `claude` yet (pipeline runs require it).
+ */
+export interface HealthReport {
+  claude: boolean;
+  codex: boolean;
+  gemini: boolean;
+  gitInstalled: boolean;
+}
+
+export async function pipelineHealthCheck(): Promise<HealthReport> {
+  return invoke<HealthReport>('pipeline_health_check');
 }

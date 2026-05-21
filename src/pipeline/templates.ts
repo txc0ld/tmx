@@ -26,7 +26,7 @@ export function helloWorldTemplate(): PipelineTemplate {
     ],
 
     pipeline: {
-      retryBudget: { reviewerReject: 3, ciFail: 3 },
+      retryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
       dualReviewer: false,
       requireMergeGate: true,
       skillBindings: {
@@ -56,21 +56,27 @@ export function anthropicTrioTemplate(): PipelineTemplate {
     description: 'Plan → Build → Review with Opus Planner, Sonnet Builder, and Opus Reviewer. Bundled skills enforce stage-handoff protocol and reviewer discipline.',
     isBuiltin: true,
 
+    // Agent tiles need real estate for Claude Code's full UI (welcome
+    // banner + idle tip carousel + status bar + tool-permission gates).
+    // At 720x540 with 12px xterm font we get ~95 cols × ~33 rows, which
+    // matches Claude Code's preferred layout — the box-drawing frames
+    // and tip carousel render without overflow / wrap-mangling. AgentTile
+    // also calls `ptyResize` post-spawn so the PTY's cols match xterm.
     tiles: [
-      { role: 'planner', type: 'agent', position: { x: 0, y: 0, w: 480, h: 380 },
+      { role: 'planner', type: 'agent', position: { x: 0, y: 0, w: 720, h: 540 },
         config: {
           agent: 'claude', model: 'opus-4-7', effort: 'high', mode: 'planner',
         } },
-      { role: 'builder', type: 'agent', position: { x: 520, y: 0, w: 480, h: 380 },
+      { role: 'builder', type: 'agent', position: { x: 760, y: 0, w: 720, h: 540 },
         config: {
           agent: 'claude', model: 'sonnet-4-6', effort: 'medium', mode: 'builder',
         } },
-      { role: 'reviewer', type: 'agent', position: { x: 1040, y: 0, w: 480, h: 380 },
+      { role: 'reviewer', type: 'agent', position: { x: 1520, y: 0, w: 720, h: 540 },
         config: {
           agent: 'claude', model: 'opus-4-7', effort: 'high', mode: 'reviewer',
           oneshot: true,
         } },
-      { role: 'controller', type: 'pipeline-controller', position: { x: 0, y: 420, w: 1520, h: 200 },
+      { role: 'controller', type: 'pipeline-controller', position: { x: 0, y: 580, w: 2240, h: 220 },
         config: {} },
     ],
 
@@ -81,7 +87,7 @@ export function anthropicTrioTemplate(): PipelineTemplate {
     ],
 
     pipeline: {
-      retryBudget: { reviewerReject: 3, ciFail: 3 },
+      retryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
       dualReviewer: false,
       requireMergeGate: true,
       skillBindings: {

@@ -24,7 +24,7 @@ export interface PipelineWireSpec {
 }
 
 export interface PipelineConfig {
-  retryBudget: { reviewerReject: number; ciFail: number };
+  retryBudget: { reviewerReject: number; ciFail: number; planReject: number };
   dualReviewer: boolean;
   requireMergeGate: boolean;
   skillBindings: Partial<Record<PipelineRole, string[]>>;

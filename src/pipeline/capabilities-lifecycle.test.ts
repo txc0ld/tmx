@@ -272,7 +272,7 @@ describe('capabilities lifecycle', () => {
 });
 
 describe('defaultRoleCapabilities (spec §17.1 defaults)', () => {
-  it('planner: docs-only fileWrites, no network, read-only shell', () => {
+  it('planner: docs-only fileWrites, no network, read-only + scaffold shell', () => {
     const caps = defaultRoleCapabilities('planner');
     expect(caps.fileWrites.allow).toEqual([
       'docs/superpowers/specs/**',
@@ -284,6 +284,11 @@ describe('defaultRoleCapabilities (spec §17.1 defaults)', () => {
     expect(caps.shell.allowPatterns).not.toContain('pnpm *');
     expect(caps.shell.allowPatterns).toContain('rg *');
     expect(caps.shell.allowPatterns).toContain('git status');
+    // Scaffold verbs needed to create spec/plan dirs and files. Without these
+    // Claude Code prompts on every `mkdir -p docs/superpowers/specs` even
+    // though `Write(docs/superpowers/specs/**)` is allowlisted.
+    expect(caps.shell.allowPatterns).toContain('mkdir *');
+    expect(caps.shell.allowPatterns).toContain('touch *');
     expect(caps.shell.denyPatterns).toContain('git push *');
     expect(caps.mcpTools).toEqual([]);
     expect(caps.maxFileSize).toBe(256_000);
@@ -314,6 +319,9 @@ describe('defaultRoleCapabilities (spec §17.1 defaults)', () => {
     // Build verbs absent.
     expect(caps.shell.allowPatterns).not.toContain('pnpm *');
     expect(caps.shell.allowPatterns).toContain('rg *');
+    // Reviewer is read-only: scaffold/write verbs MUST NOT leak in.
+    expect(caps.shell.allowPatterns).not.toContain('mkdir *');
+    expect(caps.shell.allowPatterns).not.toContain('touch *');
   });
 
   it('reviewer-codex: same scoping as reviewer', () => {

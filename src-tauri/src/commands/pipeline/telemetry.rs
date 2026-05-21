@@ -10,6 +10,14 @@ use super::validate_path_arg;
 use crate::commands::secrets_mask::mask_secrets;
 use std::path::Path;
 
+/// Maximum size of a single `<runId>.jsonl` telemetry file before rotation.
+/// On reaching this threshold the existing file is renamed to
+/// `<runId>.jsonl.1` (overwriting any prior rotation) and a fresh
+/// `<runId>.jsonl` is started. Long-running pipelines + heartbeats can
+/// otherwise produce unbounded files; 5 MB keeps individual runs bounded
+/// while still leaving room for thousands of state-change lines.
+const TELEMETRY_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
 fn validate_run_id(id: &str) -> Result<(), String> {
     if id.is_empty() {
         return Err("empty run_id".into());
@@ -23,7 +31,40 @@ fn validate_run_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// If `path` exists and is at-or-above `cap_bytes`, rename it to
+/// `<path>.1` (overwriting any existing `.1`). Idempotent + cheap when
+/// the file is below cap (single `metadata` syscall). Single-rotation
+/// only — older `.1` data is intentionally discarded so a pathological
+/// run can't fill the disk via unbounded rotated history.
+fn rotate_if_needed(path: &Path, cap_bytes: u64) -> Result<(), String> {
+    let meta = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("stat {}: {e}", path.display())),
+    };
+    if meta.len() < cap_bytes {
+        return Ok(());
+    }
+    let mut rotated = path.as_os_str().to_owned();
+    rotated.push(".1");
+    let rotated_path = std::path::PathBuf::from(rotated);
+    // `rename` overwrites the destination atomically on both Unix and
+    // Windows (Rust std normalizes Windows behavior to POSIX semantics).
+    std::fs::rename(path, &rotated_path)
+        .map_err(|e| format!("rotate {} -> {}: {e}", path.display(), rotated_path.display()))?;
+    Ok(())
+}
+
 fn telemetry_log_inner(project_dir: &Path, run_id: &str, line: &str) -> Result<(), String> {
+    telemetry_log_with_cap(project_dir, run_id, line, TELEMETRY_MAX_BYTES)
+}
+
+fn telemetry_log_with_cap(
+    project_dir: &Path,
+    run_id: &str,
+    line: &str,
+    cap_bytes: u64,
+) -> Result<(), String> {
     validate_run_id(run_id)?;
     if line.contains('\n') {
         return Err("telemetry line may not contain newlines".into());
@@ -43,6 +84,8 @@ fn telemetry_log_inner(project_dir: &Path, run_id: &str, line: &str) -> Result<(
     std::fs::create_dir_all(&dir).map_err(|e| format!("create dir: {e}"))?;
 
     let path = dir.join(format!("{run_id}.jsonl"));
+    rotate_if_needed(&path, cap_bytes)?;
+
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
@@ -113,6 +156,99 @@ mod tests {
         let dir = tempdir().unwrap();
         let res = telemetry_log_inner(dir.path(), "../escape", r#"{"at":1}"#);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn telemetry_log_appends_in_place_below_cap() {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        // 1KB cap — well above the line size, so no rotation.
+        telemetry_log_with_cap(project, "r-cap", r#"{"at":1}"#, 1024).unwrap();
+        telemetry_log_with_cap(project, "r-cap", r#"{"at":2}"#, 1024).unwrap();
+
+        let f = project.join(".terminalx/pipeline-telemetry/r-cap.jsonl");
+        let rotated = project.join(".terminalx/pipeline-telemetry/r-cap.jsonl.1");
+        assert!(f.exists());
+        assert!(!rotated.exists(), "should not rotate below cap");
+        let lines: Vec<String> = fs::read_to_string(&f).unwrap().lines().map(String::from).collect();
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn telemetry_log_rotates_at_or_above_cap() {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        let f = project.join(".terminalx/pipeline-telemetry/r-rot.jsonl");
+        let rotated = project.join(".terminalx/pipeline-telemetry/r-rot.jsonl.1");
+
+        // First write seeds the file with content >= the tiny cap so
+        // the NEXT write triggers rotation. `{"at":1}` + '\n' = 9 bytes.
+        telemetry_log_with_cap(project, "r-rot", r#"{"at":1}"#, 1024).unwrap();
+        // Cap of 8 bytes: file is now 9 bytes >= 8, so the next call
+        // should rotate the existing file and start fresh.
+        telemetry_log_with_cap(project, "r-rot", r#"{"at":2}"#, 8).unwrap();
+
+        assert!(f.exists(), ".jsonl should exist after rotation");
+        assert!(rotated.exists(), ".jsonl.1 should exist after rotation");
+
+        let current = fs::read_to_string(&f).unwrap();
+        let archived = fs::read_to_string(&rotated).unwrap();
+        assert!(current.contains(r#""at":2"#), "fresh file should hold the new line");
+        assert!(!current.contains(r#""at":1"#), "fresh file should not hold pre-rotation lines");
+        assert!(archived.contains(r#""at":1"#), "rotated file should hold the pre-rotation line");
+    }
+
+    #[test]
+    fn telemetry_log_rotation_uses_jsonl_dot_one_naming() {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        let tdir = project.join(".terminalx/pipeline-telemetry");
+
+        telemetry_log_with_cap(project, "r-name", r#"{"at":1}"#, 1024).unwrap();
+        telemetry_log_with_cap(project, "r-name", r#"{"at":2}"#, 8).unwrap();
+
+        // Only `.jsonl` and `.jsonl.1` should exist — no `.2`, `.bak`,
+        // timestamped files, etc.
+        let mut names: Vec<String> = fs::read_dir(&tdir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["r-name.jsonl".to_string(), "r-name.jsonl.1".to_string()]);
+    }
+
+    #[test]
+    fn telemetry_log_multiple_rotations_keep_only_one_archive() {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        let tdir = project.join(".terminalx/pipeline-telemetry");
+        let f = project.join(".terminalx/pipeline-telemetry/r-multi.jsonl");
+        let rotated = project.join(".terminalx/pipeline-telemetry/r-multi.jsonl.1");
+
+        // Force three rotations in a row using a tiny cap. Each call
+        // (after the first) renames the prior file → .jsonl.1, so the
+        // OLD .jsonl.1 is overwritten — single-rotation invariant.
+        telemetry_log_with_cap(project, "r-multi", r#"{"at":1}"#, 1024).unwrap();
+        telemetry_log_with_cap(project, "r-multi", r#"{"at":2}"#, 8).unwrap();
+        telemetry_log_with_cap(project, "r-multi", r#"{"at":3}"#, 8).unwrap();
+        telemetry_log_with_cap(project, "r-multi", r#"{"at":4}"#, 8).unwrap();
+
+        // Directory contains exactly two files.
+        let names: Vec<String> = fs::read_dir(&tdir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names.len(), 2, "should never accumulate more than two telemetry files: {names:?}");
+        assert!(f.exists());
+        assert!(rotated.exists());
+
+        // The current archive should hold the immediately-prior line
+        // (at=3), proving the old .1 (which held at=2) was overwritten.
+        let archived = fs::read_to_string(&rotated).unwrap();
+        assert!(archived.contains(r#""at":3"#), "archive should hold most recent rotation: {archived}");
+        assert!(!archived.contains(r#""at":2"#), "archive should have overwritten older rotation: {archived}");
+        let current = fs::read_to_string(&f).unwrap();
+        assert!(current.contains(r#""at":4"#));
     }
 
     #[test]

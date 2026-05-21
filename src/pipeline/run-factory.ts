@@ -78,6 +78,14 @@ export interface CreateRunFromTemplateInput {
    * provided; ignored otherwise. Phase 3a.3.
    */
   projectDir?: string;
+  /**
+   * Phase 3a.7: user preference for the trivial-complexity auto-approve
+   * gate. Threaded through to `initialRunState.autoApprovePlan` as the
+   * seed value. The state-machine still re-stamps on `planner_done` based
+   * on plan complexity (unchanged behavior) — this is the audit-trail
+   * starting state. Defaults to `false`.
+   */
+  autoApprovePlan?: boolean;
   deps: RunFactoryDeps;
 }
 
@@ -223,6 +231,7 @@ export async function createRunFromTemplate(
     // stays deterministic even if the user edits the template later.
     templateRetryBudget: template.pipeline.retryBudget,
     templateDualReviewer: template.pipeline.dualReviewer,
+    autoApprovePlan: input.autoApprovePlan,
   });
 
   return { runId, fingerprint };

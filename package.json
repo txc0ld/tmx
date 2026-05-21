@@ -1,7 +1,7 @@
 {
   "name": "terminalx",
-  "version": "0.1.0",
-  "description": "Infinite canvas terminal workspace for AI agent orchestration",
+  "version": "0.2.0",
+  "description": "Native desktop app for orchestrating multiple CLI agents with infinite-canvas workspace and end-to-end pipeline automation.",
   "author": "Fantom Labs",
   "license": "MIT",
   "type": "module",
@@ -12,6 +12,7 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "hooks:install": "powershell -ExecutionPolicy Bypass -File scripts/install-git-hooks.ps1"
   },
   "dependencies": {
@@ -40,6 +41,7 @@
     }
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@tauri-apps/cli": "^2.2.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

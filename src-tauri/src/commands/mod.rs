@@ -11,3 +11,4 @@ pub mod pipeline;
 pub mod secrets;
 pub mod secrets_mask;
 pub mod failure_bundle;
+pub mod health;

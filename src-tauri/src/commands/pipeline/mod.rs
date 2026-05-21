@@ -10,8 +10,10 @@
 //! - guardrails: pipeline_guardrails_install / _uninstall (Phase 2c-ii.3)
 //! - capabilities: pipeline_capabilities_install / _uninstall (Phase 2c-ii.4)
 //! - role_prompts: pipeline_read_role_prompt (Phase 2c-iii post-script)
+//! - cleanup: pipeline_cleanup_old_runs (age-based GC for terminal runs)
 
 pub mod capabilities;
+pub mod cleanup;
 pub mod guardrails;
 pub mod managed_marker;
 pub mod merger;
@@ -24,6 +26,7 @@ pub mod verification;
 pub mod worktree;
 
 pub use capabilities::*;
+pub use cleanup::*;
 pub use guardrails::*;
 pub use merger::*;
 pub use preflight::*;

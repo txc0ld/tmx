@@ -4,20 +4,26 @@ import { useProjectStore } from '@/stores/projectStore';
 import { useTimelineStore } from '@/stores/timelineStore';
 import { colors } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
-import { agentRunOneshot, httpFetch, loadWorkspace, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite, secretsMask } from '@/utils/ipc';
+import { isPipelineLaunchShortcut } from '@/utils/keyboardShortcuts';
+import { agentRunOneshot, httpFetch, loadWorkspace, pipelineCleanupOldRuns, pipelineInstallSkills, pipelineTelemetryLog, ptyWrite, readFileText, secretsMask } from '@/utils/ipc';
 import { setPipelineTelemetryEmitter, setPipelineLifecycleEmitter, usePipelineStore } from '@/stores/pipelineStore';
 import { isTerminalState } from '@/pipeline/state-machine';
 import { handleGuardrailsLifecycle } from '@/pipeline/guardrails-lifecycle';
 import { handleCapabilitiesLifecycle, activeRoleForState } from '@/pipeline/capabilities-lifecycle';
 import { handleFailureBundleLifecycle } from '@/pipeline/failure-bundle-lifecycle';
+import { handleBuilderKickLifecycle } from '@/pipeline/builder-kick-lifecycle';
+import { handlePlannerRerunLifecycle } from '@/pipeline/planner-rerun-lifecycle';
+import { makeRunPersistenceLifecycleHandler, hydrateRunsFromDisk, flushPendingPersistence } from '@/pipeline/run-persistence';
 import { startRedTeamDispatcher } from '@/pipeline/red-team-dispatcher';
 import { startDualReviewerDispatcher } from '@/pipeline/dual-reviewer-dispatcher';
+import { startSingleReviewerDispatcher } from '@/pipeline/single-reviewer-dispatcher';
 import { buildOneshotBrief } from '@/pipeline/brief-builder';
 import { startStuckDetector } from '@/pipeline/stuck-detector';
 import { startNotifier } from '@/pipeline/notifications';
 import { startWebhookNotifier } from '@/pipeline/webhook-notifier';
 import { sendNotification } from '@tauri-apps/plugin-notification';
 import { getLastStdoutAt, ingestOneshotResult, clearRunBuffers } from '@/pipeline/controller-runtime';
+import { startPipelinePtyRouter } from '@/pipeline/pty-router';
 import type { PipelineState } from '@/types';
 import { resumeFromClarification } from '@/pipeline/scratchpad-watcher';
 import type { AgentTile, PipelineRole, PipelineRun } from '@/types';
@@ -26,10 +32,18 @@ import { ProjectSidebar } from '@/components/sidebar/ProjectSidebar';
 import { TopBar } from '@/components/topbar/TopBar';
 import { StatusRail } from '@/components/status/StatusRail';
 import { ToastContainer } from '@/components/status/ToastContainer';
+import { WelcomeBanner } from '@/components/status/WelcomeBanner';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { SearchOverlay } from '@/components/canvas/SearchOverlay';
 import { SessionTimeline } from '@/components/timeline/SessionTimeline';
 import { SettingsModal } from '@/components/settings/SettingsModal';
+import { SensitivePathsModal } from '@/components/pipeline/SensitivePathsModal';
+import { StartPipelineRunModal } from '@/components/pipeline/StartPipelineRunModal';
+import { RunHistoryPanel } from '@/components/pipeline/RunHistoryPanel';
+import { RunLogsModal } from '@/components/pipeline/RunLogsModal';
+import { launchPipelineRun } from '@/pipeline/launch';
+import { useToastStore } from '@/stores/toastStore';
+import { useSettingsStore, expandBranchPattern } from '@/stores/settingsStore';
 import type { TileType, Tile } from '@/types';
 import type { TileTemplate } from '@/stores/templateStore';
 import '@/stores/clipboardStore'; // Initialize clipboard listener
@@ -98,6 +112,69 @@ function findActiveRolePtyId(run: PipelineRun): string | undefined {
   return undefined;
 }
 
+/**
+ * Project IDs whose pipeline runs have already been hydrated from disk this
+ * session. Module-level so HMR-driven re-mounts don't re-hydrate (which
+ * could race with the lifecycle-handler writes happening for the same
+ * runs). The set is intentionally never cleared — once a project's runs
+ * are in pipelineStore, they stay there for the session's lifetime.
+ */
+const hydratedProjectIds = new Set<string>();
+
+/** Test-only: clear the hydration tracker between tests. */
+export function _resetHydratedProjectIdsForTest(): void {
+  hydratedProjectIds.clear();
+}
+
+/**
+ * Hydrate one project's persisted runs into pipelineStore if we haven't
+ * already done so this session. Pulled out so the boot effect and the
+ * project-switch subscription share the same dedup + warning behavior.
+ *
+ * Piggybacks the cleanup pass on the same once-per-session/project gate —
+ * `pipeline_cleanup_old_runs` deletes terminal runs older than the user's
+ * configured retention. The frontend hydration runs first (so the in-memory
+ * `pipelineStore.runs` is populated), then cleanup deletes the on-disk
+ * artifacts. Stale store entries for runs whose JSON we just deleted are
+ * fine — they're terminal, not active, and will be evicted on the next app
+ * boot when hydration walks the now-cleaner directory.
+ */
+function maybeHydrateProject(projectId: string): void {
+  if (!projectId) return;
+  if (hydratedProjectIds.has(projectId)) return;
+  const proj = useProjectStore.getState().projects.find(p => p.id === projectId);
+  if (!proj?.cwd) return;
+  hydratedProjectIds.add(projectId);
+  const projectCwd = proj.cwd;
+  hydrateRunsFromDisk(projectCwd)
+    .catch(err => {
+      console.warn('[pipeline] run hydration failed:', err);
+    })
+    .finally(() => {
+      const retentionDays = useSettingsStore.getState().pipelinePrefs.retentionDays;
+      if (retentionDays <= 0) return; // 0 = disabled
+      pipelineCleanupOldRuns({ projectDir: projectCwd, retentionDays })
+        .then(res => {
+          if (
+            res.removed_records > 0 ||
+            res.removed_telemetry > 0 ||
+            res.removed_worktrees > 0
+          ) {
+            console.info(
+              '[pipeline] cleanup:',
+              `${res.removed_records} records,`,
+              `${res.removed_telemetry} telemetry files,`,
+              `${res.removed_worktrees} worktrees removed`,
+              res.errors.length ? `(${res.errors.length} errors)` : '',
+            );
+          }
+        })
+        .catch(err => {
+          console.warn('[pipeline] cleanup failed:', err);
+        });
+    });
+}
+
 function spawnTileAtCenter(type: TileType, overrides: Record<string, unknown> = {}): void {
   const state = useCanvasStore.getState();
   const pid = state.activeProject;
@@ -134,6 +211,33 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
+  // Pipeline launch UX. Two modals interlock:
+  //
+  //   StartPipelineRunModal — collects goal + branch from the user.
+  //   SensitivePathsModal   — opens mid-launch when preflight finds .env / *.pem / etc.
+  //
+  // The launch flow (`src/pipeline/launch.ts`) is UI-framework-free; it
+  // accepts a `confirmSensitivePaths` callback. We wire that callback to a
+  // promise-resolver pattern: stash the resolver in state, render the modal,
+  // resolve from the modal's button clicks. Keeps the launch flow synchronous-
+  // looking while still gating on user input.
+  const [pipelineRunOpen, setPipelineRunOpen] = useState(false);
+  // Re-run pre-fill: when the user clicks Re-run on a terminal-state run,
+  // we read PIPELINE_GOAL.md off the original worktree and pass it down to
+  // StartPipelineRunModal as `defaultGoal`. Cleared whenever the modal
+  // closes so a subsequent fresh launch starts with an empty textarea.
+  const [pipelineDefaultGoal, setPipelineDefaultGoal] = useState<string>('');
+  const [pipelineDefaultBranch, setPipelineDefaultBranch] = useState<string>('');
+  const [sensitivePathsState, setSensitivePathsState] = useState<{
+    paths: string[];
+    resolve: (proceed: boolean) => void;
+  } | null>(null);
+  // Run history register + drill-through to logs. The history panel only
+  // selects a run; rendering the actual logs modal lives at the App level
+  // so the panel stays a thin lister.
+  const [runHistoryOpen, setRunHistoryOpen] = useState(false);
+  const [logsTarget, setLogsTarget] = useState<PipelineRun | null>(null);
+
   // Install per-app subscriptions at mount (not module import). Avoids
   // leaking a duplicate subscription if the module is re-loaded under HMR
   // or the app re-renders at the root.
@@ -169,6 +273,19 @@ export default function App() {
     const offGuardrails = setPipelineLifecycleEmitter(handleGuardrailsLifecycle);
     const offCapabilities = setPipelineLifecycleEmitter(handleCapabilitiesLifecycle);
     const offFailureBundle = setPipelineLifecycleEmitter(handleFailureBundleLifecycle);
+    // Run-record persistence: writes <projectDir>/.terminalx/pipeline-runs/<id>.json
+    // on every state transition so reload/crash/HMR don't wipe the run state.
+    // Hydration on boot is wired below in the project-load effect.
+    const offRunPersistence = setPipelineLifecycleEmitter(makeRunPersistenceLifecycleHandler());
+    // Builder kick: deterministic handoff prompt to the Builder PTY when
+    // the run enters `building`. The agent-chain wire pipes the planner's
+    // tail output too, but it races the state transition; this kick makes
+    // the handoff observable and idempotent (per-plan-path dedup).
+    const offBuilderKick = setPipelineLifecycleEmitter(handleBuilderKickLifecycle);
+    // Planner re-run kick: when a run loops `awaiting_plan_approval → planning`
+    // after a `reject_plan` event, write the user's feedback to the live
+    // Planner PTY so it can revise the plan in-place (no role-prompt churn).
+    const offPlannerRerun = setPipelineLifecycleEmitter(handlePlannerRerunLifecycle);
     // Phase 3b.2: when a run leaves `awaiting_clarification`, reset the
     // scratchpad-watcher's pendingProbe debounce so the next stagnation
     // window can fire one fresh synthetic clarification (rather than being
@@ -182,8 +299,22 @@ export default function App() {
       offGuardrails();
       offCapabilities();
       offFailureBundle();
+      offRunPersistence();
+      offBuilderKick();
+      offPlannerRerun();
       offScratchpadResume();
     };
+  }, []);
+
+  // beforeunload: flush any debounced run-persistence writes so the
+  // disk record is fresh when the renderer dies. Best-effort — the IPC
+  // is fire-and-forget, but `writeFileText` enqueues onto the Tauri
+  // command dispatch loop and Rust completes the atomic rename even
+  // after the renderer goes away.
+  useEffect(() => {
+    const onUnload = () => flushPendingPersistence();
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
   }, []);
 
   // Audit fix: prune per-run renderer state on terminal transitions.
@@ -203,6 +334,13 @@ export default function App() {
     });
     return off;
   }, []);
+
+  // Global PTY → controller-runtime router. Without this, every sentinel
+  // an agent emits goes nowhere — `ingestPtyChunk` was previously only
+  // called from tests. The router maintains a ptyId→{runId,role} map by
+  // subscribing to canvasStore (so the lookup is O(1) per chunk) and
+  // forwards matching `pty-output` events into the sentinel parser.
+  useEffect(() => startPipelinePtyRouter(), []);
 
   // Polish.1: red-team dispatcher. Closes the spawn-side gap from Phase
   // 3c.6 — without this, complex runs reaching `awaiting_red_team` after
@@ -271,6 +409,41 @@ export default function App() {
         ingestOneshotResult({
           runId,
           role,
+          stdout: result.stdout,
+          exitCode: result.exit_code,
+        });
+      },
+    });
+    return stop;
+  }, []);
+
+  // Single-reviewer dispatcher (STANDARD-run companion to the dual variant).
+  // The Anthropic Trio template marks Reviewer with `config.oneshot: true`,
+  // so instantiate.ts skips spawning a live Reviewer tile. On entry into
+  // `reviewing`, this dispatcher fires `agent_run_oneshot` with the
+  // assembled brief and pipes the captured stdout back through
+  // `ingestOneshotResult` so the existing controller-runtime parser
+  // dispatches the `reviewer_done` / `abort` events.
+  useEffect(() => {
+    const stop = startSingleReviewerDispatcher({
+      runOneShotReviewer: async ({ runId }) => {
+        const run = usePipelineStore.getState().runs[runId];
+        if (!run) return;
+        const project = useProjectStore.getState().projects.find(p => p.id === run.projectId);
+        const brief = await buildOneshotBrief({ role: 'reviewer', run, projectDir: project?.cwd });
+        if (!brief) {
+          console.warn(`[single-reviewer] role-prompt for reviewer missing — skipping spawn`);
+          return;
+        }
+        const result = await agentRunOneshot({
+          agent: 'claude',
+          args: ['--print'],
+          stdin: brief,
+          timeoutSecs: 600,
+        });
+        ingestOneshotResult({
+          runId,
+          role: 'reviewer',
           stdout: result.stdout,
           exitCode: result.exit_code,
         });
@@ -401,6 +574,13 @@ export default function App() {
         useCanvasStore.getState().switchProject(storeActive);
       }
 
+      // Pipeline run-record hydration: walk
+      // <projectCwd>/.terminalx/pipeline-runs/*.json for the active project,
+      // deserialize, apply the active-state-on-reload policy, and load into
+      // pipelineStore.runs. The project-switch subscription below picks up
+      // any subsequent project changes during the session.
+      maybeHydrateProject(storeActive ?? useProjectStore.getState().active);
+
       // Restore workspace — try IPC (disk) first, fall back to localStorage cache
       const pid = useCanvasStore.getState().activeProject;
       if (pid) {
@@ -448,6 +628,21 @@ export default function App() {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Project-switch hydration: the boot effect above only loads runs for the
+  // initially-active project. When the user switches via the sidebar, the
+  // newly-active project's `<projectCwd>/.terminalx/pipeline-runs/*.json`
+  // snapshots need to land in pipelineStore so the run-history panel + the
+  // pipeline-pending badge stop being silent. Per-session dedup via the
+  // module-level `hydratedProjectIds` Set so we don't race with the
+  // single-writer lifecycle handler if the user toggles projects rapidly.
+  useEffect(() => {
+    return useProjectStore.subscribe((state, prev) => {
+      if (state.active && state.active !== prev.active) {
+        maybeHydrateProject(state.active);
+      }
+    });
+  }, []);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Don't intercept ANY keystrokes when xterm's hidden textarea (or any
@@ -466,6 +661,14 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setPaletteOpen(p => !p);
+      }
+      // Cmd/Ctrl+Shift+P — open the pipeline launch modal. Guard against
+      // re-open from a held-key repeat (the functional setter no-ops if
+      // already true, but preventDefault still needs to run once).
+      if (isPipelineLaunchShortcut(e)) {
+        e.preventDefault();
+        setPipelineRunOpen(prev => prev ? prev : true);
+        return;
       }
       // Ctrl+F — global search across tiles
       if ((e.metaKey || e.ctrlKey) && e.key === 'f' && !inTile) {
@@ -561,6 +764,128 @@ export default function App() {
     spawnTileAtCenter(template.category, template.config);
   }, []);
 
+  // Fresh auto-suffixed branch name. Always generates a NEW one — the
+  // re-run flow deliberately does not reuse the prior run's branch (terminal
+  // runs already own their branch on disk; reuse would collide).
+  //
+  // Phase 3a.7: expands tokens from the user's `branchPattern` pref.
+  // Falls back to the legacy literal if the pattern produces an invalid
+  // branch name (validation runs at submit time too — the StartPipelineRunModal
+  // shows the error inline if the user edits the value).
+  const freshBranchName = useCallback(() => {
+    const pattern = useSettingsStore.getState().pipelinePrefs.branchPattern;
+    const { branch, valid } = expandBranchPattern(pattern);
+    if (valid) return branch;
+    return `pipeline/run-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 4)}`;
+  }, []);
+
+  // Re-run with this goal. Wired to:
+  //   1. The PipelineControllerTile's "Re-run" button via a window event
+  //      (so the tile doesn't have to thread a callback prop through every
+  //      controller-tile callsite).
+  //   2. The RunHistoryPanel's per-row Re-run button via the `onRerun` prop.
+  //
+  // Reads `<run.worktreePath>/PIPELINE_GOAL.md` off disk, strips the
+  // `# Pipeline goal\n\n` header that `launch.ts` writes, and opens the
+  // launch modal pre-filled. If the file is missing (worktree was deleted)
+  // we toast a warning and STILL open the modal — never block the user on a
+  // missing artifact. Switches the active project first if the run belongs
+  // to a different one so the launch flow's `useProjectStore.getState()`
+  // resolves to the right project.
+  const handleRerunWithGoal = useCallback(
+    async (run: PipelineRun) => {
+      const setActive = useProjectStore.getState().setActive;
+      const activeProjectId = useProjectStore.getState().active;
+      if (run.projectId !== activeProjectId) {
+        setActive(run.projectId);
+      }
+      let goal = '';
+      try {
+        const raw = await readFileText(`${run.worktreePath}/PIPELINE_GOAL.md`);
+        // Strip the leading `# Pipeline goal\n\n` header that launch.ts
+        // writes. Defensive: tolerate either CRLF or LF line endings, and
+        // a missing trailing blank line. Anything that doesn't match the
+        // expected prefix is passed through verbatim — better to show the
+        // raw file than silently lose content.
+        const stripped = raw
+          .replace(/^# Pipeline goal\r?\n\r?\n?/, '')
+          .replace(/\r?\n+$/, '');
+        goal = stripped;
+      } catch {
+        useToastStore
+          .getState()
+          .addToast(
+            "Couldn't read prior goal — file missing. Opening launch modal with empty goal.",
+            'warning',
+          );
+      }
+      setPipelineDefaultGoal(goal);
+      setPipelineDefaultBranch(freshBranchName());
+      setPipelineRunOpen(true);
+      setRunHistoryOpen(false);
+    },
+    [freshBranchName],
+  );
+
+  // Subscribe to the controller-tile's `tx-pipeline-rerun` window event.
+  // The tile dispatches a CustomEvent with `{ run }` in detail; we route it
+  // through `handleRerunWithGoal` exactly like the history-panel Re-run.
+  useEffect(() => {
+    function onRerun(e: Event) {
+      const detail = (e as CustomEvent<{ run: PipelineRun }>).detail;
+      if (!detail?.run) return;
+      void handleRerunWithGoal(detail.run);
+    }
+    window.addEventListener('tx-pipeline-rerun', onRerun);
+    return () => window.removeEventListener('tx-pipeline-rerun', onRerun);
+  }, [handleRerunWithGoal]);
+
+  // Pipeline run launch — invoked by StartPipelineRunModal's submit button.
+  // Returns the launch flow's structured result so the modal can surface
+  // the error inline instead of via a toast (faster feedback loop).
+  const handleStartPipelineRun = useCallback(
+    async (input: { goal: string; branch: string; templateId: string }) => {
+      const result = await launchPipelineRun({
+        goal: input.goal,
+        branch: input.branch,
+        templateId: input.templateId,
+        confirmSensitivePaths: (paths) =>
+          new Promise<boolean>((resolve) => {
+            setSensitivePathsState({ paths, resolve });
+          }),
+      });
+      if (result.ok) {
+        setPipelineRunOpen(false);
+        // Clear the rerun pre-fill so the next fresh launch starts empty.
+        setPipelineDefaultGoal('');
+        setPipelineDefaultBranch('');
+        useToastStore.getState().addToast(
+          `Pipeline run started — branch ${input.branch}`,
+          'success',
+        );
+        return { ok: true };
+      }
+      // Concurrent-run guard: close the modal and toast — user has to
+      // act on the existing run (abort or wait), no point re-opening
+      // the launch form with the same inputs.
+      if (result.reason === 'already-active') {
+        setPipelineRunOpen(false);
+        useToastStore.getState().addToast(result.error, 'error');
+        return { ok: false, error: result.error };
+      }
+      // Toast non-cancellation errors so they're visible even after the
+      // modal is closed; cancellations are silent (user-initiated).
+      if (result.reason !== 'cancelled') {
+        useToastStore.getState().addToast(
+          `Pipeline launch failed: ${result.error}`,
+          'error',
+        );
+      }
+      return { ok: false, error: result.error };
+    },
+    [],
+  );
+
   const project = projects.find(p => p.id === activeProject);
 
   return (
@@ -581,7 +906,10 @@ export default function App() {
           onAddTile={handleAddTile}
           onAddFromTemplate={handleAddFromTemplate}
           onOpenPalette={() => setPaletteOpen(true)}
+          onStartPipelineRun={() => setPipelineRunOpen(true)}
+          onOpenRunHistory={() => setRunHistoryOpen(true)}
         />
+        <WelcomeBanner />
         <InfiniteCanvas />
         <SessionTimeline onClose={() => useTimelineStore.getState().setOpen(false)} />
         <StatusRail />
@@ -600,6 +928,83 @@ export default function App() {
       )}
 
       <SettingsModal />
+
+      {/* Launch + sensitive-paths gate are visually mutually exclusive.
+          The launch modal stays mounted (so the user's typed goal isn't
+          lost) but is hidden while the gate is up. On gate cancel the
+          launch flow returns; the user re-sees the launch modal with the
+          inline error pre-filled. */}
+      {pipelineRunOpen && (
+        <StartPipelineRunModal
+          defaultBranch={pipelineDefaultBranch || freshBranchName()}
+          defaultGoal={pipelineDefaultGoal}
+          defaultTemplateId={useSettingsStore.getState().pipelinePrefs.defaultTemplate}
+          onSubmit={handleStartPipelineRun}
+          onCancel={() => {
+            setPipelineRunOpen(false);
+            setPipelineDefaultGoal('');
+            setPipelineDefaultBranch('');
+          }}
+          hidden={sensitivePathsState !== null}
+        />
+      )}
+
+      {sensitivePathsState && (
+        <SensitivePathsModal
+          paths={sensitivePathsState.paths}
+          onAcknowledge={() => {
+            sensitivePathsState.resolve(true);
+            setSensitivePathsState(null);
+          }}
+          onCancel={() => {
+            sensitivePathsState.resolve(false);
+            setSensitivePathsState(null);
+          }}
+        />
+      )}
+
+      {/* Run history register + drill-through. The panel reads runs from
+          pipelineStore directly; clicking a row stages a logs target which
+          mounts RunLogsModal in front. Closing logs falls back to history. */}
+      {runHistoryOpen && (
+        <RunHistoryPanel
+          onClose={() => setRunHistoryOpen(false)}
+          onOpenLogs={(run) => {
+            // Cross-project: switch the active project before mounting
+            // the logs modal so the user lands on that project's canvas
+            // when they close the modal — otherwise the modal pops over
+            // a project they aren't viewing and "Close" returns them to
+            // the wrong canvas. We do NOT abort the prior project's runs
+            // — pipelineStore retains them across switches.
+            const activeProjectId = useProjectStore.getState().active;
+            if (run.projectId && run.projectId !== activeProjectId) {
+              useProjectStore.getState().setActive(run.projectId);
+            }
+            // Mark this run as viewed so the sidebar's red "unviewed
+            // failed" dot clears. Best-effort — localStorage failures are
+            // silent (private-mode browsers / quota exhaustion).
+            try {
+              localStorage.setItem(`tx-run-viewed-${run.id}`, '1');
+            } catch {
+              /* ignore */
+            }
+            setLogsTarget(run);
+          }}
+          onRerun={(run) => {
+            void handleRerunWithGoal(run);
+          }}
+        />
+      )}
+
+      {logsTarget && (
+        <RunLogsModal
+          run={logsTarget}
+          projectDir={
+            projects.find((p) => p.id === logsTarget.projectId)?.cwd ?? ''
+          }
+          onClose={() => setLogsTarget(null)}
+        />
+      )}
 
       <ToastContainer />
     </div>

@@ -22,7 +22,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     baseBranch: 'main',
     state: 'idle',
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
-    retryCounters: { reviewerReject: 0, ciFail: 0 },
+    retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
     startedAt: 0,
     escalationLog: [],
     tiles: {},
@@ -32,8 +32,8 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     autoApprovePlan: false,
     useDualReviewer: false,
     runRedTeam: false,
-    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
-    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3, planReject: 3 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
     templateDualReviewer: false,
     ...overrides,
   };
@@ -113,7 +113,7 @@ describe('pipeline state machine', () => {
   it('reviewing + reviewer reject exceeds budget → escalated', () => {
     const run = makeRun({
       state: 'reviewing',
-      retryCounters: { reviewerReject: 3, ciFail: 0 },
+      retryCounters: { reviewerReject: 3, ciFail: 0, planReject: 3 },
     });
     const ev: PipelineEvent = {
       type: 'reviewer_done',
@@ -148,7 +148,7 @@ describe('pipeline state machine', () => {
   it('any active state + ci_fail exceeds budget → escalated', () => {
     const run = makeRun({
       state: 'building',
-      retryCounters: { reviewerReject: 0, ciFail: 3 },
+      retryCounters: { reviewerReject: 0, ciFail: 3, planReject: 0 },
     });
     const ev: PipelineEvent = {
       type: 'ci_fail',
@@ -217,7 +217,7 @@ describe('pipeline state machine', () => {
     });
     expect(run.state).toBe('idle');
     expect(run.artifacts.builds).toEqual([]);
-    expect(run.retryCounters).toEqual({ reviewerReject: 0, ciFail: 0 });
+    expect(run.retryCounters).toEqual({ reviewerReject: 0, ciFail: 0, planReject: 0 });
   });
 
   it('planner_failed → failed with planner_refused class', () => {
@@ -284,7 +284,7 @@ describe('pipeline state machine', () => {
   it('reviewer reject exceeds budget sets retryCounter to 4', () => {
     const run = makeRun({
       state: 'reviewing',
-      retryCounters: { reviewerReject: 3, ciFail: 0 },
+      retryCounters: { reviewerReject: 3, ciFail: 0, planReject: 3 },
     });
     const ev: PipelineEvent = {
       type: 'reviewer_done',
@@ -377,10 +377,69 @@ describe('pipeline state machine', () => {
     expect(run.escalationLog[0].decision).toBe('replan');
   });
 
+  // ─── reject_plan (operator-driven plan rejection) ────────────────────
+
+  it('reject_plan: awaiting_plan_approval → planning, increments planReject counter, appends rejection to questions', () => {
+    const run = makeRun({
+      state: 'awaiting_plan_approval',
+      retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
+    });
+    const ev: PipelineEvent = { type: 'reject_plan', feedback: 'Scope is too broad — focus on auth only.' };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('planning');
+    expect(next.retryCounters.planReject).toBe(1);
+    expect(next.artifacts.questions).toHaveLength(1);
+    expect(next.artifacts.questions[0].stage).toBe('planner');
+    expect(next.artifacts.questions[0].context).toContain('auth only');
+    expect(next.endedAt).toBeUndefined();
+  });
+
+  it('reject_plan: exceeding planReject budget → escalated with plan_reject_exhausted', () => {
+    const run = makeRun({
+      state: 'awaiting_plan_approval',
+      retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 3 },
+      effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3, planReject: 3 },
+    });
+    const ev: PipelineEvent = { type: 'reject_plan', feedback: 'Still wrong direction' };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('escalated');
+    expect(next.failureClass).toBe('plan_reject_exhausted');
+    expect(next.retryCounters.planReject).toBe(4);
+    expect(next.endedAt).toBeDefined();
+  });
+
+  it('reject_plan from non-awaiting_plan_approval states is a no-op', () => {
+    for (const state of ['planning', 'building', 'reviewing', 'idle', 'done', 'failed'] as const) {
+      const run = makeRun({ state });
+      const ev: PipelineEvent = { type: 'reject_plan', feedback: 'whatever' };
+      const next = reducer(run, ev);
+      expect(next).toBe(run);
+    }
+  });
+
+  it('reject_plan + planner_done → run loops cleanly back through awaiting_plan_approval', () => {
+    let run = makeRun({ state: 'awaiting_plan_approval' });
+    run = reducer(run, { type: 'reject_plan', feedback: 'too vague' });
+    expect(run.state).toBe('planning');
+    run = reducer(run, {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's-v2', planPath: 'p-v2',
+        tasks: [], summary: 's2', planCommitSha: 'sha-v2',
+        confidence: 'verified',
+      },
+    });
+    expect(run.state).toBe('awaiting_plan_approval');
+    expect(run.planLineage).toEqual(['sha-v2']);
+    expect(run.retryCounters.planReject).toBe(1); // counter persists across the loop
+  });
+
   // ─── Complexity gate (Phase 3c.1) ─────────────────────────────────────
 
-  it('complexity=trivial: planner_done auto-skips awaiting_plan_approval, halves budgets', () => {
-    const run = makeRun({ state: 'planning' });
+  it('complexity=trivial + user opted in (autoApprovePlan=true): auto-skips awaiting_plan_approval, halves budgets', () => {
+    // Phase 3a.7: the trivial fast-path is now gated by the user pref,
+    // seeded into run.autoApprovePlan by the run-factory.
+    const run = makeRun({ state: 'planning', autoApprovePlan: true });
     const ev: PipelineEvent = {
       type: 'planner_done',
       plan: {
@@ -391,14 +450,36 @@ describe('pipeline state machine', () => {
       },
     };
     const next = reducer(run, ev);
-    // The whole point: trivial bypasses the human confirm gate.
+    // The whole point: trivial + opt-in bypasses the human confirm gate.
     expect(next.state).toBe('building');
     expect(next.runMode).toBe('trivial');
     expect(next.autoApprovePlan).toBe(true);
     expect(next.useDualReviewer).toBe(false);
     expect(next.runRedTeam).toBe(false);
     // Halved with floor + min-1: 3 → 1.
-    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 1, ciFail: 1 });
+    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 1, ciFail: 1, planReject: 1 });
+  });
+
+  it('complexity=trivial + user opted out (autoApprovePlan=false, default): still routes through awaiting_plan_approval', () => {
+    // Phase 3a.7: default user pref is opt-out. Trivial complexity alone
+    // is no longer enough — the run must also have autoApprovePlan=true
+    // (seeded from settings) for the fast-path to engage.
+    const run = makeRun({ state: 'planning' /* autoApprovePlan: false default */ });
+    const ev: PipelineEvent = {
+      type: 'planner_done',
+      plan: {
+        stage: 'planner', branch: 'feat/r1', specPath: 's', planPath: 'p',
+        tasks: [], summary: 's', planCommitSha: 'sha-trivial-optout',
+        complexity: 'trivial',
+        confidence: 'verified',
+      },
+    };
+    const next = reducer(run, ev);
+    expect(next.state).toBe('awaiting_plan_approval');
+    expect(next.runMode).toBe('trivial');
+    expect(next.autoApprovePlan).toBe(false);
+    // Budgets still scale with complexity regardless of approval gating.
+    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 1, ciFail: 1, planReject: 1 });
   });
 
   it('complexity=standard: planner_done transitions to awaiting_plan_approval, budgets unchanged', () => {
@@ -418,7 +499,7 @@ describe('pipeline state machine', () => {
     expect(next.autoApprovePlan).toBe(false);
     expect(next.useDualReviewer).toBe(false);
     expect(next.runRedTeam).toBe(false);
-    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 3, ciFail: 3 });
+    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 3, ciFail: 3, planReject: 3 });
   });
 
   it('complexity=standard but template.dualReviewer=true → useDualReviewer=true', () => {
@@ -454,7 +535,7 @@ describe('pipeline state machine', () => {
     expect(next.autoApprovePlan).toBe(false);
     expect(next.useDualReviewer).toBe(true);
     expect(next.runRedTeam).toBe(true);
-    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 6, ciFail: 6 });
+    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 6, ciFail: 6, planReject: 6 });
   });
 
   it('complexity undefined: defaults to standard', () => {
@@ -474,11 +555,14 @@ describe('pipeline state machine', () => {
     expect(next.autoApprovePlan).toBe(false);
     expect(next.useDualReviewer).toBe(false);
     expect(next.runRedTeam).toBe(false);
-    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 3, ciFail: 3 });
+    expect(next.effectiveRetryBudgets).toEqual({ reviewerReject: 3, ciFail: 3, planReject: 3 });
   });
 
   it('replan re-stamps complexity from the new plan (full reset semantic)', () => {
-    let run = makeRun({ state: 'planning' });
+    // Seed with user opted-in so the v1 trivial path still hits 'building'
+    // (the reset semantic we want to verify is about budgets, not the
+    // approval gate).
+    let run = makeRun({ state: 'planning', autoApprovePlan: true });
     // v1: trivial → halved, building.
     run = reducer(run, {
       type: 'planner_done',
@@ -491,7 +575,7 @@ describe('pipeline state machine', () => {
     });
     expect(run.runMode).toBe('trivial');
     expect(run.state).toBe('building');
-    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 1, ciFail: 1 });
+    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 1, ciFail: 1, planReject: 1 });
 
     // Force escalated → replan_requested → planning.
     run = { ...run, state: 'escalated', failureClass: 'reviewer_irreconcilable', endedAt: 1 };
@@ -517,7 +601,7 @@ describe('pipeline state machine', () => {
     expect(run.autoApprovePlan).toBe(false);
     expect(run.useDualReviewer).toBe(true);
     expect(run.runRedTeam).toBe(true);
-    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 6, ciFail: 6 });
+    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 6, ciFail: 6, planReject: 6 });
   });
 
   it('reducer reads effectiveRetryBudgets (not the legacy constant)', () => {
@@ -526,7 +610,7 @@ describe('pipeline state machine', () => {
     let run = makeRun({
       state: 'reviewing',
       runMode: 'complex',
-      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
+      effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6, planReject: 6 },
     });
     for (let i = 1; i <= 6; i++) {
       run = reducer(run, {
@@ -566,8 +650,8 @@ describe('pipeline state machine', () => {
     expect(run.autoApprovePlan).toBe(false);
     expect(run.useDualReviewer).toBe(false);
     expect(run.runRedTeam).toBe(false);
-    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 3, ciFail: 3 });
-    expect(run.templateRetryBudget).toEqual({ reviewerReject: 3, ciFail: 3 });
+    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 3, ciFail: 3, planReject: 3 });
+    expect(run.templateRetryBudget).toEqual({ reviewerReject: 3, ciFail: 3, planReject: 3 });
     expect(run.templateDualReviewer).toBe(false);
   });
 
@@ -579,13 +663,13 @@ describe('pipeline state machine', () => {
       worktreePath: '/tmp/wt/r-tmpl',
       branch: 'feat/r-tmpl',
       fingerprint: FP,
-      templateRetryBudget: { reviewerReject: 5, ciFail: 4 },
+      templateRetryBudget: { reviewerReject: 5, ciFail: 4, planReject: 5 },
       templateDualReviewer: true,
     });
     expect(run.useDualReviewer).toBe(true);
     expect(run.templateDualReviewer).toBe(true);
-    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 5, ciFail: 4 });
-    expect(run.templateRetryBudget).toEqual({ reviewerReject: 5, ciFail: 4 });
+    expect(run.effectiveRetryBudgets).toEqual({ reviewerReject: 5, ciFail: 4, planReject: 5 });
+    expect(run.templateRetryBudget).toEqual({ reviewerReject: 5, ciFail: 4, planReject: 5 });
   });
 
   it('escalated remains terminal for non-replan events (carve-out is narrow)', () => {
@@ -691,7 +775,7 @@ describe('pipeline state machine', () => {
       let run = makeRun({
         state: 'awaiting_dual_reviewer',
         useDualReviewer: true,
-        retryCounters: { reviewerReject: 3, ciFail: 0 },
+        retryCounters: { reviewerReject: 3, ciFail: 0, planReject: 3 },
       });
       run = reducer(run, { type: 'reviewer_done', verdict: opusReject(4) });
       run = reducer(run, { type: 'reviewer_done', verdict: codexReject(4) });
@@ -759,7 +843,7 @@ describe('pipeline state machine', () => {
       let run = makeRun({
         state: 'awaiting_tiebreaker',
         useDualReviewer: true,
-        retryCounters: { reviewerReject: 3, ciFail: 0 },
+        retryCounters: { reviewerReject: 3, ciFail: 0, planReject: 3 },
         artifacts: {
           builds: [], reviews: [opusApprove(), codexReject()], ciResults: [], questions: [], redTeamReports: [],
         },
@@ -776,7 +860,7 @@ describe('pipeline state machine', () => {
         useDualReviewer: true,
         templateDualReviewer: true,
         runMode: 'complex',
-        effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
+        effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6, planReject: 6 },
       });
       // planner_done → awaiting_plan_approval
       run = reducer(run, {
@@ -975,7 +1059,7 @@ describe('pipeline state machine', () => {
         state: 'reviewing',
         runMode: 'complex',
         runRedTeam: true,
-        effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
+        effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6, planReject: 6 },
       });
       run = reducer(run, { type: 'reviewer_done', verdict: reviewApprove() });
       expect(run.state).toBe('awaiting_red_team');

@@ -1,25 +1,96 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useProjectStore } from '@/stores/projectStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useTimelineStore } from '@/stores/timelineStore';
+import { usePipelineStore } from '@/stores/pipelineStore';
 import { gitAvailable } from '@/utils/ipc';
 import { useThemeStore } from '@/stores/themeStore';
 import { resolveProjectIcon } from '@/utils/projectIcon';
 import { colors, radius, spacing, fonts, motion, typography, glass } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
-import type { Project } from '@/types';
+import { isTerminalState } from '@/pipeline/state-machine';
+import type { Project, PipelineRun } from '@/types';
 
 interface ProjectSidebarProps {
   projects: Project[];
   active: string;
   onSelect: (projectId: string) => void;
+  /**
+   * DI for tests / Storybook: override the runs map. Production reads
+   * `pipelineStore.runs` directly via the `usePipelineStore` selector.
+   */
+  runs?: Record<string, PipelineRun>;
+}
+
+/**
+ * Indicator state for a single project's pipeline footprint.
+ *
+ *   - `'active'`: at least one non-terminal run on this project.
+ *   - `'unviewed-failed'`: at least one terminal run in `failed`/`escalated`
+ *      that the user hasn't yet acknowledged via the run-logs modal
+ *      (per `tx-run-viewed-${runId}` localStorage key).
+ *   - `'none'`: nothing to show.
+ *
+ * `unviewed-failed` takes priority over `active` because it's a louder
+ * signal (something needs attention; an in-flight run is just status).
+ */
+export type ProjectIndicatorKind = 'active' | 'unviewed-failed' | 'none';
+
+const RUN_VIEWED_KEY_PREFIX = 'tx-run-viewed-';
+
+/** SSR-safe localStorage probe for the per-run viewed flag. */
+function isRunViewed(runId: string): boolean {
+  try {
+    return localStorage.getItem(`${RUN_VIEWED_KEY_PREFIX}${runId}`) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Compute (count, kind) for the sidebar dot. Pure — testable without
+ * mounting the component. `count` includes only non-terminal runs (the
+ * tooltip says "N pipeline run(s) active") so terminal-but-unviewed-failed
+ * runs flip the kind to red without bumping a count that would mislead.
+ */
+export function computeProjectIndicator(
+  runs: PipelineRun[],
+  viewedCheck: (runId: string) => boolean = isRunViewed,
+): { kind: ProjectIndicatorKind; activeCount: number } {
+  let activeCount = 0;
+  let hasUnviewedFailed = false;
+  for (const r of runs) {
+    if (!isTerminalState(r.state)) {
+      activeCount += 1;
+    } else if ((r.state === 'failed' || r.state === 'escalated') && !viewedCheck(r.id)) {
+      hasUnviewedFailed = true;
+    }
+  }
+  if (hasUnviewedFailed) return { kind: 'unviewed-failed', activeCount };
+  if (activeCount > 0) return { kind: 'active', activeCount };
+  return { kind: 'none', activeCount: 0 };
 }
 
 type ModalMode = null | 'menu' | 'new' | 'clone' | 'post-clone';
 
-export function ProjectSidebar({ projects, active, onSelect }: ProjectSidebarProps) {
+export function ProjectSidebar({ projects, active, onSelect, runs: runsProp }: ProjectSidebarProps) {
   const [modal, setModal] = useState<ModalMode>(null);
+  // Always subscribe so background runs landing while ProjectSidebar is
+  // mounted (which is always — it's the persistent left rail) trigger a
+  // re-render. Tests can override via `runs` prop and never trip the live
+  // store.
+  const liveRuns = usePipelineStore((s) => s.runs);
+  const effRuns = runsProp ?? liveRuns;
+
+  // Group runs by projectId once per render. `O(R)` where R = total runs.
+  const runsByProject = useMemo(() => {
+    const out: Record<string, PipelineRun[]> = {};
+    for (const r of Object.values(effRuns)) {
+      (out[r.projectId] ??= []).push(r);
+    }
+    return out;
+  }, [effRuns]);
   const [hasGit, setHasGit] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPath, setNewPath] = useState('');
@@ -167,6 +238,14 @@ export function ProjectSidebar({ projects, active, onSelect }: ProjectSidebarPro
         const isActive = project.id === active;
         const isSolid = i % 2 === 0;
         const iconUrl = projectIcons[project.id];
+        const indicator = computeProjectIndicator(runsByProject[project.id] ?? []);
+        const tooltipBase = `${project.name}${project.description ? ' — ' + project.description : ''}`;
+        const tooltipExtra =
+          indicator.kind === 'active'
+            ? `\n${indicator.activeCount} pipeline run${indicator.activeCount === 1 ? '' : 's'} active`
+            : indicator.kind === 'unviewed-failed'
+              ? '\nPipeline run failed — click to inspect'
+              : '';
         return (
           <div
             key={project.id}
@@ -177,7 +256,8 @@ export function ProjectSidebar({ projects, active, onSelect }: ProjectSidebarPro
                 handleDeleteProject(project.id);
               }
             }}
-            title={`${project.name}${project.description ? ' — ' + project.description : ''}\nRight-click to remove`}
+            title={`${tooltipBase}${tooltipExtra}\nRight-click to remove`}
+            data-testid={`project-sidebar-icon-${project.id}`}
             style={{
               position: 'relative',
               width: 40, height: 40,
@@ -218,9 +298,47 @@ export function ProjectSidebar({ projects, active, onSelect }: ProjectSidebarPro
             ) : (
               project.icon
             )}
+            {/* Pipeline-run indicator dot — top-right of the icon. Accent
+                pulse for in-flight runs, solid red for unviewed
+                failed/escalated. Subscribes via the runsByProject memo so
+                background runs on inactive projects still surface. */}
+            {indicator.kind !== 'none' && (
+              <span
+                data-testid={`project-sidebar-indicator-${project.id}`}
+                data-indicator-kind={indicator.kind}
+                aria-label={
+                  indicator.kind === 'active'
+                    ? `${indicator.activeCount} pipeline run${indicator.activeCount === 1 ? '' : 's'} active`
+                    : 'Pipeline run failed'
+                }
+                style={{
+                  position: 'absolute',
+                  top: -2,
+                  right: -2,
+                  width: 10,
+                  height: 10,
+                  borderRadius: radius.full,
+                  background:
+                    indicator.kind === 'unviewed-failed'
+                      ? 'var(--tx-error, #d44)'
+                      : 'var(--tx-accent)',
+                  boxShadow: '0 0 0 2px var(--tx-bg)',
+                  pointerEvents: 'none',
+                  animation:
+                    indicator.kind === 'active'
+                      ? 'tx-sidebar-indicator-pulse 2s ease-in-out infinite'
+                      : undefined,
+                  zIndex: 2,
+                }}
+              />
+            )}
           </div>
         );
       })}
+      <style>{`@keyframes tx-sidebar-indicator-pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.18); opacity: 0.8; }
+      }`}</style>
 
       {/* Add project button */}
       <div

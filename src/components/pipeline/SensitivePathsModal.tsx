@@ -27,7 +27,7 @@ const overlayStyle: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
   zIndex: 10_000,
-  background: 'rgba(0, 0, 0, 0.6)',
+  background: 'rgba(0, 0, 0, 0.75)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -192,6 +192,8 @@ export function SensitivePathsModal({ paths, onAcknowledge, onCancel }: Props) {
               ...buttonBase,
               background: 'var(--tx-accent)',
               borderColor: 'var(--tx-accent)',
+              color: 'var(--tx-accent-fg)',
+              fontWeight: 600,
             }}
           >
             Acknowledge & proceed

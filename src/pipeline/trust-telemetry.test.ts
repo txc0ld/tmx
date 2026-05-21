@@ -53,7 +53,7 @@ function makeDualRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     baseBranch: 'main',
     state: 'awaiting_tiebreaker',
     artifacts: { builds: [], reviews: [], ciResults: [], questions: [], redTeamReports: [] },
-    retryCounters: { reviewerReject: 0, ciFail: 0 },
+    retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
     startedAt: 0,
     escalationLog: [],
     tiles: {},
@@ -63,8 +63,8 @@ function makeDualRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
     autoApprovePlan: false,
     useDualReviewer: true,
     runRedTeam: true,
-    effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6 },
-    templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+    effectiveRetryBudgets: { reviewerReject: 6, ciFail: 6, planReject: 6 },
+    templateRetryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
     templateDualReviewer: false,
     ...overrides,
   };
@@ -115,12 +115,15 @@ describe('trust telemetry (Phase 3c.7)', () => {
     }
   });
 
-  it('complexity_routed: trivial plan stamps autoApprovePlan=true and skips dual/red-team', () => {
+  it('complexity_routed: trivial plan + user opted in stamps autoApprovePlan=true and skips dual/red-team', () => {
+    // Phase 3a.7: trivial fast-path requires the run to seed
+    // autoApprovePlan=true (set by the run-factory from the user pref).
     const { events, unsub } = captureTelemetry();
     try {
       const runId = usePipelineStore.getState().createRun({
         runId: 'r-trivial', templateId: 't', projectId: 'proj-T',
         worktreePath: '/tmp/wt', branch: 'feat/r1', fingerprint: FP,
+        autoApprovePlan: true,
       });
       usePipelineStore.getState().dispatch(runId, { type: 'start' });
       usePipelineStore.getState().dispatch(runId, {

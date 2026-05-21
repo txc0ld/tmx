@@ -314,6 +314,271 @@ pub fn pipeline_failure_bundle_generate(
     generate_bundle_inner(input)
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Bundle summary — read-only, in-memory parse for the Run Logs UI.
+// ────────────────────────────────────────────────────────────────────
+
+/// Compact summary of a failure bundle's contents — surfaced in the
+/// Run Logs modal so the user can eyeball what happened without
+/// extracting the tarball.
+///
+/// Best-effort: every field that depends on a specific entry inside
+/// the bundle defaults to a neutral empty/zero value when that entry
+/// is missing or malformed. The caller renders what's present and
+/// shows a generic "couldn't parse" hint for the rest. The IPC only
+/// returns `Err` for hard failures: bundle-path validation, file-open,
+/// or gzip/tar framing errors.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct FailureBundleSummary {
+    /// Compressed size of the on-disk tarball.
+    pub bytes: u64,
+    /// Total non-empty lines in `telemetry.jsonl`.
+    pub telemetry_line_count: u32,
+    /// Last 5 telemetry events (chronological — oldest first within
+    /// the slice). Each rendered as a compact `<event>@<at>` string;
+    /// when JSON parse fails the raw line is stored verbatim,
+    /// truncated to 200 chars to avoid bloating the IPC payload.
+    pub last_events: Vec<String>,
+    /// `state` field from the run artifacts JSON, when present.
+    pub run_state: Option<String>,
+    /// `failureReason` field from the artifacts JSON, when present.
+    pub failure_reason: Option<String>,
+    /// Retry counter map from the artifacts JSON, when present.
+    /// Stringified values keep the IPC type stable — the artifacts
+    /// shape isn't versioned across the IPC boundary.
+    pub retry_counters: std::collections::BTreeMap<String, String>,
+    /// One-line summary of the porcelain status counts:
+    /// `<modified> modified, <added> added, <deleted> deleted, <untracked> untracked`.
+    /// Empty string when `git_status.txt` is absent or empty.
+    pub git_status: String,
+    /// True iff `artifacts.json` was found inside the tarball. False
+    /// here means the run state / failure reason / retry counter
+    /// fields are unreliable (defaulted), not that they're confirmed
+    /// missing on the run object itself.
+    pub artifacts_present: bool,
+}
+
+/// Read-only path validation for a bundle path supplied by the
+/// frontend. Mirrors the run-id whitelist + traversal rejection used
+/// by `generate_bundle_inner`, but applied to the full path: we
+/// require the path to end in `failure-bundles/<run_id>.tar.gz` and
+/// the run_id portion to match the same `[A-Za-z0-9_-]+` charset.
+fn validate_bundle_path(p: &str) -> Result<PathBuf, String> {
+    if p.is_empty() {
+        return Err("empty bundle_path".into());
+    }
+    if p.chars().any(|c| c.is_control()) {
+        return Err("bundle_path contains control characters".into());
+    }
+    let path = PathBuf::from(p);
+    let file = path
+        .file_name()
+        .ok_or_else(|| "bundle_path has no file name".to_string())?
+        .to_string_lossy()
+        .into_owned();
+    if !file.ends_with(".tar.gz") {
+        return Err("bundle_path must end in .tar.gz".into());
+    }
+    let run_id = file.trim_end_matches(".tar.gz");
+    validate_run_id(run_id)?;
+    Ok(path)
+}
+
+/// Build the `<modified> modified, <added> added, ...` one-liner from
+/// raw `git status --porcelain` output. Counts each non-empty line
+/// once. Conflicts (`UU`, `AA`, etc.) count as `modified` for the
+/// summary's purpose — they're changes that need attention.
+fn summarize_git_status(porcelain: &str) -> String {
+    let mut modified = 0u32;
+    let mut added = 0u32;
+    let mut deleted = 0u32;
+    let mut untracked = 0u32;
+    for line in porcelain.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        // Porcelain v1 format: XY␠path. The first 2 chars are the
+        // status. `??` is untracked; otherwise look at either column.
+        let status: String = line.chars().take(2).collect();
+        if status == "??" {
+            untracked += 1;
+            continue;
+        }
+        let mut bytes = status.bytes();
+        let x = bytes.next().unwrap_or(b' ');
+        let y = bytes.next().unwrap_or(b' ');
+        // Prefer the index column (X); fall back to worktree (Y).
+        let primary = if x != b' ' { x } else { y };
+        match primary {
+            b'A' => added += 1,
+            b'D' => deleted += 1,
+            b'M' | b'R' | b'C' | b'U' | b'T' => modified += 1,
+            _ => modified += 1, // catch-all for unusual codes
+        }
+    }
+    format!(
+        "{modified} modified, {added} added, {deleted} deleted, {untracked} untracked"
+    )
+}
+
+/// Compact a single telemetry JSONL line to `<event>@<at>` for the
+/// "last 5 events" list. Falls back to the raw (truncated) line when
+/// JSON parse or field extraction fails.
+fn compact_telemetry_event(line: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(line) {
+        Ok(v) => {
+            let event = v.get("event").and_then(|x| x.as_str()).unwrap_or("?");
+            let at = v
+                .get("at")
+                .map(|x| match x {
+                    serde_json::Value::String(s) => s.clone(),
+                    _ => x.to_string(),
+                })
+                .unwrap_or_else(|| "?".into());
+            format!("{event}@{at}")
+        }
+        Err(_) => {
+            let mut s = line.to_string();
+            if s.len() > 200 {
+                s.truncate(200);
+                s.push_str("…");
+            }
+            s
+        }
+    }
+}
+
+/// Pull the artifact-derived fields out of the parsed JSON. Defensive
+/// against unexpected shapes: anything not a string/object falls back
+/// to None / empty.
+fn extract_artifact_fields(
+    artifacts: &serde_json::Value,
+) -> (
+    Option<String>,
+    Option<String>,
+    std::collections::BTreeMap<String, String>,
+) {
+    let run_state = artifacts
+        .get("state")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let failure_reason = artifacts
+        .get("failureReason")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let mut retry = std::collections::BTreeMap::new();
+    if let Some(obj) = artifacts.get("retryCounters").and_then(|v| v.as_object()) {
+        for (k, v) in obj.iter() {
+            let s = match v {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Number(n) => n.to_string(),
+                serde_json::Value::Bool(b) => b.to_string(),
+                serde_json::Value::Null => "null".into(),
+                _ => v.to_string(),
+            };
+            retry.insert(k.clone(), s);
+        }
+    }
+    (run_state, failure_reason, retry)
+}
+
+pub fn summarize_bundle_inner(bundle_path: &str) -> Result<FailureBundleSummary, String> {
+    let path = validate_bundle_path(bundle_path)?;
+    let bytes = std::fs::metadata(&path)
+        .map_err(|e| format!("stat {}: {e}", path.display()))?
+        .len();
+    let file = std::fs::File::open(&path)
+        .map_err(|e| format!("open {}: {e}", path.display()))?;
+    let gz = flate2::read::GzDecoder::new(file);
+    let mut ar = tar::Archive::new(gz);
+
+    // Read the three entries we care about into memory. Cap each at
+    // a few MB so a malicious / corrupted bundle can't OOM us.
+    const MAX_ENTRY_BYTES: u64 = 8 * 1024 * 1024;
+    let mut telemetry: Option<String> = None;
+    let mut artifacts: Option<String> = None;
+    let mut git_status: Option<String> = None;
+
+    for entry in ar
+        .entries()
+        .map_err(|e| format!("read tar entries: {e}"))?
+    {
+        let mut e = entry.map_err(|e| format!("read entry: {e}"))?;
+        let name_owned = e
+            .path()
+            .map_err(|e| format!("read entry path: {e}"))?
+            .to_string_lossy()
+            .into_owned();
+        match name_owned.as_str() {
+            "telemetry.jsonl" | "artifacts.json" | "git_status.txt" => {}
+            _ => continue,
+        }
+        let size = e.header().size().unwrap_or(0);
+        if size > MAX_ENTRY_BYTES {
+            // Skip oversized entries — defaulting to "absent" is safer
+            // than reading attacker-controlled megabytes.
+            continue;
+        }
+        let mut buf = String::with_capacity(size as usize);
+        if std::io::Read::read_to_string(&mut e, &mut buf).is_err() {
+            // Non-UTF-8 entry — skip; the summary is best-effort.
+            continue;
+        }
+        match name_owned.as_str() {
+            "telemetry.jsonl" => telemetry = Some(buf),
+            "artifacts.json" => artifacts = Some(buf),
+            "git_status.txt" => git_status = Some(buf),
+            _ => {}
+        }
+    }
+
+    let mut summary = FailureBundleSummary {
+        bytes,
+        ..Default::default()
+    };
+
+    if let Some(t) = &telemetry {
+        let lines: Vec<&str> = t.lines().filter(|l| !l.trim().is_empty()).collect();
+        summary.telemetry_line_count = lines.len() as u32;
+        // Last 5, chronological.
+        let start = lines.len().saturating_sub(5);
+        summary.last_events = lines[start..]
+            .iter()
+            .map(|l| compact_telemetry_event(l))
+            .collect();
+    }
+
+    if let Some(a) = &artifacts {
+        match serde_json::from_str::<serde_json::Value>(a) {
+            Ok(v) => {
+                summary.artifacts_present = true;
+                let (state, reason, retry) = extract_artifact_fields(&v);
+                summary.run_state = state;
+                summary.failure_reason = reason;
+                summary.retry_counters = retry;
+            }
+            Err(_) => {
+                // Malformed JSON — leave the artifact fields at their
+                // defaults but keep `artifacts_present = false` so the
+                // UI can show "couldn't parse artifacts".
+            }
+        }
+    }
+
+    if let Some(s) = &git_status {
+        summary.git_status = summarize_git_status(s);
+    }
+
+    Ok(summary)
+}
+
+#[tauri::command]
+pub fn pipeline_failure_bundle_summary(
+    bundle_path: String,
+) -> Result<FailureBundleSummary, String> {
+    summarize_bundle_inner(&bundle_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,5 +783,167 @@ mod tests {
         // surface as a parse error during entries iteration.
         let entries = read_bundle_entries(Path::new(&res.bundle_path));
         assert_eq!(entries.len(), 6);
+    }
+
+    // ── Summary tests ────────────────────────────────────────────────
+
+    /// Build a synthetic bundle with caller-supplied entry contents.
+    /// Used to drive `summarize_bundle_inner` against well-known inputs
+    /// without going through the full generator (which would invoke
+    /// `git` and need a real repo).
+    fn write_synthetic_bundle(
+        path: &Path,
+        entries: &[(&str, &[u8])],
+    ) {
+        let f = fs::File::create(path).expect("create bundle");
+        let gz = GzEncoder::new(f, Compression::default());
+        let mut builder = tar::Builder::new(gz);
+        for (name, bytes) in entries {
+            let mut h = tar::Header::new_gnu();
+            h.set_path(name).unwrap();
+            h.set_size(bytes.len() as u64);
+            h.set_mode(0o644);
+            h.set_mtime(0);
+            h.set_cksum();
+            builder.append(&h, *bytes).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+
+    #[test]
+    fn summary_reads_synthetic_bundle_entries() {
+        let dir = tempdir().unwrap();
+        let bundle = dir.path().join("r-sum.tar.gz");
+        let telem = b"{\"at\":\"t1\",\"event\":\"state_change\"}\n\
+                      {\"at\":\"t2\",\"event\":\"capability_install\"}\n\
+                      {\"at\":\"t3\",\"event\":\"state_change\"}\n\
+                      {\"at\":\"t4\",\"event\":\"guardrails_install\"}\n\
+                      {\"at\":\"t5\",\"event\":\"state_change\"}\n\
+                      {\"at\":\"t6\",\"event\":\"merger_invoked\"}\n";
+        let artifacts = br#"{"state":"failed","failureReason":"reviewer_blocker","retryCounters":{"build":2,"review":1}}"#;
+        let status = b" M src/foo.rs\nA  src/new.rs\n D src/old.rs\n?? src/scratch.rs\n";
+        write_synthetic_bundle(
+            &bundle,
+            &[
+                ("telemetry.jsonl", telem),
+                ("artifacts.json", artifacts),
+                ("git_status.txt", status),
+                ("preflight.json", b"{}"),
+            ],
+        );
+
+        let s = summarize_bundle_inner(bundle.to_str().unwrap()).expect("summary ok");
+
+        assert!(s.bytes > 0);
+        assert_eq!(s.telemetry_line_count, 6);
+        assert_eq!(s.last_events.len(), 5);
+        // Chronological: oldest of the five (t2) first; newest (t6) last.
+        assert!(s.last_events[0].contains("t2"));
+        assert!(s.last_events[4].contains("merger_invoked@t6"));
+        assert!(s.artifacts_present);
+        assert_eq!(s.run_state.as_deref(), Some("failed"));
+        assert_eq!(s.failure_reason.as_deref(), Some("reviewer_blocker"));
+        assert_eq!(s.retry_counters.get("build").map(String::as_str), Some("2"));
+        assert_eq!(s.retry_counters.get("review").map(String::as_str), Some("1"));
+        assert_eq!(s.git_status, "1 modified, 1 added, 1 deleted, 1 untracked");
+    }
+
+    #[test]
+    fn summary_handles_missing_entries_gracefully() {
+        let dir = tempdir().unwrap();
+        let bundle = dir.path().join("r-sparse.tar.gz");
+        // Only versions.txt — no telemetry, artifacts, or git_status.
+        write_synthetic_bundle(&bundle, &[("versions.txt", b"terminalx: 0.1.0\n")]);
+
+        let s = summarize_bundle_inner(bundle.to_str().unwrap()).expect("summary ok");
+        assert!(s.bytes > 0);
+        assert_eq!(s.telemetry_line_count, 0);
+        assert!(s.last_events.is_empty());
+        assert_eq!(s.run_state, None);
+        assert_eq!(s.failure_reason, None);
+        assert!(s.retry_counters.is_empty());
+        assert_eq!(s.git_status, "");
+        assert!(!s.artifacts_present);
+    }
+
+    #[test]
+    fn summary_handles_corrupt_artifacts_json() {
+        let dir = tempdir().unwrap();
+        let bundle = dir.path().join("r-corrupt.tar.gz");
+        write_synthetic_bundle(
+            &bundle,
+            &[
+                ("telemetry.jsonl", b"{\"at\":\"t1\",\"event\":\"x\"}\n"),
+                ("artifacts.json", b"not actually json {{{"),
+            ],
+        );
+
+        let s = summarize_bundle_inner(bundle.to_str().unwrap()).expect("summary ok");
+        assert_eq!(s.telemetry_line_count, 1);
+        assert!(!s.artifacts_present);
+        assert_eq!(s.run_state, None);
+    }
+
+    #[test]
+    fn summary_rejects_path_outside_failure_bundles_naming() {
+        let dir = tempdir().unwrap();
+        // Wrong extension.
+        let bad1 = dir.path().join("r.zip");
+        std::fs::write(&bad1, b"garbage").unwrap();
+        assert!(summarize_bundle_inner(bad1.to_str().unwrap()).is_err());
+
+        // Empty input.
+        assert!(summarize_bundle_inner("").is_err());
+
+        // Run-id with traversal characters.
+        let bad2 = dir.path().join("..tar.gz");
+        std::fs::write(&bad2, b"garbage").unwrap();
+        let err = summarize_bundle_inner(bad2.to_str().unwrap()).unwrap_err();
+        assert!(
+            err.contains("run_id") || err.contains("file name"),
+            "expected run_id rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn summary_telemetry_unparseable_line_falls_back_to_raw() {
+        let dir = tempdir().unwrap();
+        let bundle = dir.path().join("r-rawline.tar.gz");
+        write_synthetic_bundle(
+            &bundle,
+            &[("telemetry.jsonl", b"this is not json at all\n")],
+        );
+        let s = summarize_bundle_inner(bundle.to_str().unwrap()).expect("summary ok");
+        assert_eq!(s.telemetry_line_count, 1);
+        assert_eq!(s.last_events.len(), 1);
+        assert!(s.last_events[0].contains("not json"));
+    }
+
+    #[test]
+    fn summary_against_real_generated_bundle_round_trips() {
+        // End-to-end: run the producer, then the summarizer on its
+        // output. Catches any future drift between the two.
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        let telemetry_path = project.join(".terminalx/pipeline-telemetry");
+        fs::create_dir_all(&telemetry_path).unwrap();
+        fs::write(
+            telemetry_path.join("r-rt.jsonl"),
+            "{\"at\":\"t1\",\"event\":\"state_change\"}\n",
+        )
+        .unwrap();
+        let mut input = baseline_input(project, "r-rt");
+        input.artifacts_json =
+            r#"{"state":"escalated","failureReason":"red_team_blocker","retryCounters":{"build":3}}"#
+                .to_string();
+
+        let res = generate_bundle_inner(input).expect("bundle generated");
+        let s = summarize_bundle_inner(&res.bundle_path).expect("summary ok");
+        assert_eq!(s.bytes, res.size_bytes);
+        assert_eq!(s.telemetry_line_count, 1);
+        assert!(s.artifacts_present);
+        assert_eq!(s.run_state.as_deref(), Some("escalated"));
+        assert_eq!(s.failure_reason.as_deref(), Some("red_team_blocker"));
+        assert_eq!(s.retry_counters.get("build").map(String::as_str), Some("3"));
     }
 }

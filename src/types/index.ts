@@ -46,6 +46,13 @@ export interface AgentTile extends TileBase {
   autoPipe?: boolean;             // default false
   autoPipeIdleMs?: number;        // silence required before auto-pipe fires — default 2000
   autoPromptTemplate?: string;    // prompt appended after the piped context (empty = pipe only)
+
+  // Pipeline binding — set on agent tiles spawned by `launchPipelineRun`.
+  // The global PTY router in App.tsx uses these to forward chunks into
+  // `ingestPtyChunk` so the controller-runtime sentinel parser can drive
+  // the state machine. Absent on stand-alone agent tiles.
+  pipelineRunId?: string;
+  pipelineRole?: 'planner' | 'builder' | 'reviewer';
 }
 
 export interface TerminalTile extends TileBase {
@@ -240,6 +247,7 @@ export type FailureClass =
   | 'subagent_failed'
   | 'external_dep'
   | 'secrets_violation'
+  | 'plan_reject_exhausted'
   | 'unknown';
 
 export interface RunFingerprint {
@@ -407,7 +415,7 @@ export interface RedTeamReport {
 export interface EscalationEntry {
   at: number;
   reason: string;
-  exhaustedCounter?: 'reviewerReject' | 'ciFail';
+  exhaustedCounter?: 'reviewerReject' | 'ciFail' | 'planReject';
   decision: 'replan' | 'escalate' | 'manual_resolve';
   newPlanRef?: string;
 }
@@ -444,7 +452,7 @@ export interface PipelineRun {
   baseBranch: string;
   state: PipelineState;
   artifacts: PipelineRunArtifacts;
-  retryCounters: { reviewerReject: number; ciFail: number };
+  retryCounters: { reviewerReject: number; ciFail: number; planReject: number };
   startedAt: number;
   endedAt?: number;
   failureReason?: string;
@@ -504,7 +512,7 @@ export interface PipelineRun {
    * complex = doubled). The reducer reads these instead of the legacy
    * hardcoded `REVIEWER_REJECT_BUDGET` / `CI_FAIL_BUDGET` constants.
    */
-  effectiveRetryBudgets: { reviewerReject: number; ciFail: number };
+  effectiveRetryBudgets: { reviewerReject: number; ciFail: number; planReject: number };
   /**
    * The template's structural retry budget — captured at run creation and
    * never mutated after. Used as the baseline that `planner_done` rescales
@@ -512,13 +520,26 @@ export interface PipelineRun {
    * from the template at dispatch time) so the reducer stays pure and
    * replans behave deterministically regardless of template edits.
    */
-  templateRetryBudget: { reviewerReject: number; ciFail: number };
+  templateRetryBudget: { reviewerReject: number; ciFail: number; planReject: number };
   /**
    * The template's `dualReviewer` flag — captured at run creation. The run's
    * effective `useDualReviewer` is `runMode === 'complex' || templateDualReviewer`,
    * re-evaluated on each `planner_done`.
    */
   templateDualReviewer: boolean;
+  /**
+   * Transient runtime flag (not part of the state-machine). True when this
+   * run was hydrated from disk after an app reload — its agent PTYs died with
+   * the app process, so any approve/abort still works but Builder/Reviewer
+   * cannot auto-resume. The controller tile renders a banner; the
+   * builder-kick lifecycle short-circuits to avoid writing to dead PTY ids.
+   *
+   * Set by `reconcileHydratedRun` for hydrated `awaiting_*` runs. Never
+   * cleared automatically — once disconnected, stays disconnected for the
+   * remainder of the run's life. Optional so existing fixtures and the
+   * `initialRunState` factory don't have to set `false` everywhere.
+   */
+  agentsDisconnected?: boolean;
 }
 
 export interface PipelineControllerTile extends TileBase {

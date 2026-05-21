@@ -47,6 +47,7 @@ pub fn run() {
             commands::filesystem::write_file_text,
             commands::filesystem::get_file_size,
             commands::filesystem::read_file_mtime,
+            commands::filesystem::delete_file,
             commands::filesystem::watch_directory,
             commands::filesystem::unwatch_directory,
             // Workspace persistence
@@ -92,9 +93,13 @@ pub fn run() {
             commands::secrets_mask::secrets_mask,
             // Failure bundle generator (Phase 2c-iii.7)
             commands::failure_bundle::pipeline_failure_bundle_generate,
+            commands::failure_bundle::pipeline_failure_bundle_summary,
+            // Boot-time CLI health check (welcome banner)
+            commands::health::pipeline_health_check,
             // Pipeline (agentic-pipeline Phase 1)
             commands::pipeline::pipeline_capabilities_install,
             commands::pipeline::pipeline_capabilities_uninstall,
+            commands::pipeline::pipeline_cleanup_old_runs,
             commands::pipeline::pipeline_guardrails_install,
             commands::pipeline::pipeline_guardrails_uninstall,
             commands::pipeline::pipeline_install_skills,

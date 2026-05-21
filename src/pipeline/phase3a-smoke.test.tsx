@@ -141,8 +141,9 @@ describe('Phase 3a smoke: settings modal + factory gate + skills + webhook caden
       target: { value: 'https://hooks.example.com/3a-typed' },
     });
 
-    // Status flips to ready (validation ok + non-empty draft).
-    expect(screen.getByTestId('project-webhook-status').textContent || '').toMatch(/ready/);
+    // Status flips to the helper-text variant (validation ok + non-empty
+    // draft → no error, just the JSON-stringified / secrets-masked hint).
+    expect(screen.getByTestId('project-webhook-status').textContent || '').toMatch(/https only/);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId('project-settings-save'));
@@ -312,7 +313,7 @@ describe('Phase 3a smoke: settings modal + factory gate + skills + webhook caden
               ],
               redTeamReports: [],
             },
-            retryCounters: { reviewerReject: 0, ciFail: 0 },
+            retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
             startedAt: Date.now(),
             escalationLog: [],
             tiles: {},
@@ -330,8 +331,8 @@ describe('Phase 3a smoke: settings modal + factory gate + skills + webhook caden
             autoApprovePlan: false,
             useDualReviewer: false,
             runRedTeam: false,
-            effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
-            templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+            effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3, planReject: 3 },
+            templateRetryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
             templateDualReviewer: false,
           },
         },
@@ -388,7 +389,7 @@ describe('Phase 3a smoke: settings modal + factory gate + skills + webhook caden
               ],
               redTeamReports: [],
             },
-            retryCounters: { reviewerReject: 0, ciFail: 0 },
+            retryCounters: { reviewerReject: 0, ciFail: 0, planReject: 0 },
             startedAt: Date.now(),
             escalationLog: [],
             tiles: {},
@@ -406,8 +407,8 @@ describe('Phase 3a smoke: settings modal + factory gate + skills + webhook caden
             autoApprovePlan: false,
             useDualReviewer: false,
             runRedTeam: false,
-            effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3 },
-            templateRetryBudget: { reviewerReject: 3, ciFail: 3 },
+            effectiveRetryBudgets: { reviewerReject: 3, ciFail: 3, planReject: 3 },
+            templateRetryBudget: { reviewerReject: 3, ciFail: 3, planReject: 3 },
             templateDualReviewer: false,
           },
         },

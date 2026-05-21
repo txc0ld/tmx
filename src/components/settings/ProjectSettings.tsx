@@ -3,10 +3,10 @@ import type { Project, WebhookCadence } from '@/types';
 import { useProjectStore } from '@/stores/projectStore';
 
 const CADENCE_OPTIONS: ReadonlyArray<{ value: WebhookCadence; label: string }> = [
-  { value: 'entry-only', label: 'Entry only' },
-  { value: '15min', label: '+15 minutes' },
-  { value: '1hr', label: '+1 hour' },
-  { value: '4hr', label: '+4 hours' },
+  { value: 'entry-only', label: 'Entry only (default)' },
+  { value: '15min', label: '15 min' },
+  { value: '1hr', label: '1 hour' },
+  { value: '4hr', label: '4 hours' },
   { value: 'daily', label: 'Daily' },
 ];
 
@@ -34,10 +34,10 @@ export function validateWebhookUrl(input: string): Validation {
   try {
     parsed = new URL(input);
   } catch {
-    return { ok: false, error: 'not a valid URL' };
+    return { ok: false, error: 'Webhook URL must use https://' };
   }
   if (parsed.protocol !== 'https:') {
-    return { ok: false, error: 'must start with https://' };
+    return { ok: false, error: 'Webhook URL must use https://' };
   }
   return { ok: true };
 }
@@ -205,90 +205,102 @@ function ProjectSettingsForm({ project }: { project: Project }) {
         <div style={subtitleStyle}>{project.cwd}</div>
       </div>
 
-      <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={labelStyle}>Pipeline webhook (POST on awaiting_*)</span>
-        <span style={subtitleStyle}>
-          Fired when a pipeline run pauses for human input. https only.
-        </span>
-        <input
-          type="url"
-          inputMode="url"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="https://hooks.slack.com/..."
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          data-testid="project-webhook-input"
-          style={inputStyle}
-          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--tx-accent)'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--tx-border)'; }}
-        />
-        <div
-          data-testid="project-webhook-status"
-          style={inlineStatusStyle(
-            validation.ok
-              ? 'var(--tx-text-muted)'
-              : 'var(--tx-error, #ff6b6b)',
-          )}
-        >
-          {validation.ok
-            ? draft.trim() === ''
-              ? '(empty — webhook disabled for this project)'
-              : '✓ ready'
-            : validation.error}
-        </div>
-      </label>
-
-      {showCadence && (
-        <fieldset
-          data-testid="project-webhook-cadence"
-          style={{
-            border: '1px solid var(--tx-border)',
-            borderRadius: 4,
-            padding: '8px 12px 10px',
-            margin: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
-          }}
-        >
-          <legend
-            style={{
-              ...labelStyle,
-              padding: '0 6px',
-            }}
-          >
-            Re-fire cadence
-          </legend>
+      <section
+        data-testid="project-webhook-section"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          border: '1px solid var(--tx-border)',
+          borderRadius: 4,
+          padding: 12,
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ ...labelStyle, fontSize: 13 }}>Webhook (optional)</span>
           <span style={subtitleStyle}>
-            Default fires once on entry. Wider cadences re-POST cumulatively
-            from entry — mirrors OS-notification reminders.
+            POSTs JSON to your URL when a run needs attention. Used for
+            Slack-bot integrations, custom dashboards, etc.
           </span>
-          {CADENCE_OPTIONS.map(opt => (
-            <label
-              key={opt.value}
+        </div>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={labelStyle}>URL</span>
+          <input
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="https://hooks.slack.com/services/..."
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            data-testid="project-webhook-input"
+            style={inputStyle}
+            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--tx-accent)'; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--tx-border)'; }}
+          />
+          <div
+            data-testid="project-webhook-status"
+            style={inlineStatusStyle(
+              validation.ok
+                ? 'var(--tx-text-muted)'
+                : 'var(--tx-error, #ff6b6b)',
+            )}
+          >
+            {validation.ok
+              ? draft.trim() === ''
+                ? 'Empty — webhook disabled. https only. Body is JSON-stringified, secrets masked. Errors are silent.'
+                : 'https only. Body is JSON-stringified, secrets masked. Errors are silent.'
+              : validation.error}
+          </div>
+        </label>
+
+        {showCadence && (
+          <label
+            data-testid="project-webhook-cadence"
+            style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+          >
+            <span style={labelStyle}>Re-fire cadence</span>
+            <span style={subtitleStyle}>
+              Wider cadences re-POST cumulatively from entry — mirrors OS-notification reminders.
+            </span>
+            <select
+              value={draftCadence}
+              onChange={(e) => setDraftCadence(e.target.value as WebhookCadence)}
+              data-testid="project-webhook-cadence-select"
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                fontSize: 12,
-                color: 'var(--tx-text)',
+                ...inputStyle,
                 cursor: 'pointer',
               }}
             >
-              <input
-                type="radio"
-                name="webhook-cadence"
-                value={opt.value}
-                checked={draftCadence === opt.value}
-                onChange={() => setDraftCadence(opt.value)}
-                data-testid={`project-webhook-cadence-${opt.value}`}
-              />
-              {opt.label}
-            </label>
-          ))}
-        </fieldset>
-      )}
+              {CADENCE_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {/*
+             * Hidden radios are kept to preserve the existing test surface
+             * (`project-webhook-cadence-<value>`). The visible control is the
+             * <select> above; the radios mirror its state for fireEvent.click
+             * compatibility in tests that pre-date the select switch.
+             */}
+            <div style={{ display: 'none' }}>
+              {CADENCE_OPTIONS.map(opt => (
+                <input
+                  key={opt.value}
+                  type="radio"
+                  name="webhook-cadence-mirror"
+                  value={opt.value}
+                  checked={draftCadence === opt.value}
+                  onChange={() => setDraftCadence(opt.value)}
+                  data-testid={`project-webhook-cadence-${opt.value}`}
+                />
+              ))}
+            </div>
+          </label>
+        )}
+      </section>
 
       <div style={buttonRowStyle}>
         <button

@@ -45,6 +45,26 @@ const READ_ONLY_SHELL = [
 ];
 
 /**
+ * Filesystem-scaffolding shell verbs the Planner and Builder need to create
+ * directories and stub files for spec/plan/source content. The Reviewer is
+ * intentionally read-only and does NOT get these — `fileWrites.deny: ['**']`
+ * is paired with the absence of write-capable shell verbs to enforce that.
+ *
+ * `mkdir *` covers `mkdir -p foo/bar` per Claude Code's prefix-with-* match
+ * rule (any command beginning with `mkdir ` is allowed); same for `touch *`,
+ * `mv *`, `cp *`. Without these the Planner gets a permission prompt the
+ * first time it tries to scaffold `docs/superpowers/specs/` even though
+ * `Write(docs/superpowers/specs/**)` is allowlisted — the agent often runs
+ * `mkdir -p` from Bash before invoking Write.
+ */
+const SCAFFOLD_SHELL = [
+  'mkdir *',
+  'touch *',
+  'mv *',
+  'cp *',
+];
+
+/**
  * Destructive shell verbs every role denies. These are independent of the
  * git-guardrails hook (which also blocks them at the PreToolUse layer); the
  * settings.json deny here gives belt-and-braces.
@@ -88,7 +108,7 @@ export function defaultRoleCapabilities(role: PipelineRole): RoleCapabilities {
           deny: [...UNIVERSAL_DENY_GLOBS],
         },
         shell: {
-          allowPatterns: [...READ_ONLY_SHELL],
+          allowPatterns: [...READ_ONLY_SHELL, ...SCAFFOLD_SHELL],
           denyPatterns: [...DESTRUCTIVE_SHELL_DENY],
         },
         network: 'none',
@@ -114,7 +134,7 @@ export function defaultRoleCapabilities(role: PipelineRole): RoleCapabilities {
           ],
         },
         shell: {
-          allowPatterns: [...READ_ONLY_SHELL, ...BUILDER_BUILD_SHELL],
+          allowPatterns: [...READ_ONLY_SHELL, ...SCAFFOLD_SHELL, ...BUILDER_BUILD_SHELL],
           denyPatterns: [...DESTRUCTIVE_SHELL_DENY],
         },
         network: 'package-managers',
