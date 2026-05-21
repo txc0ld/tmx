@@ -36,6 +36,9 @@ export function usePty(
 
     onPtyExit((id) => {
       if (!mounted || id !== ptyId) return;
+      ptyKill(id).catch(() => {
+        // The backend may already have removed the session; exit cleanup is best-effort.
+      });
       onExitRef.current?.();
     }).then(fn => { if (mounted) cleanupExit = fn; else fn(); });
 

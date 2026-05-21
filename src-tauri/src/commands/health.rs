@@ -25,12 +25,25 @@ pub struct HealthReport {
 /// On Windows, also checks PATHEXT-style suffixes (`.exe`, `.cmd`, `.bat`).
 /// Pure read-only filesystem probe — never spawns the binary.
 pub(super) fn binary_on_path(name: &str) -> bool {
-    binary_on_path_with(name, std::env::var_os("PATH"))
+    resolve_binary_on_path(name).is_some()
 }
 
+/// Resolve a binary name to the concrete PATH entry TerminalX would launch.
+pub(super) fn resolve_binary_on_path(name: &str) -> Option<PathBuf> {
+    resolve_binary_on_path_with(name, std::env::var_os("PATH"))
+}
+
+#[cfg(test)]
 fn binary_on_path_with(name: &str, path_env: Option<std::ffi::OsString>) -> bool {
+    resolve_binary_on_path_with(name, path_env).is_some()
+}
+
+fn resolve_binary_on_path_with(
+    name: &str,
+    path_env: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
     let Some(path_env) = path_env else {
-        return false;
+        return None;
     };
     let candidates = candidate_filenames(name);
     for dir in std::env::split_paths(&path_env) {
@@ -40,11 +53,11 @@ fn binary_on_path_with(name: &str, path_env: Option<std::ffi::OsString>) -> bool
         for candidate in &candidates {
             let full: PathBuf = dir.join(candidate);
             if is_executable(&full) {
-                return true;
+                return Some(full);
             }
         }
     }
-    false
+    None
 }
 
 #[cfg(target_os = "windows")]
@@ -94,7 +107,6 @@ pub async fn pipeline_health_check() -> Result<HealthReport, String> {
 mod tests {
     use super::*;
     use std::ffi::OsString;
-    #[cfg(unix)]
     use std::fs;
 
     #[cfg(unix)]
@@ -113,6 +125,21 @@ mod tests {
             "definitely-not-a-real-binary-xyz",
             Some(path_env)
         ));
+    }
+
+    #[test]
+    fn resolve_binary_returns_concrete_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bin = tmp.path().join(candidate_filenames("fake-tool")[0].clone());
+        fs::write(&bin, b"").unwrap();
+        #[cfg(unix)]
+        make_executable(&bin);
+
+        let path_env = OsString::from(tmp.path());
+        assert_eq!(
+            resolve_binary_on_path_with("fake-tool", Some(path_env)),
+            Some(bin)
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use crate::state::app_state::AppState;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tauri::{AppHandle, Emitter, State};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +39,88 @@ pub struct AgentStatusChange {
 fn has_windows_cmd_metachar(s: &str) -> bool {
     s.chars()
         .any(|c| matches!(c, '&' | '|' | '<' | '>' | '^' | '%'))
+}
+
+fn validate_spawn_arg(arg: &str) -> Result<(), String> {
+    if arg.contains('\0') {
+        return Err("Agent command argument contains null byte".to_string());
+    }
+    if arg.len() > 16384 {
+        return Err("Agent command argument too long".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn validate_windows_cmd_arg(arg: &str) -> Result<(), String> {
+    validate_spawn_arg(arg)?;
+    if arg.contains('"') || arg.contains('\r') || arg.contains('\n') {
+        return Err("Windows .cmd agent arguments cannot contain quotes or newlines".to_string());
+    }
+    if has_windows_cmd_metachar(arg) {
+        return Err(
+            "Windows .cmd agent arguments cannot contain cmd.exe metacharacters".to_string(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn quote_windows_cmd_arg(arg: &str) -> String {
+    format!("\"{}\"", arg)
+}
+
+#[cfg(target_os = "windows")]
+fn prepare_windows_agent_command(
+    resolved_bin: &Path,
+    args: Vec<String>,
+) -> Result<(String, Vec<String>), String> {
+    let ext = resolved_bin
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "exe" | "com" => {
+            for arg in &args {
+                validate_spawn_arg(arg)?;
+            }
+            Ok((resolved_bin.to_string_lossy().to_string(), args))
+        }
+        "cmd" | "bat" => {
+            for arg in &args {
+                validate_windows_cmd_arg(arg)?;
+            }
+            let mut command = format!("call {}", quote_windows_cmd_arg(&resolved_bin.to_string_lossy()));
+            for arg in args {
+                command.push(' ');
+                command.push_str(&quote_windows_cmd_arg(&arg));
+            }
+            Ok((
+                "cmd.exe".to_string(),
+                vec![
+                    "/D".to_string(),
+                    "/S".to_string(),
+                    "/C".to_string(),
+                    command,
+                ],
+            ))
+        }
+        other => Err(format!(
+            "Unsupported Windows agent executable extension '.{other}'. Use .exe, .com, .cmd, or .bat."
+        )),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn prepare_unix_agent_command(
+    resolved_bin: &Path,
+    args: Vec<String>,
+) -> Result<(String, Vec<String>), String> {
+    for arg in &args {
+        validate_spawn_arg(arg)?;
+    }
+    Ok((resolved_bin.to_string_lossy().to_string(), args))
 }
 
 /// Resolve the CLI binary name + initial args from an agent_spawn request.
@@ -152,57 +235,28 @@ pub async fn agent_spawn(
         pipeline_run,
     )?;
 
-    // Check if binary exists in PATH
-    let check = if cfg!(target_os = "windows") {
-        tokio::process::Command::new("where.exe")
-            .arg(&bin)
-            .output()
-            .await
-    } else {
-        tokio::process::Command::new("which")
-            .arg(&bin)
-            .output()
-            .await
-    };
-
-    match check {
-        Ok(output) if output.status.success() => {}
-        _ => {
-            return Err(format!(
-                "'{}' not found in PATH. Install the {} CLI or set a custom command.",
-                bin,
-                match agent_type {
-                    AgentType::Claude => "Claude Code",
-                    AgentType::Codex => "Codex",
-                    AgentType::Gemini => "Gemini",
-                }
-            ));
-        }
-    }
-
-    // On Windows, npm global CLIs are .cmd scripts — must run through cmd.exe
-    let (spawn_bin, spawn_args) = if cfg!(target_os = "windows") {
-        let mut cmd_args = vec!["/C".to_string(), bin.clone()];
-        cmd_args.extend(args);
-        ("cmd.exe".to_string(), cmd_args)
-    } else {
-        (bin.clone(), args)
-    };
-
-    // Validate custom_command args don't contain null bytes before spawning.
-    // We intentionally do NOT reject arg-looking tokens (e.g. `--model sonnet`) —
-    // custom_command is a user trust boundary: users legitimately pass model flags.
-    // Renderer compromise is mitigated at the agent_spawn call site and by the webview CSP.
-    if custom_command.is_some() {
-        for a in &spawn_args {
-            if a.contains('\0') {
-                return Err("Custom command argument contains null byte".to_string());
+    let resolved_bin = crate::commands::health::resolve_binary_on_path(&bin).ok_or_else(|| {
+        format!(
+            "'{}' not found in PATH. Install the {} CLI or set a custom command.",
+            bin,
+            match agent_type {
+                AgentType::Claude => "Claude Code",
+                AgentType::Codex => "Codex",
+                AgentType::Gemini => "Gemini",
             }
-            if a.len() > 16384 {
-                return Err("Custom command argument too long".to_string());
-            }
+        )
+    })?;
+
+    let (spawn_bin, spawn_args) = {
+        #[cfg(target_os = "windows")]
+        {
+            prepare_windows_agent_command(&resolved_bin, args)?
         }
-    }
+        #[cfg(not(target_os = "windows"))]
+        {
+            prepare_unix_agent_command(&resolved_bin, args)?
+        }
+    };
 
     // Spawn via PTY with args — bypasses renderer-facing allowlist because
     // bin names are already validated (claude/codex/gemini or path-less custom).
@@ -225,7 +279,7 @@ pub async fn agent_spawn(
             agent_type,
             status: AgentStatus::Working,
             cwd,
-            pid: None,
+            pid: state.pty_manager.lock().process_id(&pty_id),
             uptime_secs: 0,
         },
     );
@@ -521,6 +575,31 @@ mod spawn_args_tests {
         let err =
             resolve_spawn_bin_and_args(&AgentType::Claude, Some("-p"), None, false).unwrap_err();
         assert!(err.contains("cannot start with '-'"), "got: {err}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_cmd_shim_uses_single_quoted_call_string() {
+        let (bin, args) = prepare_windows_agent_command(
+            Path::new(r"C:\Users\tmayo\AppData\Roaming\npm\claude.cmd"),
+            vec!["--dangerously-skip-permissions".to_string()],
+        )
+        .unwrap();
+        assert_eq!(bin, "cmd.exe");
+        assert_eq!(&args[..3], ["/D", "/S", "/C"]);
+        assert!(args[3].starts_with("call \""));
+        assert!(args[3].contains("claude.cmd\" \"--dangerously-skip-permissions\""));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_cmd_shim_rejects_metachar_args() {
+        let err = prepare_windows_agent_command(
+            Path::new(r"C:\Users\tmayo\AppData\Roaming\npm\claude.cmd"),
+            vec!["ok".to_string(), "bad&whoami".to_string()],
+        )
+        .unwrap_err();
+        assert!(err.contains("metacharacters"), "got: {err}");
     }
 }
 
