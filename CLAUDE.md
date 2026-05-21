@@ -8,6 +8,20 @@ Native desktop app (Tauri 2) — infinite canvas workspace for orchestrating mul
 
 **Stack:** Tauri 2 (Rust, `portable-pty`, `reqwest`) + React 19 + TypeScript 5 + Vite 6 + Zustand 5 + xterm.js 5.5 + Monaco Editor
 
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues for `txc0ld/tmx`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the standard five-label triage vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo. Read repo-level docs plus relevant `docs/features/` pages before architectural, testing, or debugging work. See `docs/agents/domain.md`.
+
 ## Build & Dev Commands
 
 ```bash
