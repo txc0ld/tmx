@@ -33,7 +33,7 @@ serde_json = "1"
 
 # Filesystem watching
 notify = "8"
-notify-debouncer-mini = "0.4"
+notify-debouncer-mini = "0.7"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
