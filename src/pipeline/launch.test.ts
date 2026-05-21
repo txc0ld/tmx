@@ -110,6 +110,23 @@ describe('launchPipelineRun template selection', () => {
     expect(plannerTileMode()).toBe('planner');
   });
 
+  it('persists the run snapshot before writing the planner goal file', async () => {
+    const result = await launchPipelineRun({
+      goal: 'persist first',
+      branch: 'feat/persist-first',
+      templateId: 'tx.pipeline.hello-world',
+      confirmSensitivePaths: async () => true,
+    });
+
+    expect(result.ok).toBe(true);
+    const writes = vi.mocked(ipc.writeFileText).mock.calls.map(([path]) => path);
+    const snapshotIndex = writes.findIndex((path) => path.includes('/.terminalx/pipeline-runs/'));
+    const goalIndex = writes.findIndex((path) => path.endsWith('/PIPELINE_GOAL.md'));
+    expect(snapshotIndex).toBeGreaterThanOrEqual(0);
+    expect(goalIndex).toBeGreaterThanOrEqual(0);
+    expect(snapshotIndex).toBeLessThan(goalIndex);
+  });
+
   it('falls back to anthropicTrio when templateId is unknown (logs warning)', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const result = await launchPipelineRun({

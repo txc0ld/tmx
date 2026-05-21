@@ -311,7 +311,7 @@ export async function launchPipelineRun(
   //      and-start would lose the run record entirely.
   const newRun = usePipelineStore.getState().runs[factoryResult.runId];
   if (newRun) {
-    void persistRun(newRun, defaultRunPersistenceDeps());
+    await persistRun(newRun, defaultRunPersistenceDeps());
   }
 
   // 8. Persist the goal so the planner can read it as a file. Non-fatal —
