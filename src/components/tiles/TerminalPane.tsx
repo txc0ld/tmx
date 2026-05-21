@@ -96,6 +96,7 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
     const detachKb = attachKeyboardCapture(
       containerRef.current,
       (data) => writeRef.current(data),
+      terminal,
     );
     const rafId = requestAnimationFrame(() => {
       fitAddon.fit();

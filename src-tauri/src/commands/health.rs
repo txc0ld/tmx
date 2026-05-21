@@ -24,12 +24,14 @@ pub struct HealthReport {
 ///
 /// On Windows, also checks PATHEXT-style suffixes (`.exe`, `.cmd`, `.bat`).
 /// Pure read-only filesystem probe — never spawns the binary.
-fn binary_on_path(name: &str) -> bool {
+pub(super) fn binary_on_path(name: &str) -> bool {
     binary_on_path_with(name, std::env::var_os("PATH"))
 }
 
 fn binary_on_path_with(name: &str, path_env: Option<std::ffi::OsString>) -> bool {
-    let Some(path_env) = path_env else { return false };
+    let Some(path_env) = path_env else {
+        return false;
+    };
     let candidates = candidate_filenames(name);
     for dir in std::env::split_paths(&path_env) {
         if dir.as_os_str().is_empty() {
@@ -92,6 +94,7 @@ pub async fn pipeline_health_check() -> Result<HealthReport, String> {
 mod tests {
     use super::*;
     use std::ffi::OsString;
+    #[cfg(unix)]
     use std::fs;
 
     #[cfg(unix)]
@@ -106,7 +109,10 @@ mod tests {
     fn missing_binary_returns_false() {
         let tmp = tempfile::tempdir().unwrap();
         let path_env = OsString::from(tmp.path());
-        assert!(!binary_on_path_with("definitely-not-a-real-binary-xyz", Some(path_env)));
+        assert!(!binary_on_path_with(
+            "definitely-not-a-real-binary-xyz",
+            Some(path_env)
+        ));
     }
 
     #[test]

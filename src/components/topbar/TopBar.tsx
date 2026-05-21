@@ -11,6 +11,8 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { PipelineOnboardingTooltip, dismissPipelineOnboarding } from '@/components/topbar/PipelineOnboardingTooltip';
 import type { Project, TileType, Tile, PipelineRun } from '@/types';
 
+const USE_NATIVE_NON_MAC_DECORATIONS = true;
+
 interface TopBarProps {
   project: Project | undefined;
   onAddTile: (type: TileType) => void;
@@ -37,6 +39,7 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette, onStartPipel
   }, [dropdownOpen]);
 
   const appWindow = getCurrentWindow();
+  const showCustomWindowControls = !isMac() && !USE_NATIVE_NON_MAC_DECORATIONS;
 
   // Group templates into ordered sections
   const sectionOrder: { key: string; label: string; types: string[] }[] = [
@@ -184,7 +187,7 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette, onStartPipel
       <LocalClock />
 
       {/* Window controls — hidden on macOS where native traffic lights are used */}
-      {!isMac() && (
+      {showCustomWindowControls && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
           // @ts-expect-error webkit

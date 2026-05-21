@@ -179,8 +179,8 @@ export function SessionTimeline({ onClose }: SessionTimelineProps) {
             </span>
           )}
           {/* Oldest first (reversed since store prepends newest) */}
-          {[...events].reverse().map((event) => (
-            <EventCard key={event.id} event={event} />
+          {[...events].reverse().map((event, index) => (
+            <EventCard key={event.id ?? `${event.timestamp}-${index}`} event={event} />
           ))}
         </div>
       </div>

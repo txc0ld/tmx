@@ -656,6 +656,8 @@ export default function App() {
       // Don't intercept plain keystrokes when focus is inside tile content (terminals, editors, inputs)
       const target = e.target as HTMLElement;
       const inTile = target.closest?.('[data-tile-content]');
+      const inTerminal = target.closest?.('[data-terminal-content]');
+      if (inTerminal && e.key !== 'Escape') return;
       if (inTile && !e.ctrlKey && !e.metaKey && e.key !== 'Escape') return;
 
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {

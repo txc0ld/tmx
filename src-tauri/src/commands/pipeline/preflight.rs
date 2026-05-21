@@ -1,6 +1,7 @@
 //! `pipeline_preflight` — git/CLI/worktree-dir checks before a pipeline run.
 
 use super::validate_path_arg;
+use crate::commands::health::binary_on_path;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -31,8 +32,7 @@ pub struct PreflightResult {
 const SENSITIVE_EXACT_NAMES: &[&str] = &[".env", "aws-credentials"];
 const SENSITIVE_PREFIX_PATTERNS: &[&str] =
     &[".env.", "id_rsa", "id_ed25519", "secrets.", "gcp-key"];
-const SENSITIVE_SUFFIX_PATTERNS: &[&str] =
-    &[".pem", ".key", ".kdbx", ".p12", ".pfx", ".ovpn"];
+const SENSITIVE_SUFFIX_PATTERNS: &[&str] = &[".pem", ".key", ".kdbx", ".p12", ".pfx", ".ovpn"];
 
 /// Directory names that are never recursed into during the sensitive-path scan.
 const SCAN_SKIP_DIRS: &[&str] = &[
@@ -56,7 +56,10 @@ fn matches_sensitive(name: &str) -> bool {
     if SENSITIVE_EXACT_NAMES.iter().any(|n| *n == name) {
         return true;
     }
-    if SENSITIVE_PREFIX_PATTERNS.iter().any(|p| name.starts_with(p)) {
+    if SENSITIVE_PREFIX_PATTERNS
+        .iter()
+        .any(|p| name.starts_with(p))
+    {
         return true;
     }
     if SENSITIVE_SUFFIX_PATTERNS.iter().any(|s| name.ends_with(s)) {
@@ -169,11 +172,7 @@ fn scan_sensitive_paths(project_dir: &Path) -> Vec<String> {
 }
 
 fn cmd_present(bin: &str) -> bool {
-    Command::new(bin)
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    binary_on_path(bin)
 }
 
 /// Resolve the user's home dir using the same precedence as `skills::skills_dir`:
@@ -479,10 +478,9 @@ mod tests {
 
         // Lay down a tampered SKILL.md for a real bundled skill.
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let real = std::fs::read(
-            manifest_dir.join("resources/skills/tx-pipeline-stage-handoff/SKILL.md"),
-        )
-        .unwrap();
+        let real =
+            std::fs::read(manifest_dir.join("resources/skills/tx-pipeline-stage-handoff/SKILL.md"))
+                .unwrap();
         let mut tampered = real.clone();
         tampered.push(b'!'); // single-byte flip / append
 
@@ -491,7 +489,10 @@ mod tests {
         fs::write(installed_dir.join("SKILL.md"), &tampered).unwrap();
 
         let result = run_preflight_inner(dir.path(), Some(home.path()));
-        assert!(!result.signed_skills_ok, "tampered skill should fail verification");
+        assert!(
+            !result.signed_skills_ok,
+            "tampered skill should fail verification"
+        );
         assert!(
             result.errors.iter().any(|e| e.contains("hash mismatch")),
             "expected a hash-mismatch error in {:?}",
@@ -506,10 +507,9 @@ mod tests {
 
         // Lay down the real bundled SKILL.md unchanged.
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let real = std::fs::read(
-            manifest_dir.join("resources/skills/tx-pipeline-stage-handoff/SKILL.md"),
-        )
-        .unwrap();
+        let real =
+            std::fs::read(manifest_dir.join("resources/skills/tx-pipeline-stage-handoff/SKILL.md"))
+                .unwrap();
         let installed_dir = home.path().join(".claude/skills/tx-pipeline-stage-handoff");
         fs::create_dir_all(&installed_dir).unwrap();
         fs::write(installed_dir.join("SKILL.md"), &real).unwrap();
@@ -551,7 +551,10 @@ mod tests {
         // Pre-create the skills dir to exercise the "exists" branch.
         fs::create_dir_all(home.path().join(".claude/skills")).unwrap();
         let result = run_preflight_inner(dir.path(), Some(home.path()));
-        assert!(result.skill_cache_writable, "existing dir should accept probe write");
+        assert!(
+            result.skill_cache_writable,
+            "existing dir should accept probe write"
+        );
     }
 
     #[test]
@@ -738,7 +741,10 @@ mod tests {
         // Should report the symlink path (target's basename matched).
         // Should NOT report the file inside node_modules (that dir is skipped,
         // and we don't descend into symlinks).
-        assert_eq!(result.sensitive_paths_found, vec!["benign_link".to_string()]);
+        assert_eq!(
+            result.sensitive_paths_found,
+            vec!["benign_link".to_string()]
+        );
     }
 
     #[cfg(unix)]
@@ -826,9 +832,6 @@ mod tests {
         fs::write(dir.path().join(".env.local"), "x").unwrap();
 
         let result = run_preflight_inner(dir.path(), Some(home.path()));
-        assert_eq!(
-            result.sensitive_paths_found,
-            vec![".env.local".to_string()]
-        );
+        assert_eq!(result.sensitive_paths_found, vec![".env.local".to_string()]);
     }
 }

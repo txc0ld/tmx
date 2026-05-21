@@ -212,6 +212,7 @@ pub async fn pipeline_run_verification_step(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use tempfile::tempdir;
 
     // ── Verification step runner tests (Phase 2c-i.2) ──────────
@@ -240,7 +241,11 @@ mod tests {
         assert_eq!(res.exit_code, Some(0));
         assert!(!res.timed_out);
         assert_eq!(res.kind, "test");
-        assert!(res.output.is_empty(), "expected empty output, got {:?}", res.output);
+        assert!(
+            res.output.is_empty(),
+            "expected empty output, got {:?}",
+            res.output
+        );
     }
 
     #[cfg(unix)]
@@ -273,8 +278,16 @@ mod tests {
         })
         .await;
         assert_eq!(res.status, "pass");
-        assert!(res.output.contains("hello"), "missing stdout: {:?}", res.output);
-        assert!(res.output.contains("err"), "missing stderr: {:?}", res.output);
+        assert!(
+            res.output.contains("hello"),
+            "missing stdout: {:?}",
+            res.output
+        );
+        assert!(
+            res.output.contains("err"),
+            "missing stderr: {:?}",
+            res.output
+        );
     }
 
     #[cfg(unix)]

@@ -145,7 +145,7 @@ export function TerminalTile({ tile }: TerminalTileProps) {
         addSplit('horizontal');
       }
       // Ctrl+D — vertical split (only when no text selected in terminal)
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'd') {
+      if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.key === 'd') {
         if (splits.length > 0) {
           e.preventDefault();
           e.stopPropagation();
@@ -202,6 +202,7 @@ export function TerminalTile({ tile }: TerminalTileProps) {
     const detachKb = attachKeyboardCapture(
       containerRef.current,
       (data) => writeWithHistory(data),
+      terminal,
     );
     const rafId = requestAnimationFrame(() => {
       fitAddon.fit();

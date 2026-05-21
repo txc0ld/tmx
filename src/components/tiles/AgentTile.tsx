@@ -173,6 +173,7 @@ export function AgentTile({ tile }: AgentTileProps) {
     const detachKb = attachKeyboardCapture(
       containerRef.current,
       (data) => writeRef.current(data),
+      terminal,
     );
     const rafId = requestAnimationFrame(() => {
       fitAddon.fit();

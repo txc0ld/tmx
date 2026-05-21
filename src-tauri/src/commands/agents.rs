@@ -35,6 +35,11 @@ pub struct AgentStatusChange {
     pub status: AgentStatus,
 }
 
+fn has_windows_cmd_metachar(s: &str) -> bool {
+    s.chars()
+        .any(|c| matches!(c, '&' | '|' | '<' | '>' | '^' | '%'))
+}
+
 /// Resolve the CLI binary name + initial args from an agent_spawn request.
 ///
 /// Pure helper extracted so the args-building logic can be unit-tested
@@ -55,6 +60,9 @@ pub(super) fn resolve_spawn_bin_and_args(
         let bin_name = parts[0];
         if bin_name.contains('/') || bin_name.contains('\\') {
             return Err("Custom command must be a program name, not a path".to_string());
+        }
+        if cfg!(target_os = "windows") && parts.iter().any(|p| has_windows_cmd_metachar(p)) {
+            return Err("Custom command contains Windows cmd.exe metacharacters".to_string());
         }
         return Ok((
             bin_name.to_string(),
@@ -146,9 +154,15 @@ pub async fn agent_spawn(
 
     // Check if binary exists in PATH
     let check = if cfg!(target_os = "windows") {
-        tokio::process::Command::new("where.exe").arg(&bin).output().await
+        tokio::process::Command::new("where.exe")
+            .arg(&bin)
+            .output()
+            .await
     } else {
-        tokio::process::Command::new("which").arg(&bin).output().await
+        tokio::process::Command::new("which")
+            .arg(&bin)
+            .output()
+            .await
     };
 
     match check {
@@ -217,10 +231,13 @@ pub async fn agent_spawn(
     );
 
     // Emit initial status
-    if let Err(e) = app.emit("agent-status", AgentStatusChange {
-        id: pty_id.clone(),
-        status: AgentStatus::Working,
-    }) {
+    if let Err(e) = app.emit(
+        "agent-status",
+        AgentStatusChange {
+            id: pty_id.clone(),
+            status: AgentStatus::Working,
+        },
+    ) {
         eprintln!("agent-status emit failed: {}", e);
     }
 
@@ -230,10 +247,7 @@ pub async fn agent_spawn(
 
 /// Kill an agent process
 #[tauri::command]
-pub async fn agent_kill(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
+pub async fn agent_kill(state: State<'_, AppState>, id: String) -> Result<(), String> {
     state.agent_registry.lock().remove(&id);
     // Also kill the PTY — log failures but don't block caller
     if let Err(e) = state.pty_manager.lock().kill(&id) {
@@ -244,9 +258,7 @@ pub async fn agent_kill(
 
 /// List all running agents
 #[tauri::command]
-pub async fn agent_list(
-    state: State<'_, AppState>,
-) -> Result<Vec<AgentInfo>, String> {
+pub async fn agent_list(state: State<'_, AppState>) -> Result<Vec<AgentInfo>, String> {
     let agents = state.agent_registry.lock();
     Ok(agents.values().cloned().collect())
 }
@@ -425,8 +437,7 @@ mod spawn_args_tests {
 
     #[test]
     fn claude_pipeline_run_appends_skip_permissions_flag() {
-        let (bin, args) =
-            resolve_spawn_bin_and_args(&AgentType::Claude, None, None, true).unwrap();
+        let (bin, args) = resolve_spawn_bin_and_args(&AgentType::Claude, None, None, true).unwrap();
         assert_eq!(bin, "claude");
         assert!(
             args.contains(&"--dangerously-skip-permissions".to_string()),
@@ -457,8 +468,7 @@ mod spawn_args_tests {
 
     #[test]
     fn codex_pipeline_run_does_not_inject_claude_flag() {
-        let (bin, args) =
-            resolve_spawn_bin_and_args(&AgentType::Codex, None, None, true).unwrap();
+        let (bin, args) = resolve_spawn_bin_and_args(&AgentType::Codex, None, None, true).unwrap();
         assert_eq!(bin, "codex");
         assert!(
             !args.contains(&"--dangerously-skip-permissions".to_string()),
@@ -468,8 +478,7 @@ mod spawn_args_tests {
 
     #[test]
     fn gemini_pipeline_run_does_not_inject_claude_flag() {
-        let (bin, args) =
-            resolve_spawn_bin_and_args(&AgentType::Gemini, None, None, true).unwrap();
+        let (bin, args) = resolve_spawn_bin_and_args(&AgentType::Gemini, None, None, true).unwrap();
         assert_eq!(bin, "gemini");
         assert!(
             !args.contains(&"--dangerously-skip-permissions".to_string()),
@@ -494,10 +503,23 @@ mod spawn_args_tests {
         assert_eq!(args, vec!["--model".to_string(), "opus-4".to_string()]);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_custom_command_rejects_cmd_metacharacters() {
+        let err = resolve_spawn_bin_and_args(
+            &AgentType::Claude,
+            None,
+            Some("claude & echo injected"),
+            true,
+        )
+        .unwrap_err();
+        assert!(err.contains("cmd.exe metacharacters"), "got: {err}");
+    }
+
     #[test]
     fn task_starting_with_dash_is_rejected() {
-        let err = resolve_spawn_bin_and_args(&AgentType::Claude, Some("-p"), None, false)
-            .unwrap_err();
+        let err =
+            resolve_spawn_bin_and_args(&AgentType::Claude, Some("-p"), None, false).unwrap_err();
         assert!(err.contains("cannot start with '-'"), "got: {err}");
     }
 }

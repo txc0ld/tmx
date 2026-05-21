@@ -47,6 +47,7 @@ vi.mock('@/utils/ipc', async (importActual) => {
 });
 
 import { launchPipelineRun } from './launch';
+import * as ipc from '@/utils/ipc';
 import { useProjectStore } from '@/stores/projectStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { usePipelineStore } from '@/stores/pipelineStore';
@@ -81,6 +82,7 @@ function plannerTileMode(): string | undefined {
 
 describe('launchPipelineRun template selection', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     seedProject();
     useCanvasStore.setState({ tiles: {}, wires: {}, activeProject: PROJECT_ID });
     usePipelineStore.setState({ runs: {} });
@@ -123,11 +125,75 @@ describe('launchPipelineRun template selection', () => {
     );
     warn.mockRestore();
   });
+
+  it('blocks before worktree creation when Claude is missing from PATH', async () => {
+    vi.mocked(ipc.pipelinePreflight).mockResolvedValueOnce({
+      is_git_repo: true,
+      working_tree_clean: true,
+      main_branch: 'main',
+      claude_present: false,
+      codex_present: true,
+      gh_present: true,
+      gh_authenticated: true,
+      worktree_dir_writable: true,
+      signed_skills_ok: true,
+      capability_binaries_ok: true,
+      skill_cache_writable: true,
+      sensitive_paths_found: [],
+      errors: [],
+    });
+
+    const result = await launchPipelineRun({
+      goal: 'needs claude',
+      branch: 'feat/no-claude',
+      templateId: 'tx.pipeline.anthropic-trio',
+      confirmSensitivePaths: async () => true,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('preflight');
+    expect(result.error).toContain('Claude CLI is not on PATH');
+    expect(ipc.pipelineWorktreeCreate).not.toHaveBeenCalled();
+  });
+
+  it('blocks before worktree creation when Windows worktree dir is not writable', async () => {
+    vi.mocked(ipc.pipelinePreflight).mockResolvedValueOnce({
+      is_git_repo: true,
+      working_tree_clean: true,
+      main_branch: 'main',
+      claude_present: true,
+      codex_present: true,
+      gh_present: true,
+      gh_authenticated: true,
+      worktree_dir_writable: false,
+      signed_skills_ok: true,
+      capability_binaries_ok: true,
+      skill_cache_writable: true,
+      sensitive_paths_found: [],
+      errors: ['access denied creating .tx-worktrees'],
+    });
+
+    const result = await launchPipelineRun({
+      goal: 'needs writable dir',
+      branch: 'feat/no-write',
+      templateId: 'tx.pipeline.anthropic-trio',
+      confirmSensitivePaths: async () => true,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('preflight');
+    expect(result.error).toContain('Project .tx-worktrees directory is not writable');
+    expect(result.error).toContain('access denied creating .tx-worktrees');
+    expect(ipc.pipelineWorktreeCreate).not.toHaveBeenCalled();
+  });
 });
 
 
 describe('launchPipelineRun concurrent-run guard', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     seedProject();
     useCanvasStore.setState({ tiles: {}, wires: {}, activeProject: PROJECT_ID });
     usePipelineStore.setState({ runs: {} });

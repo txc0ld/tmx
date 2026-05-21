@@ -115,6 +115,7 @@ export function RunnerTile({ tile }: RunnerTileProps) {
     const detachKb = attachKeyboardCapture(
       containerRef.current,
       (data) => writeRef.current(data),
+      terminal,
     );
     const rafId = requestAnimationFrame(() => fitAddon.fit());
 
