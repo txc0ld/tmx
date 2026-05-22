@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import { readFileText, writeFileText, getFileSize } from '@/utils/ipc';
+import { confirmAction } from '@/utils/confirm';
 import { detectLanguage } from '@/utils/detectLanguage';
 import { friendlyFsError } from '@/utils/constants';
 import { colors, spacing, typography } from '@/design/tokens';
@@ -68,15 +69,17 @@ export function EditorTile({ tile }: EditorTileProps) {
         let mode: LoadMode = 'normal';
         if (size > HUGE_FILE_THRESHOLD) {
           const mb = (size / (1024 * 1024)).toFixed(1);
-          const ok = window.confirm(
+          const ok = await confirmAction(
             `This file is ${mb} MB — very large. Monaco will drop syntax highlighting, folding, and most features. Open anyway as plain text?\n\nOK = open plain-text, Cancel = don't open`,
+            { title: 'Open Large File' },
           );
           if (!ok) { setContent(null); setLoading(false); return; }
           mode = 'plaintext';
         } else if (size > LARGE_FILE_THRESHOLD) {
           const mb = (size / (1024 * 1024)).toFixed(1);
-          const ok = window.confirm(
+          const ok = await confirmAction(
             `This file is ${mb} MB. Loading it with full syntax highlighting will freeze the editor for ~${Math.ceil(size / (5 * 1024 * 1024))}s. Open in plain-text mode for fast response?\n\nOK = open plain-text, Cancel = don't open`,
+            { title: 'Open Large File' },
           );
           if (!ok) { setContent(null); setLoading(false); return; }
           mode = 'plaintext';
