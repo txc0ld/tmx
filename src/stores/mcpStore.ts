@@ -583,11 +583,42 @@ async function fetchGitHubTasks(config: Record<string, string>): Promise<McpTask
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' };
   const url = buildGitHubIssuesUrl(repo);
 
-  return mapGitHubIssuesResponse(await proxyGet(url, headers));
+  return mapGitHubIssuesResponse(await fetchGitHubIssuesPayload(url, headers));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+type JsonFetcher = (url: string, headers: Record<string, string>) => Promise<unknown>;
+
+function githubMovedUrl(payload: unknown): string | null {
+  if (!isRecord(payload)) return null;
+  if (payload.message !== 'Moved Permanently') return null;
+  if (typeof payload.url !== 'string') return null;
+
+  try {
+    const url = new URL(payload.url);
+    if (url.protocol !== 'https:' || url.hostname !== 'api.github.com') return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchGitHubIssuesPayload(
+  url: string,
+  headers: Record<string, string>,
+  fetcher: JsonFetcher = proxyGet,
+): Promise<unknown> {
+  let currentUrl = url;
+  for (let redirects = 0; redirects <= 2; redirects += 1) {
+    const payload = await fetcher(currentUrl, headers);
+    const movedUrl = githubMovedUrl(payload);
+    if (!movedUrl) return payload;
+    currentUrl = movedUrl;
+  }
+  throw new Error('GitHub repository redirect loop');
 }
 
 interface GitHubIssuePayload {
