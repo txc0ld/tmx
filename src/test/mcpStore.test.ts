@@ -5,6 +5,7 @@ import {
   buildJiraSearchUrl,
   buildNotionQueryUrl,
   buildSlackHistoryUrl,
+  mapGitHubIssuesResponse,
 } from '@/stores/mcpStore';
 
 describe('mcpStore URL builders', () => {
@@ -13,6 +14,39 @@ describe('mcpStore URL builders', () => {
       .toBe('https://api.github.com/repos/openai/terminalx/issues?state=open&per_page=20');
     expect(buildGitHubIssuesUrl()).toContain('/issues?filter=assigned');
     expect(() => buildGitHubIssuesUrl('https://github.com/openai/terminalx')).toThrow(/owner\/name/);
+  });
+
+  it('maps GitHub issue arrays and skips pull requests', () => {
+    expect(mapGitHubIssuesResponse([
+      {
+        id: 1,
+        number: 10,
+        title: 'Fix Windows terminal',
+        html_url: 'https://github.com/org/repo/issues/10',
+        labels: [{ name: 'priority' }],
+      },
+      {
+        id: 2,
+        number: 11,
+        title: 'PR',
+        html_url: 'https://github.com/org/repo/pull/11',
+        labels: [],
+        pull_request: {},
+      },
+    ])).toEqual([{
+      id: 'gh-1',
+      source: 'github',
+      sourceId: '10',
+      text: '#10 Fix Windows terminal',
+      done: false,
+      priority: 'high',
+      url: 'https://github.com/org/repo/issues/10',
+    }]);
+  });
+
+  it('reports malformed GitHub API payloads clearly', () => {
+    expect(() => mapGitHubIssuesResponse({ message: 'Bad credentials' }))
+      .toThrow(/GitHub issues response was not an array: Bad credentials/);
   });
 
   it('encodes Slack channel query params and rejects unsafe channel values', () => {

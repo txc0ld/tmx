@@ -5,6 +5,7 @@ import { useWiringEngine } from '@/hooks/useWiringEngine';
 import { saveWorkspace } from '@/utils/ipc';
 import { AUTO_SNAPSHOT_INTERVAL_MS } from '@/utils/constants';
 import { screenToCanvas } from '@/utils/layout';
+import { stripRuntimeTilesState } from '@/utils/runtimeState';
 import { colors, fonts, alpha } from '@/design/tokens';
 import { CanvasGrid } from './CanvasGrid';
 import { Minimap } from './Minimap';
@@ -123,7 +124,7 @@ export function InfiniteCanvas() {
         const pid = s.activeProject;
         if (!pid) return;
         const data = {
-          tiles: (s.tiles[pid] || []).map(t => { const { ...r } = t as unknown as Record<string, unknown>; delete r.ptyId; return r; }),
+          tiles: stripRuntimeTilesState(s.tiles[pid] || []),
           transform: s.transforms[pid] || { x: 0, y: 0, scale: 1 },
         };
         const json = JSON.stringify(data);
@@ -196,7 +197,7 @@ export function InfiniteCanvas() {
       if (!pid) return;
       const cache = {
         projectId: pid,
-        tiles: s.tiles[pid] ?? [],
+        tiles: stripRuntimeTilesState(s.tiles[pid] ?? []),
         wires: s.wires[pid] ?? [],
         transform: s.transforms[pid] ?? { x: 0, y: 0, scale: 1 },
         zStack: s.zStack,
@@ -267,7 +268,7 @@ export function InfiniteCanvas() {
       try {
         const cache = {
           projectId: pid,
-          tiles: s.tiles[pid] ?? [],
+          tiles: stripRuntimeTilesState(s.tiles[pid] ?? []),
           wires: s.wires[pid] ?? [],
           transform: s.transforms[pid] ?? { x: 0, y: 0, scale: 1 },
           zStack: s.zStack,

@@ -583,17 +583,45 @@ async function fetchGitHubTasks(config: Record<string, string>): Promise<McpTask
   const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' };
   const url = buildGitHubIssuesUrl(repo);
 
-  const issues = await proxyGet(url, headers) as { id: number; number: number; title: string; html_url: string; labels: { name: string }[]; pull_request?: unknown }[];
+  return mapGitHubIssuesResponse(await proxyGet(url, headers));
+}
 
-  return issues
-    .filter(issue => !issue.pull_request)
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+interface GitHubIssuePayload {
+  id: number;
+  number: number;
+  title: string;
+  html_url: string;
+  labels?: unknown;
+  pull_request?: unknown;
+}
+
+function isGitHubIssuePayload(issue: unknown): issue is GitHubIssuePayload {
+  return isRecord(issue) &&
+    typeof issue.id === 'number' &&
+    typeof issue.number === 'number' &&
+    typeof issue.title === 'string' &&
+    typeof issue.html_url === 'string';
+}
+
+export function mapGitHubIssuesResponse(payload: unknown): McpTask[] {
+  if (!Array.isArray(payload)) {
+    const detail = isRecord(payload) && typeof payload.message === 'string' ? `: ${payload.message}` : '';
+    throw new Error(`GitHub issues response was not an array${detail}`);
+  }
+
+  return payload
+    .filter((issue): issue is GitHubIssuePayload => isGitHubIssuePayload(issue) && !issue.pull_request)
     .map(issue => ({
       id: `gh-${issue.id}`,
       source: 'github' as McpType,
       sourceId: String(issue.number),
       text: `#${issue.number} ${issue.title}`,
       done: false,
-      priority: issue.labels?.some(l => l.name === 'priority') ? 'high' : undefined,
+      priority: Array.isArray(issue.labels) && issue.labels.some(l => isRecord(l) && l.name === 'priority') ? 'high' : undefined,
       url: issue.html_url,
     }));
 }
