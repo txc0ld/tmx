@@ -5,7 +5,7 @@ import '@xterm/xterm/css/xterm.css';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { usePty } from '@/hooks/usePty';
-import { ptySpawn } from '@/utils/ipc';
+import { ptySpawn, ptyWrite } from '@/utils/ipc';
 import { colors, fonts, typography, radius, motion, alpha } from '@/design/tokens';
 import { TerminalPane } from './TerminalPane';
 import { attachKeyboardCapture } from './xtermInput';
@@ -145,7 +145,7 @@ export function TerminalTile({ tile }: TerminalTileProps) {
         addSplit('horizontal');
       }
       // Ctrl+D — vertical split (only when no text selected in terminal)
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'd') {
+      if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && e.key === 'd') {
         if (splits.length > 0) {
           e.preventDefault();
           e.stopPropagation();
@@ -202,6 +202,7 @@ export function TerminalTile({ tile }: TerminalTileProps) {
     const detachKb = attachKeyboardCapture(
       containerRef.current,
       (data) => writeWithHistory(data),
+      terminal,
     );
     const rafId = requestAnimationFrame(() => {
       fitAddon.fit();
@@ -234,6 +235,21 @@ export function TerminalTile({ tile }: TerminalTileProps) {
   }, []);
 
   // Spawn PTY for main pane
+  useEffect(() => {
+    if (spawnedRef.current || !tile.ptyId || !termRef.current) return;
+    let cancelled = false;
+
+    ptyWrite(tile.ptyId, '').then(() => {
+      if (!cancelled) spawnedRef.current = true;
+    }).catch(() => {
+      if (!cancelled) {
+        useCanvasStore.getState().updateTile(tile.id, { ptyId: undefined } as Partial<TerminalTileType>);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [tile.id, tile.ptyId]);
+
   useEffect(() => {
     if (spawnedRef.current || tile.ptyId || !termRef.current) return;
     spawnedRef.current = true;

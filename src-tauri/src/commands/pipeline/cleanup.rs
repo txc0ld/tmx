@@ -10,7 +10,7 @@
 //! project can accumulate thousands of files for runs that finished long
 //! ago. This command walks the run-records directory, picks out runs that
 //! are both terminal AND older than the retention window, and deletes the
-//! run record + telemetry file(s) + (optionally) the orphaned worktree.
+//! run record + telemetry file(s) + (optionally) the old worktree.
 //!
 //! Safety
 //! ──────
@@ -111,6 +111,15 @@ fn record_age_anchor_ms(rec: &RunRecord, file_path: &Path) -> u64 {
     mtime
 }
 
+fn path_mtime_ms(path: &Path) -> u64 {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(u64::MAX)
+}
+
 /// Try `git worktree remove --force` first (cleans up git's bookkeeping)
 /// and fall back to `remove_dir_all` for cases where git missed something
 /// (e.g. orphaned directory whose worktree was already removed from
@@ -149,10 +158,9 @@ pub(crate) fn cleanup_inner(project_dir: &Path, cutoff_ms: u64) -> CleanupResult
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return result,
         Err(e) => {
-            result.errors.push(format!(
-                "read_dir {}: {e}",
-                runs_dir.display()
-            ));
+            result
+                .errors
+                .push(format!("read_dir {}: {e}", runs_dir.display()));
             return result;
         }
     };
@@ -171,10 +179,7 @@ pub(crate) fn cleanup_inner(project_dir: &Path, cutoff_ms: u64) -> CleanupResult
         let raw = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) => {
-                result.errors.push(format!(
-                    "read {}: {e}",
-                    path.display()
-                ));
+                result.errors.push(format!("read {}: {e}", path.display()));
                 continue;
             }
         };
@@ -208,9 +213,7 @@ pub(crate) fn cleanup_inner(project_dir: &Path, cutoff_ms: u64) -> CleanupResult
         // Old + terminal — clean it up.
 
         if let Err(e) = std::fs::remove_file(&path) {
-            result
-                .errors
-                .push(format!("rm {}: {e}", path.display()));
+            result.errors.push(format!("rm {}: {e}", path.display()));
             // Don't try to clean the rest of this run's files — record
             // deletion is the source of truth, telemetry without record
             // is fine to leave.
@@ -224,9 +227,7 @@ pub(crate) fn cleanup_inner(project_dir: &Path, cutoff_ms: u64) -> CleanupResult
             match std::fs::remove_file(tel) {
                 Ok(()) => result.removed_telemetry += 1,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => result
-                    .errors
-                    .push(format!("rm {}: {e}", tel.display())),
+                Err(e) => result.errors.push(format!("rm {}: {e}", tel.display())),
             }
         }
 
@@ -240,17 +241,21 @@ pub(crate) fn cleanup_inner(project_dir: &Path, cutoff_ms: u64) -> CleanupResult
     }
 
     // Orphaned worktrees: directories under `.tx-worktrees/` whose run
-    // record is gone. Safe because the run record is the source of
-    // truth — no record means no live run can possibly be using the
-    // worktree, no matter how recently it was touched.
+    // record is gone AND whose directory mtime is older than the retention
+    // cutoff. A just-created worktree can briefly exist before its run JSON
+    // is flushed, so recent orphans are preserved for a later cleanup pass.
+    //
+    // Historical note: this used to delete every orphan regardless of age.
+    // That was unsafe during launch/persistence races on Windows.
+    //
+    // Original invariant still applies: only safe run-id directories are touched.
     if worktrees_root.exists() {
         let entries = match std::fs::read_dir(&worktrees_root) {
             Ok(e) => e,
             Err(e) => {
-                result.errors.push(format!(
-                    "read_dir {}: {e}",
-                    worktrees_root.display()
-                ));
+                result
+                    .errors
+                    .push(format!("read_dir {}: {e}", worktrees_root.display()));
                 return result;
             }
         };
@@ -270,6 +275,9 @@ pub(crate) fn cleanup_inner(project_dir: &Path, cutoff_ms: u64) -> CleanupResult
             // Does a record file still exist?
             let record = runs_dir.join(format!("{name}.json"));
             if record.exists() {
+                continue;
+            }
+            if path_mtime_ms(&p) > cutoff_ms {
                 continue;
             }
             match remove_worktree_dir(project_dir, &p) {
@@ -313,9 +321,7 @@ mod tests {
         let dir = project.join(".terminalx/pipeline-runs");
         fs::create_dir_all(&dir).unwrap();
         let body = match ended_at {
-            Some(t) => format!(
-                r#"{{"id":"{id}","state":"{state}","endedAt":{t},"startedAt":1}}"#
-            ),
+            Some(t) => format!(r#"{{"id":"{id}","state":"{state}","endedAt":{t},"startedAt":1}}"#),
             None => format!(r#"{{"id":"{id}","state":"{state}","startedAt":1}}"#),
         };
         fs::write(dir.join(format!("{id}.json")), body).unwrap();
@@ -426,9 +432,24 @@ mod tests {
         // before the orphan-worktree pass.
         fs::create_dir_all(project.join(".terminalx/pipeline-runs")).unwrap();
 
-        let res = cleanup_inner(project, 9_999_999);
+        let res = cleanup_inner(project, u64::MAX);
         assert_eq!(res.removed_worktrees, 1);
         assert!(!wt.exists());
+    }
+
+    #[test]
+    fn cleanup_preserves_recent_orphan_worktrees_with_no_run_record() {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        let wt = project.join(".tx-worktrees/r-recent-orphan");
+        fs::create_dir_all(&wt).unwrap();
+        fs::write(wt.join("a.txt"), "x").unwrap();
+        fs::create_dir_all(project.join(".terminalx/pipeline-runs")).unwrap();
+
+        let res = cleanup_inner(project, 1);
+
+        assert_eq!(res.removed_worktrees, 0);
+        assert!(wt.exists());
     }
 
     #[test]
@@ -515,11 +536,7 @@ mod tests {
         write_record(project, "r-old", "done", Some(1));
         write_telemetry(project, "r-old");
 
-        let res = pipeline_cleanup_old_runs(
-            project.to_string_lossy().to_string(),
-            0,
-        )
-        .unwrap();
+        let res = pipeline_cleanup_old_runs(project.to_string_lossy().to_string(), 0).unwrap();
         assert_eq!(res.removed_records, 0);
         assert!(project.join(".terminalx/pipeline-runs/r-old.json").exists());
     }

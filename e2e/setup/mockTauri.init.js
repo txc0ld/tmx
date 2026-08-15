@@ -34,7 +34,7 @@
     agent_list: () => [],
     agent_run_oneshot: () => ({ stdout: '', stderr: '', exit_code: 0, timed_out: false }),
 
-    read_file_tree: () => ({ name: 'mock', path: '/mock', children: [] }),
+    read_file_tree: () => [],
     read_file_text: () => '',
     write_file_text: () => undefined,
     get_file_size: () => 0,
@@ -153,6 +153,9 @@
 
     'plugin:webview|create': () => undefined,
     'plugin:window|theme': () => 'dark',
+    'plugin:fs|exists': () => false,
+    'plugin:fs|mkdir': () => undefined,
+    'plugin:fs|write_file': () => undefined,
 
     // Path plugin — `homeDir()` / `appDataDir()` etc. all funnel through
     // `plugin:path|resolve_directory`. Run factory + worktree paths join
@@ -210,8 +213,17 @@
     unregisterCallback(id) {
       callbacks.delete(id);
     },
+    unregisterListener(_event, _eventId) {
+      return Promise.resolve();
+    },
     convertFileSrc(filePath, _protocol) {
       return filePath;
+    },
+  };
+
+  window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+    unregisterListener(_event, _eventId) {
+      // No-op. The mock never dispatches native events.
     },
   };
 })();

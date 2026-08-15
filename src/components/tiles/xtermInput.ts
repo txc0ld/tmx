@@ -18,15 +18,54 @@
 /*  Key → terminal-sequence translation                                */
 /* ------------------------------------------------------------------ */
 
+function modifierParam(e: KeyboardEvent): number {
+  let value = 1;
+  if (e.shiftKey) value += 1;
+  if (e.altKey) value += 2;
+  if (e.ctrlKey) value += 4;
+  return value;
+}
+
+function modifiedCsi(e: KeyboardEvent, code: string, tilde = false): string | null {
+  const mod = modifierParam(e);
+  if (mod === 1) return null;
+  return tilde ? `\x1b[${code};${mod}~` : `\x1b[1;${mod}${code}`;
+}
+
 /** Map a DOM KeyboardEvent to the byte string a VT terminal expects. */
-function keyToSequence(e: KeyboardEvent, applicationCursorMode?: boolean): string | null {
+export function keyToSequence(e: KeyboardEvent, applicationCursorMode?: boolean): string | null {
   // Pure modifier keys — no terminal data
   const MODIFIERS = ['Control', 'Shift', 'Alt', 'Meta', 'CapsLock', 'NumLock', 'ScrollLock'];
   if (MODIFIERS.includes(e.key)) return null;
 
   // Let OS / browser shortcuts pass through (Cmd+*, Ctrl+Shift+*)
   if (e.metaKey) return null;
-  if (e.ctrlKey && e.shiftKey) return null;
+  if (e.ctrlKey && e.shiftKey && e.key.length === 1) return null;
+
+  switch (e.key) {
+    case 'ArrowUp': {
+      const modified = modifiedCsi(e, 'A');
+      return modified ?? (applicationCursorMode ? '\x1bOA' : '\x1b[A');
+    }
+    case 'ArrowDown': {
+      const modified = modifiedCsi(e, 'B');
+      return modified ?? (applicationCursorMode ? '\x1bOB' : '\x1b[B');
+    }
+    case 'ArrowRight': {
+      const modified = modifiedCsi(e, 'C');
+      return modified ?? (applicationCursorMode ? '\x1bOC' : '\x1b[C');
+    }
+    case 'ArrowLeft': {
+      const modified = modifiedCsi(e, 'D');
+      return modified ?? (applicationCursorMode ? '\x1bOD' : '\x1b[D');
+    }
+    case 'Home':       return modifiedCsi(e, 'H') ?? '\x1b[H';
+    case 'End':        return modifiedCsi(e, 'F') ?? '\x1b[F';
+    case 'Delete':     return modifiedCsi(e, '3', true) ?? '\x1b[3~';
+    case 'Insert':     return modifiedCsi(e, '2', true) ?? '\x1b[2~';
+    case 'PageUp':     return modifiedCsi(e, '5', true) ?? '\x1b[5~';
+    case 'PageDown':   return modifiedCsi(e, '6', true) ?? '\x1b[6~';
+  }
 
   // Ctrl + letter → control character (^A = 0x01 … ^Z = 0x1A)
   if (e.ctrlKey && !e.altKey) {
@@ -50,18 +89,6 @@ function keyToSequence(e: KeyboardEvent, applicationCursorMode?: boolean): strin
     case 'Backspace':  return '\x7f';
     case 'Tab':        return e.shiftKey ? '\x1b[Z' : '\t';
     case 'Escape':     return '\x1b';
-
-    case 'ArrowUp':    return applicationCursorMode ? '\x1bOA' : '\x1b[A';
-    case 'ArrowDown':  return applicationCursorMode ? '\x1bOB' : '\x1b[B';
-    case 'ArrowRight': return applicationCursorMode ? '\x1bOC' : '\x1b[C';
-    case 'ArrowLeft':  return applicationCursorMode ? '\x1bOD' : '\x1b[D';
-
-    case 'Home':       return '\x1b[H';
-    case 'End':        return '\x1b[F';
-    case 'Delete':     return '\x1b[3~';
-    case 'Insert':     return '\x1b[2~';
-    case 'PageUp':     return '\x1b[5~';
-    case 'PageDown':   return '\x1b[6~';
 
     case 'F1':  return '\x1bOP';
     case 'F2':  return '\x1bOQ';
@@ -177,10 +204,11 @@ async function pasteFromClipboard(writeToPty: (data: string) => void): Promise<v
 export function attachKeyboardCapture(
   container: HTMLElement,
   writeToPty: (data: string) => void,
-  terminal?: { _core?: { modes?: { applicationCursorKeysMode?: boolean } } },
+  terminal?: unknown,
 ): () => void {
   // Make the container focusable (no visible outline)
   container.setAttribute('tabindex', '0');
+  container.setAttribute('data-terminal-content', 'true');
   container.style.outline = 'none';
 
   const onKeyDown = (e: KeyboardEvent) => {
@@ -201,7 +229,9 @@ export function attachKeyboardCapture(
       return;
     }
 
-    const appCursorMode = terminal?._core?.modes?.applicationCursorKeysMode ?? false;
+    const appCursorMode =
+      (terminal as { _core?: { modes?: { applicationCursorKeysMode?: boolean } } } | undefined)
+        ?._core?.modes?.applicationCursorKeysMode ?? false;
     const seq = keyToSequence(e, appCursorMode);
     if (seq !== null) {
       writeToPty(seq);
@@ -250,5 +280,6 @@ export function attachKeyboardCapture(
     container.removeEventListener('keydown', onKeyDown);
     container.removeEventListener('paste', onPaste);
     container.removeEventListener('mousedown', onMouseDown);
+    container.removeAttribute('data-terminal-content');
   };
 }

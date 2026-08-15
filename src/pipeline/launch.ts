@@ -39,6 +39,7 @@ import { useProjectStore } from '@/stores/projectStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { screenToCanvas } from '@/utils/layout';
+import { joinPath } from '@/utils/path';
 import { createRunFromTemplate, defaultRunFactoryDeps } from './run-factory';
 import { instantiatePipelineTemplate } from './instantiate';
 import { anthropicTrioTemplate, helloWorldTemplate } from './templates';
@@ -53,6 +54,17 @@ const TX_VERSION = '0.2.0';
 /** Same regex as `validate_branch_name` on the Rust side, kept in sync to
  *  fail fast in the UI before round-tripping through the IPC. */
 const BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
+
+function preflightBlockers(preflight: PreflightResult): string[] {
+  const blockers: string[] = [];
+  if (!preflight.claude_present) blockers.push('Claude CLI is not on PATH.');
+  if (!preflight.capability_binaries_ok) blockers.push('Required capability binaries are missing.');
+  if (!preflight.worktree_dir_writable) blockers.push('Project .tx-worktrees directory is not writable.');
+  if (!preflight.skill_cache_writable) blockers.push('Agent skill cache is not writable.');
+  if (!preflight.signed_skills_ok) blockers.push('Bundled pipeline skills are missing or have been modified.');
+  blockers.push(...preflight.errors);
+  return Array.from(new Set(blockers));
+}
 
 export interface LaunchPipelineRunInput {
   goal: string;
@@ -179,6 +191,14 @@ export async function launchPipelineRun(
       reason: 'preflight',
     };
   }
+  const blockers = preflightBlockers(preflight);
+  if (blockers.length > 0) {
+    return {
+      ok: false,
+      error: `Pipeline preflight blocked launch:\n- ${blockers.join('\n- ')}`,
+      reason: 'preflight',
+    };
+  }
   const baseBranch = preflight.main_branch ?? 'main';
 
   // 4. Sensitive-paths gate. Run ONCE here; the factory's gate is bypassed
@@ -192,7 +212,7 @@ export async function launchPipelineRun(
 
   // 5. Generate identifiers.
   const runId = crypto.randomUUID();
-  const worktreePath = `${projectDir}/.tx-worktrees/${runId}`;
+  const worktreePath = joinPath(projectDir, '.tx-worktrees', runId);
 
   // 6. Create the worktree. From here on, any failure must destroy it.
   try {
@@ -291,14 +311,14 @@ export async function launchPipelineRun(
   //      and-start would lose the run record entirely.
   const newRun = usePipelineStore.getState().runs[factoryResult.runId];
   if (newRun) {
-    void persistRun(newRun, defaultRunPersistenceDeps());
+    await persistRun(newRun, defaultRunPersistenceDeps());
   }
 
   // 8. Persist the goal so the planner can read it as a file. Non-fatal —
   //    a failure here doesn't tear down the run; the user can always paste
   //    the goal into the planner's terminal manually.
   try {
-    await writeFileText(`${worktreePath}/PIPELINE_GOAL.md`, `# Pipeline goal\n\n${goal}\n`);
+    await writeFileText(joinPath(worktreePath, 'PIPELINE_GOAL.md'), `# Pipeline goal\n\n${goal}\n`);
   } catch (e) {
     console.warn('[pipeline] PIPELINE_GOAL.md write failed (non-fatal):', e);
   }

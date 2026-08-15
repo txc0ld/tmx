@@ -41,9 +41,13 @@ declare global {
       invoke: (cmd: string, args?: unknown, options?: unknown) => Promise<unknown>;
       transformCallback: (callback: (...args: unknown[]) => void, once: boolean) => number;
       unregisterCallback: (id: number) => void;
+      unregisterListener: (event: string, eventId: number) => Promise<void>;
       convertFileSrc: (filePath: string, protocol?: string) => string;
     };
     __E2E_MOCK_INSTALLED__?: boolean;
+    __TAURI_EVENT_PLUGIN_INTERNALS__?: {
+      unregisterListener: (event: string, eventId: number) => void;
+    };
   }
 }
 
@@ -100,7 +104,7 @@ export function installMockTauri(opts: InstallOpts = {}) {
     }),
 
     // ── Filesystem ──────────────────────
-    read_file_tree: () => ({ name: 'mock', path: '/mock', children: [] }),
+    read_file_tree: () => [],
     read_file_text: () => '',
     write_file_text: () => undefined,
     get_file_size: () => 0,
@@ -231,6 +235,9 @@ export function installMockTauri(opts: InstallOpts = {}) {
     // ── Tauri webview / window plugins ─
     'plugin:webview|create': () => undefined,
     'plugin:window|theme': () => 'dark',
+    'plugin:fs|exists': () => false,
+    'plugin:fs|mkdir': () => undefined,
+    'plugin:fs|write_file': () => undefined,
   };
 
   const fixtures: Record<
@@ -266,8 +273,17 @@ export function installMockTauri(opts: InstallOpts = {}) {
     unregisterCallback(id) {
       callbacks.delete(id);
     },
+    unregisterListener(_event, _eventId) {
+      return Promise.resolve();
+    },
     convertFileSrc(filePath, _protocol) {
       return filePath;
+    },
+  };
+
+  window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+    unregisterListener(_event, _eventId) {
+      // No-op. The mock never dispatches native events.
     },
   };
 }

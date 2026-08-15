@@ -9,7 +9,10 @@ import { isMac, modShortcut } from '@/utils/platform';
 import { isTemplatePinned, toggleTemplatePin } from '@/components/canvas/TileDock';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { PipelineOnboardingTooltip, dismissPipelineOnboarding } from '@/components/topbar/PipelineOnboardingTooltip';
+import { confirmAction } from '@/utils/confirm';
 import type { Project, TileType, Tile, PipelineRun } from '@/types';
+
+const USE_NATIVE_NON_MAC_DECORATIONS = true;
 
 interface TopBarProps {
   project: Project | undefined;
@@ -37,6 +40,7 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette, onStartPipel
   }, [dropdownOpen]);
 
   const appWindow = getCurrentWindow();
+  const showCustomWindowControls = !isMac() && !USE_NATIVE_NON_MAC_DECORATIONS;
 
   // Group templates into ordered sections
   const sectionOrder: { key: string; label: string; types: string[] }[] = [
@@ -184,7 +188,7 @@ export function TopBar({ project, onAddFromTemplate, onOpenPalette, onStartPipel
       <LocalClock />
 
       {/* Window controls — hidden on macOS where native traffic lights are used */}
-      {!isMac() && (
+      {showCustomWindowControls && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
           // @ts-expect-error webkit
@@ -671,13 +675,13 @@ function LayoutMenuButton() {
     setOpen(false);
   }, []);
 
-  const deleteSlot = useCallback((idx: number) => {
+  const deleteSlot = useCallback(async (idx: number) => {
     const pid = useCanvasStore.getState().activeProject;
     if (!pid) return;
     const existing = loadSlots(pid);
     const name = existing[idx]?.name;
     if (!name) return;
-    if (!confirm(`Delete layout "${name}"?`)) return;
+    if (!(await confirmAction(`Delete layout "${name}"?`))) return;
     existing[idx] = null;
     saveSlots(pid, existing);
     setSlots(existing);
@@ -927,13 +931,13 @@ function SettingsGearButton() {
 }
 
 function ClearCanvasButton() {
-  const handleClick = useCallback(() => {
+  const handleClick = useCallback(async () => {
     const store = useCanvasStore.getState();
     const pid = store.activeProject;
     if (!pid) return;
     const existing = store.tiles[pid] || [];
     if (existing.length === 0) return;
-    if (!confirm(`Clear all ${existing.length} tile${existing.length === 1 ? '' : 's'} from this canvas?`)) return;
+    if (!(await confirmAction(`Clear all ${existing.length} tile${existing.length === 1 ? '' : 's'} from this canvas?`))) return;
     for (const t of existing) store.removeTile(t.id);
     import('@/stores/toastStore').then(({ useToastStore }) => {
       useToastStore.getState().addToast('Canvas cleared', 'success');

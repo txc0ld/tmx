@@ -1,6 +1,7 @@
 import { useEffect, useRef, memo } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { useWiringStore } from '@/stores/wiringStore';
+import { confirmAction } from '@/utils/confirm';
 import { colors } from '@/design/tokens';
 import type { Wire, Tile } from '@/types';
 
@@ -112,9 +113,9 @@ const WirePath = memo(function WirePath({ wire, from, to }: { wire: Wire; from: 
         stroke="transparent"
         strokeWidth={12}
         style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
-        onContextMenu={e => {
+        onContextMenu={async e => {
           e.preventDefault();
-          if (confirm('Remove this wire?')) {
+          if (await confirmAction('Remove this wire?', { title: 'Remove Wire' })) {
             useCanvasStore.getState().removeWire(wire.id);
           }
         }}

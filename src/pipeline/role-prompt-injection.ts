@@ -87,11 +87,15 @@ async function defaultReadOptionalFile(
     return text;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (!/no such file|not found|enoent/i.test(msg)) {
+    if (!isOptionalFileMissingError(msg)) {
       console.warn(`[role-prompt] read ${filename} for ${trimmed} failed:`, msg);
     }
     return null;
   }
+}
+
+export function isOptionalFileMissingError(message: string): boolean {
+  return /no such file|not found|enoent|cannot find the file|os error 2/i.test(message);
 }
 
 /**

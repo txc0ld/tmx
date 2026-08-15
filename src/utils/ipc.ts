@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { Tile, Wire, TimelineEvent, TimelineEventType } from '@/types';
+import { stripRuntimeTilesState } from '@/utils/runtimeState';
 
 // ─── Terminal / PTY ───────────────────────────────────────────────────
 
@@ -201,8 +202,9 @@ export async function saveWorkspace(state: {
   wires: Wire[];
   transform: { x: number; y: number; scale: number };
 }): Promise<void> {
+  const tiles = stripRuntimeTilesState(state.tiles);
   return invoke('save_workspace', {
-    state: { ...state, updatedAt: new Date().toISOString() },
+    state: { ...state, tiles, updatedAt: new Date().toISOString() },
   });
 }
 

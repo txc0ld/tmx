@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Tile, Wire, CanvasTransform, WorkspaceSnapshot, GroupTile } from '../types';
 import type { SnapGuide } from '@/utils/layout';
+import { stripRuntimeTilesState } from '@/utils/runtimeState';
 
 // ─── Wire data throttle buffers ────────────────────────
 const wireDataBuffer = new Map<string, string>();
@@ -576,7 +577,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const pid = s.activeProject;
     return {
       name,
-      tiles: s.tiles[pid] || [],
+      tiles: stripRuntimeTilesState(s.tiles[pid] || []),
       wires: s.wires[pid] || [],
       transform: s.transforms[pid] || DEFAULT_TRANSFORM,
       zStack: [...s.zStack],
@@ -587,11 +588,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   loadSnapshot: (snapshot) =>
     set(s => {
       const pid = s.activeProject;
+      const tiles = stripRuntimeTilesState(snapshot.tiles);
       return {
-        tiles: { ...s.tiles, [pid]: snapshot.tiles },
+        tiles: { ...s.tiles, [pid]: tiles },
         wires: { ...s.wires, [pid]: snapshot.wires },
         transforms: { ...s.transforms, [pid]: snapshot.transform },
-        zStack: snapshot.zStack ?? snapshot.tiles.map(t => t.id),
+        zStack: snapshot.zStack ?? tiles.map(t => t.id),
         focusedTile: null,
         selectedTiles: [],
         focusModeActive: false,

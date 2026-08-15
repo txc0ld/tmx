@@ -13,6 +13,7 @@ import { save as dialogSave, open as dialogOpen } from '@tauri-apps/plugin-dialo
 import { readFileText, writeFileText } from '@/utils/ipc';
 import { validateWorkspaceImport, WorkspaceImportError } from '@/utils/workspaceImport';
 import { screenToCanvas } from '@/utils/layout';
+import { confirmAction } from '@/utils/confirm';
 import type { TileType } from '@/types';
 
 interface CommandPaletteProps {
@@ -631,8 +632,9 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
           );
           return;
         }
-        const ok = confirm(
+        const ok = await confirmAction(
           `Detected: ${detected.label}\n\nSpawn ${detected.starterTiles.length} tiles for this project?`,
+          { title: 'Apply Starter Layout' },
         );
         if (!ok) return;
 
@@ -704,10 +706,11 @@ export function CommandPalette({ onClose, onAddFromTemplate }: CommandPalettePro
             alert('Plugin entryUrl must be https://');
             return;
           }
-          const confirmed = confirm(
+          const confirmed = await confirmAction(
             `Register plugin "${manifest.name}"?\n\n` +
             `It will load ${manifest.entryUrl || '(no UI)'} in a sandboxed iframe. ` +
             `Only install plugins from sources you trust.`,
+            { title: 'Register Plugin' },
           );
           if (!confirmed) return;
           usePluginStore.getState().registerPlugin(manifest, manifest.entryUrl);

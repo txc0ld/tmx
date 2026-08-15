@@ -7,6 +7,7 @@ import { usePipelineStore } from '@/stores/pipelineStore';
 import { gitAvailable } from '@/utils/ipc';
 import { useThemeStore } from '@/stores/themeStore';
 import { resolveProjectIcon } from '@/utils/projectIcon';
+import { confirmAction } from '@/utils/confirm';
 import { colors, radius, spacing, fonts, motion, typography, glass } from '@/design/tokens';
 import { screenToCanvas } from '@/utils/layout';
 import { isTerminalState } from '@/pipeline/state-machine';
@@ -250,9 +251,9 @@ export function ProjectSidebar({ projects, active, onSelect, runs: runsProp }: P
           <div
             key={project.id}
             onClick={() => onSelect(project.id)}
-            onContextMenu={e => {
+            onContextMenu={async e => {
               e.preventDefault();
-              if (confirm(`Remove "${project.name}" from projects?`)) {
+              if (await confirmAction(`Remove "${project.name}" from projects?`, { title: 'Remove Project' })) {
                 handleDeleteProject(project.id);
               }
             }}

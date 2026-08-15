@@ -13,14 +13,18 @@ concurrency:
 
 jobs:
   frontend:
-    name: Frontend — lint, test, build
-    runs-on: ubuntu-latest
+    name: Frontend - ${{ matrix.os }} - type-check, test, build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v6
 
       - uses: pnpm/action-setup@v6
         with:
-          version: 9
+          version: 10.28.2
 
       - uses: actions/setup-node@v6
         with:
@@ -31,7 +35,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Type-check
-        run: npx tsc --noEmit
+        run: pnpm typecheck
 
       - name: Unit tests
         run: pnpm test
@@ -42,6 +46,30 @@ jobs:
       - name: Audit
         run: pnpm audit --audit-level moderate
         continue-on-error: true
+
+  e2e:
+    name: E2E - Chromium
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.28.2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install chromium
+
+      - name: Playwright E2E
+        run: pnpm test:e2e
 
   rust:
     name: Rust — ${{ matrix.os }} — check & test

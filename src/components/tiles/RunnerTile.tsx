@@ -6,6 +6,7 @@ import { useCanvasStore } from '@/stores/canvasStore';
 import { useThemeStore } from '@/stores/themeStore';
 import { usePty } from '@/hooks/usePty';
 import { ptySpawn, ptyWrite } from '@/utils/ipc';
+import { confirmAction } from '@/utils/confirm';
 import { isWindows } from '@/utils/platform';
 import { colors, fonts, spacing, typography, radius } from '@/design/tokens';
 import { attachKeyboardCapture } from './xtermInput';
@@ -115,6 +116,7 @@ export function RunnerTile({ tile }: RunnerTileProps) {
     const detachKb = attachKeyboardCapture(
       containerRef.current,
       (data) => writeRef.current(data),
+      terminal,
     );
     const rafId = requestAnimationFrame(() => fitAddon.fit());
 
@@ -169,7 +171,9 @@ export function RunnerTile({ tile }: RunnerTileProps) {
     // Warn if command looks like it contains secrets
     const SECRET_PATTERNS = /(API[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|BEARER|AUTH)[=:\s]/i;
     if (SECRET_PATTERNS.test(command)) {
-      const proceed = confirm('Command appears to contain a secret and will be saved to disk. Continue?');
+      const proceed = await confirmAction('Command appears to contain a secret and will be saved to disk. Continue?', {
+        title: 'Run Command',
+      });
       if (!proceed) return;
     }
 

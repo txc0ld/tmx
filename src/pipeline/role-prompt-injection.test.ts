@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   injectRolePromptForAgent,
+  isOptionalFileMissingError,
   isPipelineRoleMode,
   substituteInvariants,
 } from './role-prompt-injection';
@@ -24,6 +25,20 @@ describe('isPipelineRoleMode', () => {
     expect(isPipelineRoleMode('')).toBe(false);
     expect(isPipelineRoleMode('foo')).toBe(false);
     expect(isPipelineRoleMode('controller')).toBe(false);
+  });
+});
+
+describe('isOptionalFileMissingError', () => {
+  it('recognizes Windows os error 2 as a missing optional file', () => {
+    expect(
+      isOptionalFileMissingError(
+        'Path error: The system cannot find the file specified. (os error 2)',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not hide non-missing file errors', () => {
+    expect(isOptionalFileMissingError('Path error: Access is denied. (os error 5)')).toBe(false);
   });
 });
 

@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { useThemeStore } from '@/stores/themeStore';
 import { usePty } from '@/hooks/usePty';
-import { ptySpawn } from '@/utils/ipc';
+import { ptySpawn, ptyWrite } from '@/utils/ipc';
 import { colors, fonts } from '@/design/tokens';
 import { attachKeyboardCapture } from './xtermInput';
 
@@ -96,6 +96,7 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
     const detachKb = attachKeyboardCapture(
       containerRef.current,
       (data) => writeRef.current(data),
+      terminal,
     );
     const rafId = requestAnimationFrame(() => {
       fitAddon.fit();
@@ -127,6 +128,19 @@ export function TerminalPane({ paneId, ptyId, cwd, tileId, onPtySpawned }: Termi
   }, []);
 
   // Spawn PTY
+  useEffect(() => {
+    if (spawnedRef.current || !ptyId || !termRef.current) return;
+    let cancelled = false;
+
+    ptyWrite(ptyId, '').then(() => {
+      if (!cancelled) spawnedRef.current = true;
+    }).catch(() => {
+      if (!cancelled) onPtySpawned(paneId, '');
+    });
+
+    return () => { cancelled = true; };
+  }, [paneId, ptyId, onPtySpawned]);
+
   useEffect(() => {
     if (spawnedRef.current || ptyId || !termRef.current) return;
     spawnedRef.current = true;

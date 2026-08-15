@@ -139,39 +139,39 @@ export function _resetHydratedProjectIdsForTest(): void {
  * fine — they're terminal, not active, and will be evicted on the next app
  * boot when hydration walks the now-cleaner directory.
  */
-function maybeHydrateProject(projectId: string): void {
+async function maybeHydrateProject(projectId: string): Promise<void> {
   if (!projectId) return;
   if (hydratedProjectIds.has(projectId)) return;
   const proj = useProjectStore.getState().projects.find(p => p.id === projectId);
   if (!proj?.cwd) return;
   hydratedProjectIds.add(projectId);
   const projectCwd = proj.cwd;
-  hydrateRunsFromDisk(projectCwd)
-    .catch(err => {
-      console.warn('[pipeline] run hydration failed:', err);
+  try {
+    await hydrateRunsFromDisk(projectCwd);
+  } catch (err) {
+    console.warn('[pipeline] run hydration failed:', err);
+  }
+
+  const retentionDays = useSettingsStore.getState().pipelinePrefs.retentionDays;
+  if (retentionDays <= 0) return; // 0 = disabled
+  pipelineCleanupOldRuns({ projectDir: projectCwd, retentionDays })
+    .then(res => {
+      if (
+        res.removed_records > 0 ||
+        res.removed_telemetry > 0 ||
+        res.removed_worktrees > 0
+      ) {
+        console.info(
+          '[pipeline] cleanup:',
+          `${res.removed_records} records,`,
+          `${res.removed_telemetry} telemetry files,`,
+          `${res.removed_worktrees} worktrees removed`,
+          res.errors.length ? `(${res.errors.length} errors)` : '',
+        );
+      }
     })
-    .finally(() => {
-      const retentionDays = useSettingsStore.getState().pipelinePrefs.retentionDays;
-      if (retentionDays <= 0) return; // 0 = disabled
-      pipelineCleanupOldRuns({ projectDir: projectCwd, retentionDays })
-        .then(res => {
-          if (
-            res.removed_records > 0 ||
-            res.removed_telemetry > 0 ||
-            res.removed_worktrees > 0
-          ) {
-            console.info(
-              '[pipeline] cleanup:',
-              `${res.removed_records} records,`,
-              `${res.removed_telemetry} telemetry files,`,
-              `${res.removed_worktrees} worktrees removed`,
-              res.errors.length ? `(${res.errors.length} errors)` : '',
-            );
-          }
-        })
-        .catch(err => {
-          console.warn('[pipeline] cleanup failed:', err);
-        });
+    .catch(err => {
+      console.warn('[pipeline] cleanup failed:', err);
     });
 }
 
@@ -579,7 +579,7 @@ export default function App() {
       // deserialize, apply the active-state-on-reload policy, and load into
       // pipelineStore.runs. The project-switch subscription below picks up
       // any subsequent project changes during the session.
-      maybeHydrateProject(storeActive ?? useProjectStore.getState().active);
+      await maybeHydrateProject(storeActive ?? useProjectStore.getState().active);
 
       // Restore workspace — try IPC (disk) first, fall back to localStorage cache
       const pid = useCanvasStore.getState().activeProject;
@@ -638,7 +638,7 @@ export default function App() {
   useEffect(() => {
     return useProjectStore.subscribe((state, prev) => {
       if (state.active && state.active !== prev.active) {
-        maybeHydrateProject(state.active);
+        void maybeHydrateProject(state.active);
       }
     });
   }, []);
@@ -656,6 +656,8 @@ export default function App() {
       // Don't intercept plain keystrokes when focus is inside tile content (terminals, editors, inputs)
       const target = e.target as HTMLElement;
       const inTile = target.closest?.('[data-tile-content]');
+      const inTerminal = target.closest?.('[data-terminal-content]');
+      if (inTerminal && e.key !== 'Escape') return;
       if (inTile && !e.ctrlKey && !e.metaKey && e.key !== 'Escape') return;
 
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {

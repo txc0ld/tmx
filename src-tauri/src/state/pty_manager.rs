@@ -13,6 +13,7 @@ struct PtyEntry {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send>,
+    pid: Option<u32>,
 }
 
 pub struct PtyManager {
@@ -41,14 +42,30 @@ impl PtyManager {
         if self.sessions.contains_key(&id) {
             return Err(format!("PTY session {} already exists", id));
         }
-        let writer = master.take_writer()
+        let pid = child.process_id();
+        let writer = master
+            .take_writer()
             .map_err(|e| format!("Failed to take PTY writer: {}", e))?;
-        self.sessions.insert(id, PtyEntry { writer, master, child });
+        self.sessions.insert(
+            id,
+            PtyEntry {
+                writer,
+                master,
+                child,
+                pid,
+            },
+        );
         Ok(())
     }
 
+    pub fn process_id(&self, id: &str) -> Option<u32> {
+        self.sessions.get(id).and_then(|entry| entry.pid)
+    }
+
     pub fn write(&mut self, id: &str, data: &[u8]) -> Result<(), String> {
-        let entry = self.sessions.get_mut(id)
+        let entry = self
+            .sessions
+            .get_mut(id)
             .ok_or_else(|| format!("PTY session not found: {}", id))?;
         // Chunk writes to 256 bytes to avoid Windows PTY pipe buffer overflow.
         // Retry transient WouldBlock/Interrupted errors a handful of times
@@ -60,7 +77,8 @@ impl PtyManager {
                 match entry.writer.write_all(chunk) {
                     Ok(()) => break,
                     Err(e)
-                        if (e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::Interrupted)
+                        if (e.kind() == ErrorKind::WouldBlock
+                            || e.kind() == ErrorKind::Interrupted)
                             && retries > 0 =>
                     {
                         retries -= 1;
@@ -78,21 +96,24 @@ impl PtyManager {
     }
 
     pub fn resize(&mut self, id: &str, cols: u16, rows: u16) -> Result<(), String> {
-        let entry = self.sessions.get_mut(id)
+        let entry = self
+            .sessions
+            .get_mut(id)
             .ok_or_else(|| format!("PTY session not found: {}", id))?;
-        entry.master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| format!("Resize error: {}", e))
+        entry
+            .master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("Resize error: {}", e))
     }
 
     pub fn kill(&mut self, id: &str) -> Result<(), String> {
         if let Some(mut entry) = self.sessions.remove(id) {
-            // Kill the child process; ignore errors (it may have already exited)
-            let _ = entry.child.kill();
+            kill_entry(&mut entry);
         } else {
             return Err(format!("PTY session not found: {}", id));
         }
@@ -101,17 +122,44 @@ impl PtyManager {
 
     pub fn shutdown_all(&mut self) {
         for (_, mut entry) in self.sessions.drain() {
-            let _ = entry.child.kill();
+            kill_entry(&mut entry);
         }
     }
-
 }
 
 impl Drop for PtyManager {
     fn drop(&mut self) {
         // Ensure all child processes are killed when the manager is dropped
         for (_, mut entry) in self.sessions.drain() {
-            let _ = entry.child.kill();
+            kill_entry(&mut entry);
         }
+    }
+}
+
+fn kill_entry(entry: &mut PtyEntry) {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(pid) = entry.pid {
+            if kill_windows_process_tree(pid).is_ok() {
+                return;
+            }
+        }
+    }
+    // Fallback for Unix and for Windows processes already gone by the time
+    // taskkill runs.
+    let _ = entry.child.kill();
+}
+
+#[cfg(target_os = "windows")]
+fn kill_windows_process_tree(pid: u32) -> Result<(), String> {
+    let pid_arg = pid.to_string();
+    let status = std::process::Command::new("taskkill.exe")
+        .args(["/PID", &pid_arg, "/T", "/F"])
+        .status()
+        .map_err(|e| format!("spawn taskkill.exe: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("taskkill.exe exited with {status}"))
     }
 }
