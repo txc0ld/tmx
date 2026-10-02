@@ -345,7 +345,7 @@ React 19 frontend (src/)                Rust backend (src-tauri/)
 
 **Stack:** Tauri 2 · React 19 · TypeScript 5.6 · Vite 6 · Zustand 5 · xterm.js 5 · Monaco · portable-pty 0.8 · reqwest 0.12
 
-Deep architecture: [**CLAUDE.md**](./CLAUDE.md) · Design system: [**DESIGN.md**](./DESIGN.md) · Security posture: [**CONTRIBUTING.md**](./CONTRIBUTING.md#security-posture).
+Deep architecture: [**Architecture reference**](./docs/agents/architecture-reference.md) · Design system: [**DESIGN.md**](./DESIGN.md) · Security posture: [**CONTRIBUTING.md**](./CONTRIBUTING.md#security-posture).
 
 ---
 
@@ -374,7 +374,7 @@ src-tauri/              Rust backend
 └── icons/              App icons
 
 docs/features/          Per-feature documentation (~55 files)
-CLAUDE.md               Architecture + critical patterns for AI agents
+CLAUDE.md               Compatibility import of AGENTS.md
 DESIGN.md               Design-system source of truth
 FEATURES.md             Product feature tour
 WIRING.md               Drag-to-connect wiring tutorial

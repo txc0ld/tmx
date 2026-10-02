@@ -36,7 +36,7 @@ First run compiles Rust (~2-3 min). Subsequent runs use cached builds and hot-re
 
 ### Before you code
 
-Read [CLAUDE.md](./CLAUDE.md). It covers architecture, data flows, and the critical patterns you'll need to know.
+Start with [AGENTS.md](./AGENTS.md), then read the relevant [architecture reference](./docs/agents/architecture-reference.md) for data flows and critical patterns.
 
 ### Making changes
 
@@ -48,6 +48,10 @@ Read [CLAUDE.md](./CLAUDE.md). It covers architecture, data flows, and the criti
 | Types in `src/types/` | Run `npx tsc --noEmit` to verify |
 
 ### Before committing
+
+The documentation-only exception applies to repository contributor guidance (including the root `AGENTS.md` and `CLAUDE.md`) and narrative documentation that is not an application input. Inspect the complete diff, check affected links and verify factual claims against source. Changes to safety, review or approval wording also need independent review. The exception excludes all application-, build-, test- or release-consumed inputs, whether hand-authored or generated, including bundled role prompts and skills, executable code, runtime configuration, dependency manifests, workflows and schemas. Those changes run the application checks below. Required CI and existing security, release and approval gates remain in force.
+
+For code or other executable changes:
 
 ```bash
 npx tsc --noEmit        # Must pass
@@ -145,7 +149,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
 ## Pull Request Checklist
 
-Before opening a PR, confirm:
+Before opening a PR, confirm the applicable checks. Only changes eligible for the documentation-only exception defined above use its documentation checks; explain that scope in the PR and do not claim application or native-runtime verification. All other changes complete the application checks below, and every PR keeps its required CI and review gates.
 
 - [ ] `npx tsc --noEmit` passes
 - [ ] `pnpm tauri build` succeeds (or at least `pnpm dev` runs without console errors)
@@ -154,7 +158,7 @@ Before opening a PR, confirm:
 - [ ] No direct `invoke()` calls (uses `utils/ipc.ts`)
 - [ ] No Zustand selectors creating new objects inline
 - [ ] New features documented in `FEATURES.md`
-- [ ] New architecture patterns documented in `CLAUDE.md`
+- [ ] New architecture patterns documented in `docs/agents/architecture-reference.md`
 
 ---
 
@@ -164,7 +168,7 @@ This is a power-user terminal/workspace app, so the trust model is different fro
 
 - **Local filesystem access is intentionally broad** (see `is_path_allowed` in `src-tauri/src/commands/filesystem.rs`) — users need to read/write anywhere they can reach. Correctness safeguards (null-byte rejection, symlink-write rejection, 10 MB text caps) are fine; tightening the path allowlist breaks real workflows.
 - **Shell PTY spawning is allowlisted** (`SHELL_ALLOWLIST` in `terminal.rs`) — but agent spawns use `pty_spawn_internal` which bypasses the allowlist on purpose.
-- **HTTP proxy is SSRF-hardened** — private IPs (10.x, 172.16-31.x, 192.168.x, 100.64-127.x), loopback, link-local, IPv6 ULA, URL credentials, and redirect following are all blocked. After validation, DNS resolution is pinned via `reqwest::ClientBuilder::resolve_to_addrs` to prevent DNS-rebinding TOCTOU between validation and connect.
+- **HTTP proxy is SSRF-hardened** — HTTP is allowed only for loopback destinations; HTTPS blocks private IPs (10.x, 172.16-31.x, 192.168.x, 100.64-127.x), loopback, link-local and IPv6 ULA. URL credentials and redirect following are blocked. After validation, DNS resolution is pinned via `reqwest::ClientBuilder::resolve_to_addrs` to prevent DNS-rebinding TOCTOU between validation and connect.
 - **CSP allowances are intentional:** `script-src 'unsafe-eval'` is required by Monaco's language tokenizers and worker bootstrap. `style-src 'unsafe-inline'` is required by Vite's HMR `<style>` injection and by xterm's runtime style tags. `frame-src https:` backs `BrowserTile`. `img-src https:` backs agent-output image previews and browser-tile scraping. Each allowance is justified by a feature — do not remove without replacing the feature too.
 - **Plugin sandbox** — `PluginTile` was removed as unused; if it's resurrected, the iframe must stay `sandbox="allow-scripts allow-forms"` (no `allow-same-origin`) and `postMessage` must target the plugin's exact origin, not `*`.
 
