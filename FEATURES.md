@@ -210,7 +210,8 @@ Click a file → loads in Editor + shows git diff in Diff tile. No new tiles spa
 - [**README**](./README.md) — install + quick start
 - [**docs/features/**](./docs/features/README.md) — per-feature deep docs (~55 pages)
 - [**WIRING.md**](./WIRING.md) — drag-to-connect tutorial with screenshots
-- [**CLAUDE.md**](./CLAUDE.md) — architecture + critical patterns (for AI agents + devs)
+- [**Architecture reference**](./docs/agents/architecture-reference.md) — architecture + critical patterns
+- [**AGENTS.md**](./AGENTS.md) — canonical agent guide (`CLAUDE.md` imports it)
 - [**DESIGN.md**](./DESIGN.md) — design-system source of truth
 - [**CONTRIBUTING.md**](./CONTRIBUTING.md) — PR workflow + security posture
 - [**CHANGELOG.md**](./CHANGELOG.md) — release notes
